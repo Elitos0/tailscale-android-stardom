@@ -6,6 +6,9 @@
     <string name="log_out">Log out</string>
     <string name="none">None</string>
     <string name="connect">Connect</string>
+    <string name="vpn_access_active">VPN access active</string>
+    <string name="vpn_access_disabled">VPN access is disabled</string>
+    <string name="vpn_access_unavailable">VPN access is unavailable</string>
     <string name="disconnect">Disconnect</string>
     <string name="unknown_user">Unknown user</string>
     <string name="connected">Connected</string>

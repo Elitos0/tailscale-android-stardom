@@ -81,6 +81,10 @@ import com.tailscale.ipn.App
 import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
+import com.tailscale.ipn.product.auth.AuthSessionRepository
+import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.ui.AccessStatusView
 import com.tailscale.ipn.ui.Links
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
@@ -129,6 +133,8 @@ fun MainView(
     loginAtUrl: (String) -> Unit,
     navigation: MainViewNavigation,
     viewModel: MainViewModel,
+    accessRepository: AccessRepository,
+    authSessionRepository: AuthSessionRepository,
 ) {
   val currentPingDevice by viewModel.pingViewModel.peer.collectAsState()
   val healthIcon by viewModel.healthIcon.collectAsState()
@@ -151,6 +157,8 @@ fun MainView(
             val showExitNodePicker by MDMSettings.exitNodesPicker.flow.collectAsState()
             val disableToggle by MDMSettings.forceEnabled.flow.collectAsState()
             val showKeyExpiry by viewModel.showExpiry.collectAsState(initial = false)
+            val accessState by accessRepository.state.collectAsState()
+            val accessAllowed = accessState is AccessState.Active
 
             // Hide the header only on Android TV when the user needs to login
             val hideHeader = (isAndroidTV() && state == Ipn.State.NeedsLogin)
@@ -162,9 +170,13 @@ fun MainView(
                         checked = isOn,
                         enabled =
                             !disableToggle.value &&
-                                !viewModel.isToggleInProgress
-                                    .value, // Disable switch if toggle is in progress
-                        onCheckedChange = { desiredState -> viewModel.toggleVpn(desiredState) })
+                                !viewModel.isToggleInProgress.value &&
+                                (isOn || accessAllowed),
+                        onCheckedChange = { desiredState ->
+                          if (!desiredState || accessAllowed) {
+                            viewModel.toggleVpn(desiredState)
+                          }
+                        })
                   }
                 },
                 headlineContent = {
@@ -209,6 +221,7 @@ fun MainView(
                     }
                   }
                 })
+            AccessStatusView(accessRepository, authSessionRepository)
             when (state) {
               Ipn.State.Running -> {
                 viewModel.maybeRequestVpnPermission()
@@ -236,9 +249,14 @@ fun MainView(
                     isPrepared,
                     // If Tailscale is stopping, don't automatically restart; wait for user to take
                     // action (eg, if the user connected to another VPN).
-                    state != Ipn.State.Stopping,
+                    state != Ipn.State.Stopping && accessAllowed,
                     user,
-                    { viewModel.toggleVpn(desiredState = !isOn) },
+                    {
+                      if (accessAllowed) {
+                        viewModel.toggleVpn(desiredState = !isOn)
+                      }
+                    },
+                    accessAllowed,
                     { viewModel.login() },
                     loginAtUrl,
                     netmap?.SelfNode,
@@ -434,6 +452,7 @@ fun ConnectView(
     shouldStartAutomatically: Boolean,
     user: IpnLocal.LoginProfile?,
     connectAction: () -> Unit,
+    connectEnabled: Boolean,
     loginAction: () -> Unit,
     loginAtUrlAction: (String) -> Unit,
     selfNode: Tailcfg.Node?,
@@ -463,7 +482,7 @@ fun ConnectView(
               style = MaterialTheme.typography.titleSmall,
               textAlign = TextAlign.Center)
           Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = connectAction) {
+          PrimaryActionButton(onClick = connectAction, enabled = connectEnabled) {
             Text(
                 text = stringResource(id = R.string.connect),
                 fontSize = MaterialTheme.typography.titleMedium.fontSize)
@@ -515,7 +534,7 @@ fun ConnectView(
               textAlign = TextAlign.Center,
           )
           Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = connectAction) {
+          PrimaryActionButton(onClick = connectAction, enabled = connectEnabled) {
             Text(
                 text = stringResource(id = R.string.connect),
                 fontSize = MaterialTheme.typography.titleMedium.fontSize)
@@ -828,5 +847,7 @@ fun MainViewPreview() {
           onNavigateToHealth = {},
           onNavigateToSearch = {}),
       vm,
+      AccessRepository(),
+      AuthSessionRepository(App.get()),
   )
 }

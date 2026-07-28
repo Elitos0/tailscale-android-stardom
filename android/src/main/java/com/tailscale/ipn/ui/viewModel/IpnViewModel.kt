@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
  * Base model for most models in this application. Provides common facilities for watching IPN
  * notifications, managing login/logout, updating preferences, etc.
  */
-open class IpnViewModel : ViewModel() {
+open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewModel() {
   protected val TAG = this::class.simpleName
 
   val loggedInUser: StateFlow<IpnLocal.LoginProfile?> = MutableStateFlow(null)
@@ -63,21 +63,23 @@ open class IpnViewModel : ViewModel() {
   }
 
   init {
-    viewModelScope.launch {
-      Notifier.state.collect {
-        // Reload the user profiles on all state transitions to ensure loggedInUser is correct
-        viewModelScope.launch { loadUserProfiles() }
+    if (observeUserProfiles) {
+      viewModelScope.launch {
+        Notifier.state.collect {
+          // Reload the user profiles on all state transitions to ensure loggedInUser is correct
+          viewModelScope.launch { loadUserProfiles() }
+        }
       }
-    }
 
-    // This will observe the userId of the current node and reload our user profiles if
-    // we discover it has changed (e.g. due to a login or user switch)
-    viewModelScope.launch {
-      Notifier.netmap.collect {
-        it?.SelfNode?.User.let {
-          if (it != selfNodeUserId) {
-            selfNodeUserId = it
-            viewModelScope.launch { loadUserProfiles() }
+      // This will observe the userId of the current node and reload our user profiles if
+      // we discover it has changed (e.g. due to a login or user switch)
+      viewModelScope.launch {
+        Notifier.netmap.collect {
+          it?.SelfNode?.User.let {
+            if (it != selfNodeUserId) {
+              selfNodeUserId = it
+              viewModelScope.launch { loadUserProfiles() }
+            }
           }
         }
       }
@@ -92,7 +94,9 @@ open class IpnViewModel : ViewModel() {
       }
     }
 
-    viewModelScope.launch { loadUserProfiles() }
+    if (observeUserProfiles) {
+      viewModelScope.launch { loadUserProfiles() }
+    }
 
     viewModelScope.launch {
       combine(prefs, netmap, isRunningExitNode) { prefs, netmap, isRunningExitNode ->

@@ -6,8 +6,10 @@ package com.tailscale.ipn.ui.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.StableNodeID
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.util.LoadingIndicator
@@ -29,15 +31,22 @@ data class ExitNodePickerNav(
     val onNavigateToRunAsExitNode: () -> Unit,
 )
 
-class ExitNodePickerViewModelFactory(private val nav: ExitNodePickerNav) :
-    ViewModelProvider.Factory {
+class ExitNodePickerViewModelFactory(
+    private val nav: ExitNodePickerNav,
+    private val accessState: StateFlow<AccessState> = MutableStateFlow(AccessState.Unavailable)
+) : ViewModelProvider.Factory {
   @Suppress("UNCHECKED_CAST")
   override fun <T : ViewModel> create(modelClass: Class<T>): T {
-    return ExitNodePickerViewModel(nav) as T
+    return ExitNodePickerViewModel(nav, accessState) as T
   }
 }
 
-class ExitNodePickerViewModel(private val nav: ExitNodePickerNav) : IpnViewModel() {
+class ExitNodePickerViewModel(
+    private val nav: ExitNodePickerNav,
+    private val accessState: StateFlow<AccessState>,
+    private val netmapFlow: StateFlow<Netmap.NetworkMap?> = Notifier.netmap,
+    private val prefsFlow: StateFlow<Ipn.Prefs?> = Notifier.prefs,
+) : IpnViewModel(observeUserProfiles = false) {
   data class ExitNode(
       val id: StableNodeID? = null,
       val label: String,
@@ -60,10 +69,13 @@ class ExitNodePickerViewModel(private val nav: ExitNodePickerNav) : IpnViewModel
 
   init {
     viewModelScope.launch {
-      Notifier.netmap
-          .combine(Notifier.prefs) { netmap, prefs -> Pair(netmap, prefs) }
+      netmapFlow
+          .combine(prefsFlow) { netmap, prefs -> Pair(netmap, prefs) }
+          .combine(accessState) { (netmap, prefs), accessState ->
+            Triple(netmap, prefs, accessState)
+          }
           .stateIn(viewModelScope)
-          .collect { (netmap, prefs) ->
+          .collect { (netmap, prefs, accessState) ->
             val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
             netmap?.Peers?.let { peers ->
               val allNodes =
@@ -83,7 +95,9 @@ class ExitNodePickerViewModel(private val nav: ExitNodePickerNav) : IpnViewModel
                         )
                       }
 
-              val tailnetNodes = allNodes.filter { !it.mullvad }
+              val allowedExitNodeIds =
+                  (accessState as? AccessState.Active)?.allowedExitNodeIds.orEmpty()
+              val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
               tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
 
               val allMullvadExitNodes =
@@ -144,10 +158,7 @@ class ExitNodePickerViewModel(private val nav: ExitNodePickerNav) : IpnViewModel
 
   fun setExitNode(node: ExitNode) {
     LoadingIndicator.start()
-    val prefsOut = Ipn.MaskedPrefs()
-    prefsOut.ExitNodeID = node.id
-
-    Client(viewModelScope).editPrefs(prefsOut) {
+    Client(viewModelScope).editPrefs(Ipn.MaskedPrefs().apply { ExitNodeID = node.id }) {
       nav.onNavigateBackHome()
       LoadingIndicator.stop()
     }
