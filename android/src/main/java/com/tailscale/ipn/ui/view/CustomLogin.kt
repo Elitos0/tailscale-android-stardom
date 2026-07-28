@@ -3,6 +3,7 @@
 
 package com.tailscale.ipn.ui.view
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.tailscale.ipn.R
+import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.ui.theme.listItem
 import com.tailscale.ipn.ui.util.set
 import com.tailscale.ipn.ui.viewModel.LoginWithAuthKeyViewModel
@@ -45,9 +47,12 @@ data class LoginViewStrings(
 
 @Composable
 fun LoginWithCustomControlURLView(
+    context: Context,
+    authSessionRepository: AuthSessionRepository,
     onNavigateHome: BackNavigation,
     backToSettings: BackNavigation,
-    viewModel: LoginWithCustomControlURLViewModel = LoginWithCustomControlURLViewModel()
+    viewModel: LoginWithCustomControlURLViewModel =
+        LoginWithCustomControlURLViewModel(authSessionRepository)
 ) {
 
   Scaffold(
@@ -58,20 +63,29 @@ fun LoginWithCustomControlURLView(
         )
       }) { innerPadding ->
         val error by viewModel.errorDialog.collectAsState()
-        val strings =
-            LoginViewStrings(
-                title = stringResource(id = R.string.custom_control_menu),
-                explanation = stringResource(id = R.string.custom_control_menu_desc),
-                inputTitle = stringResource(id = R.string.custom_control_url_title),
-                placeholder = stringResource(id = R.string.custom_control_placeholder),
-            )
-
         error?.let { ErrorDialog(type = it, action = { viewModel.errorDialog.set(null) }) }
 
-        LoginView(
-            innerPadding = innerPadding,
-            strings = strings,
-            onSubmitAction = { viewModel.setControlURL(it, onNavigateHome) })
+        Column(
+            modifier =
+                Modifier.padding(innerPadding)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)) {
+              ListItem(
+                  colors = MaterialTheme.colorScheme.listItem,
+                  headlineContent = { Text(stringResource(id = R.string.stardom_login_title)) },
+                  supportingContent = {
+                    Text(stringResource(id = R.string.stardom_login_explanation))
+                  })
+              ListItem(
+                  colors = MaterialTheme.colorScheme.listItem,
+                  headlineContent = {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                      Button(
+                          onClick = { viewModel.setControlURL(context, onNavigateHome) },
+                          content = { Text(stringResource(id = R.string.log_in)) })
+                    }
+                  })
+            }
       }
 }
 

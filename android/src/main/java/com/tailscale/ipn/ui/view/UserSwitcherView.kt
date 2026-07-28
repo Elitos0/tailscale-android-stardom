@@ -49,7 +49,7 @@ import com.tailscale.ipn.ui.viewModel.UserSwitcherViewModel
 data class UserSwitcherNav(
     val backToSettings: BackNavigation,
     val onNavigateHome: () -> Unit,
-    val onNavigateCustomControl: () -> Unit,
+    val onNavigateStardomLogin: () -> Unit,
     val onNavigateToAuthKey: () -> Unit
 )
 
@@ -75,7 +75,7 @@ fun UserSwitcherView(nav: UserSwitcherNav, viewModel: UserSwitcherViewModel = vi
                 FusMenu(
                     viewModel = viewModel,
                     onAuthKeyClick = nav.onNavigateToAuthKey,
-                    onCustomClick = nav.onNavigateCustomControl)
+                    onCustomClick = nav.onNavigateStardomLogin)
                 IconButton(onClick = { viewModel.showHeaderMenu.set(!showHeaderMenu) }) {
                   Icon(Icons.Default.MoreVert, "menu")
                 }
@@ -209,7 +209,7 @@ fun FusMenu(
               onCustomClick()
               viewModel.showHeaderMenu.set(false)
             },
-            text = stringResource(id = R.string.custom_control_menu))
+            text = stringResource(id = R.string.stardom_login_menu))
         MenuItem(
             onClick = {
               onAuthKeyClick()
@@ -259,7 +259,7 @@ fun UserSwitcherViewPreview() {
       UserSwitcherNav(
           backToSettings = {},
           onNavigateHome = {},
-          onNavigateCustomControl = {},
+          onNavigateStardomLogin = {},
           onNavigateToAuthKey = {})
   UserSwitcherView(nav, vm)
 }

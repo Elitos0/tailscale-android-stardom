@@ -37,6 +37,8 @@ android {
     ndkVersion "23.1.7779620"
     compileSdkVersion androidApiLevel
     defaultConfig {
+        applicationId 'com.stardom.vpn'
+        manifestPlaceholders.appAuthRedirectScheme = "com.stardom.vpn"
         minSdkVersion 26
         targetSdkVersion androidApiLevel
         // versionCode is written here by `make bumposs` / `make tag_release`
@@ -54,6 +56,10 @@ android {
         // Set it to false either here or in your local.properties file to
         // disable this behaviour.
         buildConfigField "boolean", "USE_GOOGLE_DNS_FALLBACK", getLocalProperty("tailscale.useGoogleDnsFallback", "true")
+        buildConfigField "String", "HEADSCALE_CONTROL_URL", stardomBuildConfigValue("stardom.headscaleControlUrl", "https://headscale.invalid")
+        buildConfigField "String", "POLICY_API_BASE_URL", stardomBuildConfigValue("stardom.policyApiBaseUrl", "https://policy.invalid")
+        buildConfigField "String", "AUTHENTIK_ISSUER_URL", stardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.invalid")
+        buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", stardomBuildConfigValue("stardom.policyApiOidcClientId", "stardom-debug-client")
     }
 
     compileOptions {
@@ -96,6 +102,11 @@ android {
         release {
             manifestPlaceholders.leanbackRequired = isTV()
 
+            buildConfigField "String", "HEADSCALE_CONTROL_URL", requiredStardomBuildConfigValue("stardom.headscaleControlUrl", "https://headscale.invalid")
+            buildConfigField "String", "POLICY_API_BASE_URL", requiredStardomBuildConfigValue("stardom.policyApiBaseUrl", "https://policy.invalid")
+            buildConfigField "String", "AUTHENTIK_ISSUER_URL", requiredStardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.invalid")
+            buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", requiredStardomBuildConfigValue("stardom.policyApiOidcClientId", "stardom-debug-client")
+
             minifyEnabled true
 
             shrinkResources true
@@ -115,6 +126,7 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation "androidx.browser:browser:1.8.0"
     implementation "androidx.security:security-crypto:1.1.0-alpha06"
+    implementation "net.openid:appauth:0.11.1"
     implementation "androidx.work:work-runtime:2.9.1"
     implementation "androidx.work:work-runtime-ktx:2.9.1"
 
@@ -187,6 +199,26 @@ def getLocalProperty(key, defaultValue) {
     } catch(Throwable ignored) {
         return defaultValue
     }
+}
+
+def stardomBuildConfigValue(key, defaultValue) {
+    return quoteBuildConfigValue(providers.gradleProperty(key).orNull ?: defaultValue)
+}
+
+def requiredStardomBuildConfigValue(key, defaultValue) {
+    def value = providers.gradleProperty(key).orNull
+    if ((value == null || value.trim().isEmpty()) && isReleaseBuildRequested()) {
+        throw new GradleException("Missing required release Gradle property: " + key)
+    }
+    return quoteBuildConfigValue(value ?: defaultValue)
+}
+
+def isReleaseBuildRequested() {
+    return gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
+}
+
+def quoteBuildConfigValue(value) {
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
 }
 
 

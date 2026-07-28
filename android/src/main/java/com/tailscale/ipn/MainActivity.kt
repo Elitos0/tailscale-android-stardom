@@ -58,6 +58,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
+import com.tailscale.ipn.product.ProductConfig
+import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -114,6 +116,7 @@ class MainActivity : ComponentActivity() {
   private lateinit var vpnPermissionLauncher: ActivityResultLauncher<Intent>
   private lateinit var appViewModel: AppViewModel
   private lateinit var viewModel: MainViewModel
+  private lateinit var authSessionRepository: AuthSessionRepository
 
   val permissionsViewModel: PermissionsViewModel by viewModels()
 
@@ -138,9 +141,11 @@ class MainActivity : ComponentActivity() {
 
     // grab app to make sure it initializes
     App.get()
+    authSessionRepository = AuthSessionRepository(this)
     appViewModel = (application as App).getAppScopedViewModel()
     viewModel =
         ViewModelProvider(this, MainViewModelFactory(appViewModel)).get(MainViewModel::class.java)
+    authSessionRepository.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
@@ -327,9 +332,7 @@ class MainActivity : ComponentActivity() {
                       UserSwitcherNav(
                           backToSettings = backTo("settings"),
                           onNavigateHome = backTo("main"),
-                          onNavigateCustomControl = {
-                            navController.navigate("loginWithCustomControl")
-                          },
+                          onNavigateStardomLogin = { navController.navigate("loginWithStardom") },
                           onNavigateToAuthKey = { navController.navigate("loginWithAuthKey") })
 
                   composable("main", enterTransition = { fadeIn(animationSpec = tween(150)) }) {
@@ -398,9 +401,12 @@ class MainActivity : ComponentActivity() {
                   composable("loginWithAuthKey") {
                     LoginWithAuthKeyView(onNavigateHome = backTo("main"), backTo("userSwitcher"))
                   }
-                  composable("loginWithCustomControl") {
+                  composable("loginWithStardom") {
                     LoginWithCustomControlURLView(
-                        onNavigateHome = backTo("main"), backTo("userSwitcher"))
+                        context = this@MainActivity,
+                        authSessionRepository = authSessionRepository,
+                        onNavigateHome = backTo("main"),
+                        backToSettings = backTo("userSwitcher"))
                   }
                 }
             if (isIntroScreenViewedSet()) {
@@ -469,6 +475,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    authSessionRepository.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
     if (intent.getBooleanExtra(START_AT_ROOT, false)) {
       if (this::navController.isInitialized) {
         val previousEntry = navController.previousBackStackEntry
@@ -480,6 +487,16 @@ class MainActivity : ComponentActivity() {
               "MainActivity",
               "onNewIntent: No previous back stack entry, navigating directly to 'main'")
           navController.navigate("main") { popUpTo("main") { inclusive = true } }
+        }
+      }
+    }
+  }
+
+  private fun resumeFixedControlLogin() {
+    viewModel.loginWithCustomControlURL(ProductConfig.headscaleControlUrl) { result ->
+      result.onSuccess {
+        if (this::navController.isInitialized) {
+          navController.popBackStack(route = "main", inclusive = false)
         }
       }
     }

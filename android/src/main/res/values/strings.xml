@@ -30,8 +30,8 @@
     <string name="cancel">Cancel</string>
 
     <!-- Strings for the about screen -->
-    <string name="app_name" translatable="false">Tailscale</string>
-    <string name="tile_name" translatable="false">Tailscale</string>
+    <string name="app_name" translatable="false">Stardom VPN</string>
+    <string name="tile_name" translatable="false">Stardom VPN</string>
     <string name="version">Version</string>
     <string name="about_view_header">About Tailscale</string>
     <string name="about_view_title">Tailscale for Android</string>
@@ -123,6 +123,9 @@
     <string name="reauthenticate">Reauthenticate</string>
     <string name="switch_user_failed">Unable to switch users. Please try again.</string>
     <string name="add_profile_failed">Unable to add a new profile. Please try again.</string>
+    <string name="stardom_login_menu">Sign in to Stardom VPN</string>
+    <string name="stardom_login_title">Sign in to Stardom VPN</string>
+    <string name="stardom_login_explanation">Sign in with your Stardom account before connecting to the managed VPN service.</string>
     <string name="invalidCustomUrl">Please enter a valid URL in the form https://server.com</string>
     <string name="invalidCustomURLTitle">Invalid URL</string>
     <string name="custom_control_menu">Use an alternate server</string>
@@ -289,8 +292,8 @@
     <string name="use_exit_node_intent_failed">Use Exit Node Intent Failed</string>
 
     <!-- Strings for the IPNReceiver -->
-    <string name="title_connection_failed">Tailscale Connection Failed</string>
-    <string name="body_open_tailscale">Tap here to open Tailscale.</string>
+    <string name="title_connection_failed">Stardom VPN Connection Failed</string>
+    <string name="body_open_tailscale">Tap here to open Stardom VPN.</string>
 
     <!-- Strings describing notification channels -->
     <string name="taildrop_file_transfers">Taildrop file transfers</string>
