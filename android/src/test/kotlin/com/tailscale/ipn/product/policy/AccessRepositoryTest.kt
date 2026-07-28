@@ -8,6 +8,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class AccessRepositoryTest {
@@ -24,6 +25,22 @@ class AccessRepositoryTest {
         AccessRepository(PolicyApiClient(connectionFactory = { throw IOException("offline") }))
 
     assertEquals(AccessState.Unavailable, repository.load("token"))
+  }
+
+  @Test
+  fun nonHttpsBaseUrlMakesAccessUnavailableWithoutOpeningAConnection() {
+    var openedConnection = false
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                baseUrl = "http://policy.invalid",
+                connectionFactory = {
+                  openedConnection = true
+                  FakeHttpURLConnection(200, "")
+                }))
+
+    assertEquals(AccessState.Unavailable, repository.load("token"))
+    assertFalse(openedConnection)
   }
 
   @Test

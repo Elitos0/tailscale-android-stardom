@@ -18,8 +18,12 @@ class PolicyApiClient(
   fun load(token: String): AccessState {
     var connection: HttpURLConnection? = null
     return try {
+      val url = URL("${baseUrl.trimEnd('/')}/v1/me")
+      if (url.protocol != "https") {
+        return AccessState.Unavailable
+      }
       connection =
-          connectionFactory(URL("${baseUrl.trimEnd('/')}/v1/me")).apply {
+          connectionFactory(url).apply {
             requestMethod = "GET"
             connectTimeout = REQUEST_TIMEOUT_MILLIS
             readTimeout = REQUEST_TIMEOUT_MILLIS
