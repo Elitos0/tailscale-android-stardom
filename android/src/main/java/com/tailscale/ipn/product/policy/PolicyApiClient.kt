@@ -19,7 +19,7 @@ class PolicyApiClient(
     var connection: HttpURLConnection? = null
     return try {
       val url = URL("${baseUrl.trimEnd('/')}/v1/me")
-      if (url.protocol != "https") {
+      if (url.protocol != "https" || url.host.isBlank()) {
         return AccessState.Unavailable
       }
       connection =

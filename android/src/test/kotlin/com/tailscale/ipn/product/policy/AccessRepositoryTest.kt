@@ -44,6 +44,22 @@ class AccessRepositoryTest {
   }
 
   @Test
+  fun malformedHttpsBaseUrlMakesAccessUnavailableWithoutOpeningAConnection() {
+    var openedConnection = false
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                baseUrl = "https://",
+                connectionFactory = {
+                  openedConnection = true
+                  FakeHttpURLConnection(200, "")
+                }))
+
+    assertEquals(AccessState.Unavailable, repository.load("token"))
+    assertFalse(openedConnection)
+  }
+
+  @Test
   fun unauthorizedResponseMakesAccessUnavailable() {
     val repository = repository(status = 401)
 
