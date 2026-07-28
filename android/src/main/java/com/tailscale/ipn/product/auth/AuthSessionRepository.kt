@@ -17,6 +17,7 @@ import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.ResponseTypeValues
+import net.openid.appauth.TokenResponse
 
 private const val AUTH_STATE_KEY = "auth_state"
 private const val AUTH_PREFERENCES = "stardom_auth_session"
@@ -33,42 +34,69 @@ interface AuthStateStorage {
   fun clear()
 }
 
-class AuthSessionRepository(private val storage: AuthStateStorage) {
+interface AuthSessionState {
+  val isAuthorized: Boolean
+  val appAuthState: AuthState
+
+  fun updateAuthorization(response: AuthorizationResponse?, exception: AuthorizationException?)
+
+  fun updateToken(response: TokenResponse?, exception: AuthorizationException?)
+
+  fun serialize(): String
+}
+
+data class AuthorizationResult(
+    val response: AuthorizationResponse?,
+    val exception: AuthorizationException?
+)
+
+interface AppAuthGateway {
+  fun discover(callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit)
+
+  fun startAuthorization(context: Context, configuration: AuthorizationServiceConfiguration)
+
+  fun authorizationResult(intent: Intent): AuthorizationResult?
+
+  fun exchangeCode(
+      context: Context,
+      response: AuthorizationResponse,
+      callback: (TokenResponse?, AuthorizationException?) -> Unit
+  )
+
+  fun freshToken(
+      context: Context,
+      state: AuthSessionState,
+      callback: (String?, AuthorizationException?) -> Unit
+  )
+
+  fun dispose()
+}
+
+class AuthSessionRepository(
+    private val storage: AuthStateStorage,
+    private var authState: AuthSessionState,
+    private val appAuth: AppAuthGateway
+) {
+  constructor(
+      storage: AuthStateStorage
+  ) : this(storage, PersistedAuthSessionState.deserialize(storage.read()), RealAppAuthGateway())
+
   constructor(context: Context) : this(EncryptedAuthStateStorage(context.applicationContext))
 
-  private var authState = deserialize(storage.read())
   private var completion: ((Result<Unit>) -> Unit)? = null
-  private var authorizationService: AuthorizationService? = null
 
   val isSignedOut: Boolean
     get() = !authState.isAuthorized
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
     completion = onComplete
-    AuthorizationServiceConfiguration.fetchFromIssuer(
-        Uri.parse(ProductConfig.authentikIssuerUrl)) { configuration, exception ->
-          if (configuration == null) {
-            finish(
-                Result.failure(
-                    exception ?: IllegalStateException("Unable to discover OIDC issuer")))
-            return@fetchFromIssuer
-          }
-
-          val request =
-              AuthorizationRequest.Builder(
-                      configuration,
-                      ProductConfig.policyApiOidcClientId,
-                      ResponseTypeValues.CODE,
-                      Uri.parse(AUTH_REDIRECT_URI))
-                  .setScope(OIDC_SCOPES)
-                  .build()
-          authorizationService?.dispose()
-          authorizationService = AuthorizationService(context)
-          authorizationService!!.performAuthorizationRequest(
-              request,
-              callbackPendingIntent(context, AUTH_CALLBACK_ACTION),
-              callbackPendingIntent(context, AUTH_CANCEL_ACTION))
-        }
+    appAuth.discover { configuration, exception ->
+      if (configuration == null) {
+        finish(Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")))
+      } else {
+        appAuth.startAuthorization(context, configuration)
+      }
+    }
   }
 
   fun handleAuthorizationIntent(
@@ -76,34 +104,24 @@ class AuthSessionRepository(private val storage: AuthStateStorage) {
       intent: Intent,
       onRecoveredAuthorization: () -> Unit = {}
   ) {
-    val response = AuthorizationResponse.fromIntent(intent)
-    val exception = AuthorizationException.fromIntent(intent)
-    if (response == null && exception == null) {
-      return
-    }
-
-    authState.update(response, exception)
+    val result = appAuth.authorizationResult(intent) ?: return
+    authState.updateAuthorization(result.response, result.exception)
     persist()
+    val response = result.response
     if (response == null) {
-      finish(Result.failure(exception ?: IllegalStateException("Authorization was cancelled")))
+      finish(
+          Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")))
       return
     }
 
-    val service = authorizationService ?: AuthorizationService(context)
-    service.performTokenRequest(response.createTokenExchangeRequest()) {
-        tokenResponse,
-        tokenException ->
-      authState.update(tokenResponse, tokenException)
+    appAuth.exchangeCode(context, response) { tokenResponse, tokenException ->
+      authState.updateToken(tokenResponse, tokenException)
       persist()
-      service.dispose()
-      authorizationService = null
       if (tokenResponse == null) {
         finish(
             Result.failure(tokenException ?: IllegalStateException("Unable to exchange OIDC code")))
-      } else {
-        if (!finish(Result.success(Unit))) {
-          onRecoveredAuthorization()
-        }
+      } else if (!finish(Result.success(Unit))) {
+        onRecoveredAuthorization()
       }
     }
   }
@@ -114,13 +132,13 @@ class AuthSessionRepository(private val storage: AuthStateStorage) {
       return
     }
 
-    val service = AuthorizationService(context)
-    authState.performActionWithFreshTokens(service) { accessToken, _, exception ->
+    appAuth.freshToken(context, authState) { accessToken, exception ->
       persist()
-      service.dispose()
       if (exception != null || accessToken.isNullOrBlank()) {
-        clearSession()
-        onResult(Result.failure(exception ?: IllegalStateException("Signed out")))
+        if (isInvalidOrRevokedCredential(exception)) {
+          clearSession()
+        }
+        onResult(Result.failure(exception ?: IllegalStateException("Unable to refresh token")))
       } else {
         onResult(Result.success(accessToken))
       }
@@ -128,8 +146,124 @@ class AuthSessionRepository(private val storage: AuthStateStorage) {
   }
 
   fun clearSession() {
-    authState = AuthState()
+    authState = PersistedAuthSessionState(AuthState())
     storage.clear()
+  }
+
+  private fun finish(result: Result<Unit>): Boolean {
+    val hasCompletion = completion != null
+    completion?.invoke(result)
+    completion = null
+    appAuth.dispose()
+    return hasCompletion
+  }
+
+  private fun persist() {
+    storage.write(authState.serialize())
+  }
+
+  private fun isInvalidOrRevokedCredential(exception: AuthorizationException?): Boolean {
+    return exception?.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR &&
+        exception.error in setOf("invalid_grant", "invalid_token")
+  }
+}
+
+private class PersistedAuthSessionState(override val appAuthState: AuthState) : AuthSessionState {
+  override val isAuthorized: Boolean
+    get() = appAuthState.isAuthorized
+
+  override fun updateAuthorization(
+      response: AuthorizationResponse?,
+      exception: AuthorizationException?
+  ) {
+    appAuthState.update(response, exception)
+  }
+
+  override fun updateToken(response: TokenResponse?, exception: AuthorizationException?) {
+    appAuthState.update(response, exception)
+  }
+
+  override fun serialize(): String = appAuthState.jsonSerializeString()
+
+  companion object {
+    fun deserialize(value: String?): PersistedAuthSessionState {
+      if (value == null) {
+        return PersistedAuthSessionState(AuthState())
+      }
+      return try {
+        PersistedAuthSessionState(AuthState.jsonDeserialize(value))
+      } catch (_: Exception) {
+        PersistedAuthSessionState(AuthState())
+      }
+    }
+  }
+}
+
+private class RealAppAuthGateway : AppAuthGateway {
+  private var authorizationService: AuthorizationService? = null
+
+  override fun discover(
+      callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit
+  ) {
+    AuthorizationServiceConfiguration.fetchFromIssuer(
+        Uri.parse(ProductConfig.authentikIssuerUrl), callback)
+  }
+
+  override fun startAuthorization(
+      context: Context,
+      configuration: AuthorizationServiceConfiguration
+  ) {
+    val request =
+        AuthorizationRequest.Builder(
+                configuration,
+                ProductConfig.policyApiOidcClientId,
+                ResponseTypeValues.CODE,
+                Uri.parse(AUTH_REDIRECT_URI))
+            .setScope(OIDC_SCOPES)
+            .build()
+    authorizationService?.dispose()
+    authorizationService = AuthorizationService(context)
+    authorizationService!!.performAuthorizationRequest(
+        request,
+        callbackPendingIntent(context, AUTH_CALLBACK_ACTION),
+        callbackPendingIntent(context, AUTH_CANCEL_ACTION))
+  }
+
+  override fun authorizationResult(intent: Intent): AuthorizationResult? {
+    val response = AuthorizationResponse.fromIntent(intent)
+    val exception = AuthorizationException.fromIntent(intent)
+    return if (response == null && exception == null) null
+    else AuthorizationResult(response, exception)
+  }
+
+  override fun exchangeCode(
+      context: Context,
+      response: AuthorizationResponse,
+      callback: (TokenResponse?, AuthorizationException?) -> Unit
+  ) {
+    val service = authorizationService ?: AuthorizationService(context)
+    service.performTokenRequest(response.createTokenExchangeRequest()) { tokenResponse, exception ->
+      service.dispose()
+      authorizationService = null
+      callback(tokenResponse, exception)
+    }
+  }
+
+  override fun freshToken(
+      context: Context,
+      state: AuthSessionState,
+      callback: (String?, AuthorizationException?) -> Unit
+  ) {
+    val service = AuthorizationService(context)
+    state.appAuthState.performActionWithFreshTokens(service) { accessToken, _, exception ->
+      service.dispose()
+      callback(accessToken, exception)
+    }
+  }
+
+  override fun dispose() {
+    authorizationService?.dispose()
+    authorizationService = null
   }
 
   private fun callbackPendingIntent(context: Context, action: String): PendingIntent {
@@ -139,30 +273,6 @@ class AuthSessionRepository(private val storage: AuthStateStorage) {
         action.hashCode(),
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-  }
-
-  private fun finish(result: Result<Unit>): Boolean {
-    val hasCompletion = completion != null
-    completion?.invoke(result)
-    completion = null
-    authorizationService?.dispose()
-    authorizationService = null
-    return hasCompletion
-  }
-
-  private fun persist() {
-    storage.write(authState.jsonSerializeString())
-  }
-
-  private fun deserialize(value: String?): AuthState {
-    if (value == null) {
-      return AuthState()
-    }
-    return try {
-      AuthState.jsonDeserialize(value)
-    } catch (_: Exception) {
-      AuthState()
-    }
   }
 }
 

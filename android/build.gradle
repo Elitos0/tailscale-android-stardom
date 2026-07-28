@@ -102,10 +102,10 @@ android {
         release {
             manifestPlaceholders.leanbackRequired = isTV()
 
-            buildConfigField "String", "HEADSCALE_CONTROL_URL", requiredStardomBuildConfigValue("stardom.headscaleControlUrl", "https://headscale.invalid")
-            buildConfigField "String", "POLICY_API_BASE_URL", requiredStardomBuildConfigValue("stardom.policyApiBaseUrl", "https://policy.invalid")
-            buildConfigField "String", "AUTHENTIK_ISSUER_URL", requiredStardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.invalid")
-            buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", requiredStardomBuildConfigValue("stardom.policyApiOidcClientId", "stardom-debug-client")
+            buildConfigField "String", "HEADSCALE_CONTROL_URL", stardomBuildConfigValue("stardom.headscaleControlUrl", "https://headscale.invalid")
+            buildConfigField "String", "POLICY_API_BASE_URL", stardomBuildConfigValue("stardom.policyApiBaseUrl", "https://policy.invalid")
+            buildConfigField "String", "AUTHENTIK_ISSUER_URL", stardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.invalid")
+            buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", stardomBuildConfigValue("stardom.policyApiOidcClientId", "stardom-debug-client")
 
             minifyEnabled true
 
@@ -205,20 +205,25 @@ def stardomBuildConfigValue(key, defaultValue) {
     return quoteBuildConfigValue(providers.gradleProperty(key).orNull ?: defaultValue)
 }
 
-def requiredStardomBuildConfigValue(key, defaultValue) {
-    def value = providers.gradleProperty(key).orNull
-    if ((value == null || value.trim().isEmpty()) && isReleaseBuildRequested()) {
-        throw new GradleException("Missing required release Gradle property: " + key)
-    }
-    return quoteBuildConfigValue(value ?: defaultValue)
-}
-
-def isReleaseBuildRequested() {
-    return gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
-}
-
 def quoteBuildConfigValue(value) {
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def releaseArtifactTasks = ["assembleRelease", "bundleRelease", "packageRelease", "signReleaseBundle"]
+    if (taskGraph.allTasks.any { it.name in releaseArtifactTasks }) {
+        [
+            "stardom.headscaleControlUrl",
+            "stardom.policyApiBaseUrl",
+            "stardom.authentikIssuerUrl",
+            "stardom.policyApiOidcClientId",
+        ].each { key ->
+            def value = providers.gradleProperty(key).orNull
+            if (value == null || value.trim().isEmpty()) {
+                throw new GradleException("Missing required release Gradle property: " + key)
+            }
+        }
+    }
 }
 
 
