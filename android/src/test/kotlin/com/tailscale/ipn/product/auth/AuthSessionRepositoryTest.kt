@@ -3,8 +3,10 @@
 
 package com.tailscale.ipn.product.auth
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationResponse
@@ -99,6 +101,22 @@ class AuthSessionRepositoryTest {
     assertTrue(completion.single().isFailure)
     assertNull(storage.read())
     assertEquals(1, storage.clearCalls)
+  }
+
+  @Test
+  fun authorizationCallbackIsMutableOnAndroid12AndLater() {
+    val flags = callbackPendingIntentFlags(Build.VERSION_CODES.S)
+
+    assertTrue(flags and PendingIntent.FLAG_UPDATE_CURRENT != 0)
+    assertTrue(flags and PendingIntent.FLAG_MUTABLE != 0)
+  }
+
+  @Test
+  fun authorizationCallbackRemainsCompatibleBeforeAndroid12() {
+    val flags = callbackPendingIntentFlags(Build.VERSION_CODES.R)
+
+    assertTrue(flags and PendingIntent.FLAG_UPDATE_CURRENT != 0)
+    assertEquals(0, flags and PendingIntent.FLAG_MUTABLE)
   }
 }
 

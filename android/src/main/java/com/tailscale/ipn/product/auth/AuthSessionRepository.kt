@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.ProductConfig
@@ -25,6 +26,10 @@ private const val AUTH_CALLBACK_ACTION = "com.stardom.vpn.AUTH_CALLBACK"
 private const val AUTH_CANCEL_ACTION = "com.stardom.vpn.AUTH_CANCELLED"
 private const val AUTH_REDIRECT_URI = "com.stardom.vpn:/oauth2redirect"
 private const val OIDC_SCOPES = "openid profile email offline_access"
+
+internal fun callbackPendingIntentFlags(sdkInt: Int = Build.VERSION.SDK_INT): Int =
+    PendingIntent.FLAG_UPDATE_CURRENT or
+        if (sdkInt >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
 
 interface AuthStateStorage {
   fun read(): String?
@@ -269,10 +274,7 @@ private class RealAppAuthGateway : AppAuthGateway {
   private fun callbackPendingIntent(context: Context, action: String): PendingIntent {
     val intent = Intent(context, com.tailscale.ipn.MainActivity::class.java).setAction(action)
     return PendingIntent.getActivity(
-        context,
-        action.hashCode(),
-        intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        context, action.hashCode(), intent, callbackPendingIntentFlags())
   }
 }
 
