@@ -145,7 +145,9 @@ class MainActivity : ComponentActivity() {
     appViewModel = (application as App).getAppScopedViewModel()
     viewModel =
         ViewModelProvider(this, MainViewModelFactory(appViewModel)).get(MainViewModel::class.java)
-    stardomSessionController.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
+    if (stardomSessionController.consumeFixedHeadscaleContinuation()) {
+      resumeFixedControlLogin()
+    }
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
@@ -479,7 +481,6 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    stardomSessionController.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
     if (intent.getBooleanExtra(START_AT_ROOT, false)) {
       if (this::navController.isInitialized) {
         val previousEntry = navController.previousBackStackEntry

@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
+import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenResponse
@@ -86,13 +87,110 @@ class AuthSessionRepositoryTest {
         FakeAppAuthGateway(
             authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
             tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 0))
     var recovered = 0
-    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway)
+    val repository =
+        AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway, transactions) { 0 }
 
     repository.handleAuthorizationIntent(context, intent) { recovered++ }
 
     assertEquals(1, recovered)
     assertEquals(1, state.tokenUpdates)
+  }
+
+  @Test
+  fun callbackWithoutAPendingTransactionDoesNotExchangeAuthorizationCode() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(0, gateway.codeExchanges)
+  }
+
+  @Test
+  fun duplicateCallbackExchangesCodeOnlyOnce() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              1
+            }
+
+    repository.handleAuthorizationIntent(context, intent)
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(1, gateway.codeExchanges)
+  }
+
+  @Test
+  fun mismatchedCallbackDoesNotConsumeCurrentTransaction() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>(),
+            matchesPendingAuthorization = false)
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              1
+            }
+
+    repository.handleAuthorizationIntent(context, intent)
+    gateway.matchesPendingAuthorization = true
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(1, gateway.codeExchanges)
+  }
+
+  @Test
+  fun staleCallbackDoesNotExchangeAuthorizationCode() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 0))
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              5 * 60 * 1000L + 1
+            }
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(0, gateway.codeExchanges)
+  }
+
+  @Test
+  fun recoveredCallbackRecordsOneShotFixedHeadscaleContinuation() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              1
+            }
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertTrue(repository.consumeFixedHeadscaleContinuation())
+    assertEquals(false, repository.consumeFixedHeadscaleContinuation())
   }
 
   @Test
@@ -164,18 +262,19 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
-  fun authorizationCallbackIsMutableOnAndroid12AndLater() {
+  fun authorizationCallbackIsOneShotAndMutableOnAndroid12AndLater() {
     val flags = callbackPendingIntentFlags(Build.VERSION_CODES.S)
 
-    assertTrue(flags and PendingIntent.FLAG_UPDATE_CURRENT != 0)
+    assertTrue(flags and PendingIntent.FLAG_ONE_SHOT != 0)
     assertTrue(flags and PendingIntent.FLAG_MUTABLE != 0)
+    assertEquals(0, flags and PendingIntent.FLAG_UPDATE_CURRENT)
   }
 
   @Test
   fun authorizationCallbackRemainsCompatibleBeforeAndroid12() {
     val flags = callbackPendingIntentFlags(Build.VERSION_CODES.R)
 
-    assertTrue(flags and PendingIntent.FLAG_UPDATE_CURRENT != 0)
+    assertTrue(flags and PendingIntent.FLAG_ONE_SHOT != 0)
     assertEquals(0, flags and PendingIntent.FLAG_MUTABLE)
   }
 }
@@ -187,8 +286,12 @@ private class FakeAppAuthGateway(
     private val freshToken: String? = null,
     private val freshException: AuthorizationException? = null,
     private val deferDiscovery: Boolean = false,
+    var matchesPendingAuthorization: Boolean = true,
 ) : AppAuthGateway {
   var authorizationStarts = 0
+  var codeExchanges = 0
+  val authorizationRequest = mock<AuthorizationRequest>()
+  private val validAuthorizationResponse = mock<AuthorizationResponse>()
 
   override fun discover(
       callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit
@@ -198,20 +301,31 @@ private class FakeAppAuthGateway(
     }
   }
 
-  override fun startAuthorization(
-      context: Context,
+  override fun createAuthorizationRequest(
       configuration: AuthorizationServiceConfiguration
-  ) {
+  ): AuthorizationRequest = authorizationRequest
+
+  override fun startAuthorization(context: Context, request: AuthorizationRequest) {
     authorizationStarts++
   }
 
-  override fun authorizationResult(intent: Intent): AuthorizationResult? = authorizationResult
+  override fun authorizationResult(intent: Intent): AuthorizationResult? =
+      authorizationResult?.let { result ->
+        AuthorizationResult(result.response?.let { validAuthorizationResponse }, result.exception)
+      }
+
+  override fun matchesPendingAuthorization(
+      intent: Intent,
+      response: AuthorizationResponse?,
+      pendingRequest: AuthorizationRequest,
+  ): Boolean = matchesPendingAuthorization
 
   override fun exchangeCode(
       context: Context,
       response: AuthorizationResponse,
       callback: (TokenResponse?, AuthorizationException?) -> Unit
   ) {
+    codeExchanges++
     callback(tokenResponse, null)
   }
 
@@ -260,4 +374,25 @@ private class InMemoryAuthStateStorage(private var value: String? = null) : Auth
     value = null
     clearCalls++
   }
+}
+
+private class InMemoryAuthorizationTransactionStorage : AuthorizationTransactionStorage {
+  private var transaction: PendingAuthorizationTransaction? = null
+  private var fixedHeadscaleContinuation = false
+
+  override fun write(transaction: PendingAuthorizationTransaction) {
+    this.transaction = transaction
+  }
+
+  override fun consumeIf(predicate: (PendingAuthorizationTransaction) -> Boolean): Boolean {
+    val pending = transaction ?: return false
+    return predicate(pending).also { if (it) transaction = null }
+  }
+
+  override fun markFixedHeadscaleContinuation() {
+    fixedHeadscaleContinuation = true
+  }
+
+  override fun consumeFixedHeadscaleContinuation(): Boolean =
+      fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
 }

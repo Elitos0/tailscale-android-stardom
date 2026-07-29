@@ -22,16 +22,21 @@ import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.ResponseTypeValues
 import net.openid.appauth.TokenResponse
+import org.json.JSONObject
 
 private const val AUTH_STATE_KEY = "auth_state"
+private const val AUTH_PENDING_TRANSACTION_KEY = "pending_authorization_transaction"
+private const val AUTH_FIXED_HEADSCALE_CONTINUATION_KEY = "fixed_headscale_continuation"
 private const val AUTH_PREFERENCES = "stardom_auth_session"
 private const val AUTH_CALLBACK_ACTION = "com.stardom.vpn.AUTH_CALLBACK"
 private const val AUTH_CANCEL_ACTION = "com.stardom.vpn.AUTH_CANCELLED"
+internal const val AUTH_TRANSACTION_STATE_EXTRA = "com.stardom.vpn.AUTH_TRANSACTION_STATE"
 private const val AUTH_REDIRECT_URI = "com.stardom.vpn:/oauth2redirect"
 private const val OIDC_SCOPES = "openid profile email offline_access"
+private const val AUTH_TRANSACTION_MAX_AGE_MILLIS = 5 * 60 * 1000L
 
 internal fun callbackPendingIntentFlags(sdkInt: Int = Build.VERSION.SDK_INT): Int =
-    PendingIntent.FLAG_UPDATE_CURRENT or
+    PendingIntent.FLAG_ONE_SHOT or
         if (sdkInt >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
 
 interface AuthStateStorage {
@@ -41,6 +46,21 @@ interface AuthStateStorage {
 
   fun clear()
 }
+
+interface AuthorizationTransactionStorage {
+  fun write(transaction: PendingAuthorizationTransaction)
+
+  fun consumeIf(predicate: (PendingAuthorizationTransaction) -> Boolean): Boolean
+
+  fun markFixedHeadscaleContinuation()
+
+  fun consumeFixedHeadscaleContinuation(): Boolean
+}
+
+data class PendingAuthorizationTransaction(
+    val request: AuthorizationRequest,
+    val createdAtMillis: Long,
+)
 
 interface AuthSessionState {
   val isAuthorized: Boolean
@@ -61,9 +81,19 @@ data class AuthorizationResult(
 interface AppAuthGateway {
   fun discover(callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit)
 
-  fun startAuthorization(context: Context, configuration: AuthorizationServiceConfiguration)
+  fun createAuthorizationRequest(
+      configuration: AuthorizationServiceConfiguration
+  ): AuthorizationRequest
+
+  fun startAuthorization(context: Context, request: AuthorizationRequest)
 
   fun authorizationResult(intent: Intent): AuthorizationResult?
+
+  fun matchesPendingAuthorization(
+      intent: Intent,
+      response: AuthorizationResponse?,
+      pendingRequest: AuthorizationRequest,
+  ): Boolean
 
   fun exchangeCode(
       context: Context,
@@ -83,13 +113,23 @@ interface AppAuthGateway {
 class AuthSessionRepository(
     private val storage: AuthStateStorage,
     private var authState: AuthSessionState,
-    private val appAuth: AppAuthGateway
+    private val appAuth: AppAuthGateway,
+    private val transactionStorage: AuthorizationTransactionStorage =
+        InMemoryAuthorizationTransactionStorage(),
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
   constructor(
-      storage: AuthStateStorage
-  ) : this(storage, PersistedAuthSessionState.deserialize(storage.read()), RealAppAuthGateway())
+      context: Context
+  ) : this(context.applicationContext, EncryptedAuthStateStorage(context.applicationContext))
 
-  constructor(context: Context) : this(EncryptedAuthStateStorage(context.applicationContext))
+  private constructor(
+      context: Context,
+      storage: AuthStateStorage
+  ) : this(
+      storage,
+      PersistedAuthSessionState.deserialize(storage.read()),
+      RealAppAuthGateway(),
+      EncryptedAuthorizationTransactionStorage(context))
 
   private var completion: ((Result<Unit>) -> Unit)? = null
   private val _authentikState = MutableStateFlow(authentikStateFor(authState))
@@ -106,7 +146,9 @@ class AuthSessionRepository(
         _authentikState.value = AuthentikState.SignedOut
         finish(Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")))
       } else {
-        appAuth.startAuthorization(context, configuration)
+        val request = appAuth.createAuthorizationRequest(configuration)
+        transactionStorage.write(PendingAuthorizationTransaction(request, nowMillis()))
+        appAuth.startAuthorization(context, request)
       }
     }
   }
@@ -114,9 +156,22 @@ class AuthSessionRepository(
   fun handleAuthorizationIntent(
       context: Context,
       intent: Intent,
-      onRecoveredAuthorization: () -> Unit = {}
+      onRecoveredAuthorization: () -> Unit = {},
+      onFinished: () -> Unit = {},
   ) {
-    val result = appAuth.authorizationResult(intent) ?: return
+    val result =
+        appAuth.authorizationResult(intent)
+            ?: run {
+              onFinished()
+              return
+            }
+    if (!transactionStorage.consumeIf { pending ->
+      nowMillis() - pending.createdAtMillis in 0..AUTH_TRANSACTION_MAX_AGE_MILLIS &&
+          appAuth.matchesPendingAuthorization(intent, result.response, pending.request)
+    }) {
+      onFinished()
+      return
+    }
     authState.updateAuthorization(result.response, result.exception)
     persist()
     val response = result.response
@@ -124,6 +179,7 @@ class AuthSessionRepository(
       _authentikState.value = AuthentikState.SignedOut
       finish(
           Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")))
+      onFinished()
       return
     }
 
@@ -136,10 +192,12 @@ class AuthSessionRepository(
             Result.failure(tokenException ?: IllegalStateException("Unable to exchange OIDC code")))
       } else if (!finish(Result.success(Unit))) {
         _authentikState.value = AuthentikState.Authorized
+        transactionStorage.markFixedHeadscaleContinuation()
         onRecoveredAuthorization()
       } else {
         _authentikState.value = AuthentikState.Authorized
       }
+      onFinished()
     }
   }
 
@@ -166,6 +224,9 @@ class AuthSessionRepository(
   fun clearSession() {
     clearSession(AuthentikState.SignedOut)
   }
+
+  fun consumeFixedHeadscaleContinuation(): Boolean =
+      transactionStorage.consumeFixedHeadscaleContinuation()
 
   private fun clearSession(state: AuthentikState) {
     authState = PersistedAuthSessionState(AuthState())
@@ -225,6 +286,31 @@ private class PersistedAuthSessionState(override val appAuthState: AuthState) : 
   }
 }
 
+internal fun callbackMatchesPendingAuthorization(
+    intent: Intent,
+    response: AuthorizationResponse?,
+    pendingRequest: AuthorizationRequest,
+): Boolean {
+  if (intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA) != pendingRequest.state) return false
+  if (response == null) return true
+  return responseMatchesPendingRequest(response, pendingRequest)
+}
+
+private fun responseMatchesPendingRequest(
+    response: AuthorizationResponse,
+    pending: AuthorizationRequest,
+): Boolean {
+  val request = response.request
+  return response.state == pending.state &&
+      request.state == pending.state &&
+      request.clientId == pending.clientId &&
+      request.redirectUri == pending.redirectUri &&
+      request.responseType == pending.responseType &&
+      request.codeVerifier == pending.codeVerifier &&
+      request.codeVerifierChallenge == pending.codeVerifierChallenge &&
+      request.codeVerifierChallengeMethod == pending.codeVerifierChallengeMethod
+}
+
 private class RealAppAuthGateway : AppAuthGateway {
   private var authorizationService: AuthorizationService? = null
 
@@ -235,24 +321,24 @@ private class RealAppAuthGateway : AppAuthGateway {
         Uri.parse(ProductConfig.authentikIssuerUrl), callback)
   }
 
-  override fun startAuthorization(
-      context: Context,
+  override fun createAuthorizationRequest(
       configuration: AuthorizationServiceConfiguration
-  ) {
-    val request =
-        AuthorizationRequest.Builder(
-                configuration,
-                ProductConfig.policyApiOidcClientId,
-                ResponseTypeValues.CODE,
-                Uri.parse(AUTH_REDIRECT_URI))
-            .setScope(OIDC_SCOPES)
-            .build()
+  ): AuthorizationRequest =
+      AuthorizationRequest.Builder(
+              configuration,
+              ProductConfig.policyApiOidcClientId,
+              ResponseTypeValues.CODE,
+              Uri.parse(AUTH_REDIRECT_URI))
+          .setScope(OIDC_SCOPES)
+          .build()
+
+  override fun startAuthorization(context: Context, request: AuthorizationRequest) {
     authorizationService?.dispose()
     authorizationService = AuthorizationService(context)
     authorizationService!!.performAuthorizationRequest(
         request,
-        callbackPendingIntent(context, AUTH_CALLBACK_ACTION),
-        callbackPendingIntent(context, AUTH_CANCEL_ACTION))
+        callbackPendingIntent(context, AUTH_CALLBACK_ACTION, request),
+        callbackPendingIntent(context, AUTH_CANCEL_ACTION, request))
   }
 
   override fun authorizationResult(intent: Intent): AuthorizationResult? {
@@ -260,6 +346,14 @@ private class RealAppAuthGateway : AppAuthGateway {
     val exception = AuthorizationException.fromIntent(intent)
     return if (response == null && exception == null) null
     else AuthorizationResult(response, exception)
+  }
+
+  override fun matchesPendingAuthorization(
+      intent: Intent,
+      response: AuthorizationResponse?,
+      pendingRequest: AuthorizationRequest,
+  ): Boolean {
+    return callbackMatchesPendingAuthorization(intent, response, pendingRequest)
   }
 
   override fun exchangeCode(
@@ -292,10 +386,20 @@ private class RealAppAuthGateway : AppAuthGateway {
     authorizationService = null
   }
 
-  private fun callbackPendingIntent(context: Context, action: String): PendingIntent {
-    val intent = Intent(context, com.tailscale.ipn.MainActivity::class.java).setAction(action)
+  private fun callbackPendingIntent(
+      context: Context,
+      action: String,
+      request: AuthorizationRequest,
+  ): PendingIntent {
+    val intent =
+        Intent(context, AuthCallbackActivity::class.java)
+            .setAction(action)
+            .putExtra(AUTH_TRANSACTION_STATE_EXTRA, request.state)
     return PendingIntent.getActivity(
-        context, action.hashCode(), intent, callbackPendingIntentFlags())
+        context,
+        31 * action.hashCode() + request.state.hashCode(),
+        intent,
+        callbackPendingIntentFlags())
   }
 }
 
@@ -317,4 +421,76 @@ private class EncryptedAuthStateStorage(context: Context) : AuthStateStorage {
   override fun clear() {
     preferences.edit().remove(AUTH_STATE_KEY).apply()
   }
+}
+
+private class EncryptedAuthorizationTransactionStorage(
+    context: Context,
+) : AuthorizationTransactionStorage {
+  private val preferences =
+      EncryptedSharedPreferences.create(
+          context,
+          AUTH_PREFERENCES,
+          MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+          EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+          EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+
+  override fun write(transaction: PendingAuthorizationTransaction) {
+    preferences
+        .edit()
+        .putString(
+            AUTH_PENDING_TRANSACTION_KEY,
+            JSONObject()
+                .put("request", transaction.request.jsonSerializeString())
+                .put("createdAtMillis", transaction.createdAtMillis)
+                .toString())
+        .commit()
+  }
+
+  override fun consumeIf(predicate: (PendingAuthorizationTransaction) -> Boolean): Boolean =
+      synchronized(this) {
+        val transaction =
+            preferences.getString(AUTH_PENDING_TRANSACTION_KEY, null)?.let {
+              runCatching {
+                    val json = JSONObject(it)
+                    PendingAuthorizationTransaction(
+                        AuthorizationRequest.jsonDeserialize(json.getString("request")),
+                        json.getLong("createdAtMillis"))
+                  }
+                  .getOrNull()
+            } ?: return@synchronized false
+        if (!predicate(transaction)) return@synchronized false
+        preferences.edit().remove(AUTH_PENDING_TRANSACTION_KEY).commit()
+      }
+
+  override fun markFixedHeadscaleContinuation() {
+    preferences.edit().putBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, true).commit()
+  }
+
+  override fun consumeFixedHeadscaleContinuation(): Boolean =
+      synchronized(this) {
+        if (!preferences.getBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, false))
+            return@synchronized false
+        preferences.edit().remove(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY).commit()
+      }
+}
+
+private class InMemoryAuthorizationTransactionStorage : AuthorizationTransactionStorage {
+  private var transaction: PendingAuthorizationTransaction? = null
+  private var fixedHeadscaleContinuation = false
+
+  override fun write(transaction: PendingAuthorizationTransaction) {
+    this.transaction = transaction
+  }
+
+  override fun consumeIf(predicate: (PendingAuthorizationTransaction) -> Boolean): Boolean {
+    val pending = transaction ?: return false
+    return predicate(pending).also { if (it) transaction = null }
+  }
+
+  override fun markFixedHeadscaleContinuation() {
+    fixedHeadscaleContinuation = true
+  }
+
+  override fun consumeFixedHeadscaleContinuation(): Boolean =
+      fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
 }

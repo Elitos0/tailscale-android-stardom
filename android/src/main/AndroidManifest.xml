@@ -59,6 +59,10 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".product.auth.AuthCallbackActivity"
+            android:exported="false"
+            android:noHistory="true" />
+        <activity
             android:name="ShareActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
