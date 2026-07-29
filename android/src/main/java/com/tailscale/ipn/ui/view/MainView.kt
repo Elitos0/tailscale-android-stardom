@@ -495,7 +495,7 @@ fun ConnectView(
             }
           }
         } else if (connectionStage == ConnectionStage.SignIn) {
-          TailscaleLogoView(modifier = Modifier.size(50.dp))
+          StardomLogoView(modifier = Modifier.size(50.dp))
           Spacer(modifier = Modifier.size(1.dp))
           Text(
               text = stringResource(id = R.string.welcome_to_tailscale),
@@ -527,7 +527,7 @@ fun ConnectView(
               style = MaterialTheme.typography.titleMedium,
               textAlign = TextAlign.Center)
         } else if (connectionStage == ConnectionStage.RequestVpnPermission) {
-          TailscaleLogoView(modifier = Modifier.size(50.dp))
+          StardomLogoView(modifier = Modifier.size(50.dp))
           Spacer(modifier = Modifier.size(1.dp))
           Text(
               text = stringResource(id = R.string.welcome_to_tailscale),

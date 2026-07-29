@@ -34,7 +34,7 @@ fun IntroView(onContinue: () -> Unit) {
       modifier = Modifier.fillMaxHeight().fillMaxWidth().verticalScroll(rememberScrollState()),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center) {
-        TailscaleLogoView(modifier = Modifier.width(60.dp).height(60.dp))
+        StardomLogoView(modifier = Modifier.width(60.dp).height(60.dp))
         Spacer(modifier = Modifier.height(40.dp))
         Text(
             modifier = Modifier.padding(start = 40.dp, end = 40.dp, bottom = 40.dp),

@@ -69,9 +69,9 @@
     <string name="starting">Starting…</string>
     <string name="connect_to_tailnet_prefix">"Connect again to talk to the other devices in the "</string>
     <string name="connect_to_tailnet_suffix">" tailnet."</string>
-    <string name="welcome_to_tailscale">Welcome to Tailscale</string>
-    <string name="login_to_join_your_tailnet">Log in to join your tailnet and connect your devices.</string>
-    <string name="give_permissions">Set up a VPN connection so you can start using Tailscale.</string>
+    <string name="welcome_to_tailscale">Welcome to Stardom VPN</string>
+    <string name="login_to_join_your_tailnet">Log in to Stardom VPN to continue.</string>
+    <string name="give_permissions">Allow Stardom VPN to create a VPN connection on this device.</string>
     <string name="keyExpiryExplainer">Reauthenticate to remain connected to Tailscale.</string>
     <string name="deviceKeyNeverExpires">Device key does not expire</string>
     <string name="deviceKeyExpires">Device key expires %s</string>
@@ -280,8 +280,8 @@
 
     <!-- Strings for the intro screen -->
     <string name="getStarted">Get Started</string>
-    <string name="welcome1">Tailscale is a mesh VPN for securely connecting your devices.</string>
-    <string name="welcome2">All connections are device-to-device, so we never see your data. We collect and use your email address and name, as well as your device name, OS version, and IP address in order to help you to connect your devices and manage your settings. We log when you are connected to your network.</string>
+    <string name="welcome1">Stardom VPN securely connects this device to your private network.</string>
+    <string name="welcome2">Stardom VPN uses your account, device name, OS version, and IP address to connect and manage this device. Connection events may be recorded for security and support.</string>
     <string name="scan_to_connect_to_your_tailnet">Scan this QR code to log in to your tailnet</string>
     <string name="enter_code_to_connect_to_tailnet">or enter this code in the Machines > Add device section of the admin console: </string>
 
