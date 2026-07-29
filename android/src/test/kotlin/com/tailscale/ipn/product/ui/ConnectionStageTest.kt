@@ -36,15 +36,13 @@ class ConnectionStageTest {
   fun activeAccessRequestsVpnPermissionBeforeConnection() {
     assertEquals(
         ConnectionStage.RequestVpnPermission,
-        resolveConnectionStage(
-            true, AccessState.Active(setOf("node-a")), isVpnPrepared = false))
+        resolveConnectionStage(true, AccessState.Active(setOf("node-a")), isVpnPrepared = false))
   }
 
   @Test
   fun activeAccessWithPermissionCanConnect() {
     assertEquals(
         ConnectionStage.Connect,
-        resolveConnectionStage(
-            true, AccessState.Active(setOf("node-a")), isVpnPrepared = true))
+        resolveConnectionStage(true, AccessState.Active(setOf("node-a")), isVpnPrepared = true))
   }
 }

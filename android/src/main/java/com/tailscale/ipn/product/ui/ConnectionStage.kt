@@ -7,9 +7,13 @@ import com.tailscale.ipn.product.policy.AccessState
 
 sealed interface ConnectionStage {
   data object SignIn : ConnectionStage
+
   data object AccessUnavailable : ConnectionStage
+
   data object AccessDisabled : ConnectionStage
+
   data object RequestVpnPermission : ConnectionStage
+
   data object Connect : ConnectionStage
 }
 
