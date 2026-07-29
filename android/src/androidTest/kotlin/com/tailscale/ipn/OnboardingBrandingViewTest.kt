@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.ui.model.Ipn
@@ -16,6 +17,7 @@ import com.tailscale.ipn.ui.theme.AppTheme
 import com.tailscale.ipn.ui.view.ConnectView
 import com.tailscale.ipn.ui.view.IntroView
 import com.tailscale.ipn.ui.view.StartingView
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,6 +62,32 @@ class OnboardingBrandingViewTest {
         .onNodeWithText("Allow Stardom VPN to create a VPN connection on this device.")
         .assertIsDisplayed()
     assertStardomLogo()
+  }
+
+  @Test
+  fun vpnPermissionRequestRequiresExplicitConnectClick() {
+    var permissionRequests = 0
+
+    composeRule.setContent {
+      AppTheme {
+        ConnectView(
+            state = Ipn.State.Running,
+            connectionStage = ConnectionStage.RequestVpnPermission,
+            user = null,
+            connectAction = {},
+            refreshAccess = {},
+            loginAction = {},
+            loginAtUrlAction = {},
+            selfNode = null,
+            showVPNPermissionLauncher = { permissionRequests++ })
+      }
+    }
+
+    composeRule.onNodeWithText("Connect").assertIsDisplayed()
+    composeRule.runOnIdle { assertEquals(0, permissionRequests) }
+
+    composeRule.onNodeWithText("Connect").performClick()
+    composeRule.runOnIdle { assertEquals(1, permissionRequests) }
   }
 
   @Composable

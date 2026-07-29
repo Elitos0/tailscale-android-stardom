@@ -47,7 +47,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -75,9 +74,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.tailscale.ipn.App
 import com.tailscale.ipn.R
@@ -132,7 +128,10 @@ data class MainViewNavigation(
     val onNavigateToSearch: () -> Unit,
 )
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
+internal fun shouldRenderPeerContent(state: Ipn.State, connectionStage: ConnectionStage): Boolean =
+    state == Ipn.State.Running && connectionStage == ConnectionStage.Connect
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainView(
     loginAtUrl: (String) -> Unit,
@@ -238,10 +237,8 @@ fun MainView(
             if (signedIn) {
               AccessStatusView(accessRepository, authSessionRepository)
             }
-            when (state) {
-              Ipn.State.Running -> {
-                viewModel.maybeRequestVpnPermission()
-                LaunchVpnPermissionIfNeeded(viewModel)
+            when {
+              shouldRenderPeerContent(state, connectionStage) -> {
                 PromptForMissingPermissions(viewModel)
 
                 if (showKeyExpiry) {
@@ -257,8 +254,7 @@ fun MainView(
                     onSearchBarClick = navigation.onNavigateToSearch,
                     onSearch = { viewModel.searchPeers(it) })
               }
-              Ipn.State.NoState,
-              Ipn.State.Starting -> StartingView()
+              state == Ipn.State.NoState || state == Ipn.State.Starting -> StartingView()
               else -> {
                 ConnectView(
                     state,
@@ -292,19 +288,6 @@ fun TaildropDirectoryPickerPrompt() {
         modifier = Modifier.clickable { uriHandler.openUri(Links.TAILDROP_KB_URL) },
         color = MaterialTheme.colorScheme.primary,
         textDecoration = TextDecoration.Underline)
-  }
-}
-
-@Composable
-fun LaunchVpnPermissionIfNeeded(viewModel: MainViewModel) {
-  val lifecycleOwner = LocalLifecycleOwner.current
-  val shouldRequest by viewModel.requestVpnPermission.collectAsState()
-  LaunchedEffect(shouldRequest) {
-    if (!shouldRequest) return@LaunchedEffect
-    // Defer showing permission launcher until activity is resumed to avoid silent RESULT_CANCELED
-    lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-      viewModel.showVPNPermissionLauncherIfUnauthorized()
-    }
   }
 }
 

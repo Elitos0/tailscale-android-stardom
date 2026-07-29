@@ -42,7 +42,8 @@ class AuthFirstOnboardingTest {
             context.getString(R.string.welcome2),
             context.getString(R.string.welcome_to_tailscale),
             context.getString(R.string.give_permissions),
-            context.getString(R.string.login_to_join_your_tailnet))
+            context.getString(R.string.login_to_join_your_tailnet),
+            context.getString(R.string.vpn_explainer))
 
     assertTrue(onboarding.all { it.contains("Stardom VPN") })
     assertTrue(onboarding.none { it.contains("Tailscale") })

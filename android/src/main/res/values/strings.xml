@@ -374,7 +374,7 @@
 
     <!-- Strings for fallback VPN dialog -->
     <string name="vpn_permission_needed">VPN permission needed</string>
-    <string name="vpn_explainer">Tailscale needs VPN access, but it looks like your device may not show VPN settings. If you are using another VPN app or have work policies, disable them first, then try again.</string>
+    <string name="vpn_explainer">Stardom VPN needs VPN access, but it looks like your device may not show VPN settings. If you are using another VPN app or have work policies, disable them first, then try again.</string>
 
     <!-- Strings for the taildrop directory picker interstitial -->
     <string name="taildrop_directory_picker_title">Taildrop Directory</string>
