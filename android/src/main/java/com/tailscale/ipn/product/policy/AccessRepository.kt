@@ -20,7 +20,11 @@ class AccessRepository(private val policyApiClient: PolicyApiClient = PolicyApiC
   private val _state = MutableStateFlow<AccessState>(AccessState.Unavailable)
   val state: StateFlow<AccessState> = _state.asStateFlow()
 
-  fun load(token: String): AccessState = policyApiClient.load(token)
+  fun load(token: String): AccessState = policyApiClient.load(token).also { _state.value = it }
+
+  fun clear() {
+    _state.value = AccessState.Unavailable
+  }
 
   suspend fun refresh(context: Context, authSessionRepository: AuthSessionRepository): AccessState {
     return refreshMutex.withLock {

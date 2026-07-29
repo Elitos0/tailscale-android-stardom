@@ -59,8 +59,7 @@ import androidx.navigation.navArgument
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.ProductConfig
-import com.tailscale.ipn.product.auth.AuthSessionRepository
-import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -117,8 +116,7 @@ class MainActivity : ComponentActivity() {
   private lateinit var vpnPermissionLauncher: ActivityResultLauncher<Intent>
   private lateinit var appViewModel: AppViewModel
   private lateinit var viewModel: MainViewModel
-  private lateinit var authSessionRepository: AuthSessionRepository
-  private lateinit var accessRepository: AccessRepository
+  private lateinit var stardomSessionController: StardomSessionController
 
   val permissionsViewModel: PermissionsViewModel by viewModels()
 
@@ -143,12 +141,11 @@ class MainActivity : ComponentActivity() {
 
     // grab app to make sure it initializes
     App.get()
-    authSessionRepository = AuthSessionRepository(this)
-    accessRepository = AccessRepository()
+    stardomSessionController = (application as App).stardomSessionController
     appViewModel = (application as App).getAppScopedViewModel()
     viewModel =
         ViewModelProvider(this, MainViewModelFactory(appViewModel)).get(MainViewModel::class.java)
-    authSessionRepository.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
+    stardomSessionController.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
@@ -344,8 +341,7 @@ class MainActivity : ComponentActivity() {
                         loginAtUrl = ::login,
                         navigation = mainViewNav,
                         viewModel = viewModel,
-                        accessRepository = accessRepository,
-                        authSessionRepository = authSessionRepository,
+                        sessionController = stardomSessionController,
                     )
                   }
                   composable("search") {
@@ -360,7 +356,7 @@ class MainActivity : ComponentActivity() {
                     SettingsView(settingsNav = settingsNav, appViewModel = appViewModel)
                   }
                   composable("exitNodes") {
-                    ExitNodePicker(exitNodePickerNav, accessRepository.state)
+                    ExitNodePicker(exitNodePickerNav, stardomSessionController.accessState)
                   }
                   composable("health") { HealthView(backTo("main")) }
                   composable("mullvad") { MullvadExitNodePickerList(exitNodePickerNav) }
@@ -412,7 +408,7 @@ class MainActivity : ComponentActivity() {
                   composable("loginWithStardom") {
                     LoginWithCustomControlURLView(
                         context = this@MainActivity,
-                        authSessionRepository = authSessionRepository,
+                        authSessionRepository = stardomSessionController.authSessionRepository,
                         onNavigateHome = backTo("main"),
                         backToSettings = backTo("userSwitcher"))
                   }
@@ -483,7 +479,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    authSessionRepository.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
+    stardomSessionController.handleAuthorizationIntent(this, intent, ::resumeFixedControlLogin)
     if (intent.getBooleanExtra(START_AT_ROOT, false)) {
       if (this::navController.isInitialized) {
         val previousEntry = navController.previousBackStackEntry

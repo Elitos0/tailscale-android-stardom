@@ -16,23 +16,19 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tailscale.ipn.R
-import com.tailscale.ipn.product.auth.AuthSessionRepository
-import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.policy.AccessState
 
 @Composable
-fun AccessStatusView(
-    accessRepository: AccessRepository,
-    authSessionRepository: AuthSessionRepository,
-) {
+fun AccessStatusView(sessionController: StardomSessionController) {
   val context = LocalContext.current
   val lifecycleOwner = LocalLifecycleOwner.current
-  LaunchedEffect(accessRepository, authSessionRepository, lifecycleOwner) {
+  LaunchedEffect(sessionController, lifecycleOwner) {
     lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-      accessRepository.refresh(context, authSessionRepository)
+      sessionController.refreshAccess(context)
     }
   }
-  val accessState by accessRepository.state.collectAsState()
+  val accessState by sessionController.accessState.collectAsState()
   AccessStatusView(accessState)
 }
 

@@ -27,6 +27,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
+import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.auth.AuthSessionRepository
+import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -60,6 +63,9 @@ import libtailscale.Libtailscale
 
 class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  val stardomSessionController: StardomSessionController by lazy {
+    StardomSessionController(AuthSessionRepository(applicationContext), AccessRepository())
+  }
 
   companion object {
     private const val FILE_CHANNEL_ID = "tailscale-files"

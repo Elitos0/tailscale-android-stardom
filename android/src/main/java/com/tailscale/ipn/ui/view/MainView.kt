@@ -79,8 +79,7 @@ import com.tailscale.ipn.App
 import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
-import com.tailscale.ipn.product.auth.AuthSessionRepository
-import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.ui.AccessStatusView
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.product.ui.resolveConnectionStage
@@ -137,8 +136,7 @@ fun MainView(
     loginAtUrl: (String) -> Unit,
     navigation: MainViewNavigation,
     viewModel: MainViewModel,
-    accessRepository: AccessRepository,
-    authSessionRepository: AuthSessionRepository,
+    sessionController: StardomSessionController,
 ) {
   val currentPingDevice by viewModel.pingViewModel.peer.collectAsState()
   val healthIcon by viewModel.healthIcon.collectAsState()
@@ -161,15 +159,20 @@ fun MainView(
             val showExitNodePicker by MDMSettings.exitNodesPicker.flow.collectAsState()
             val disableToggle by MDMSettings.forceEnabled.flow.collectAsState()
             val showKeyExpiry by viewModel.showExpiry.collectAsState(initial = false)
-            val accessState by accessRepository.state.collectAsState()
-            val signedIn = state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
+            val accessState by sessionController.accessState.collectAsState()
+            val authentikState by sessionController.authentikState.collectAsState()
+            val hasHeadscaleProfile =
+                state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
             val context = LocalContext.current
             val refreshScope = rememberCoroutineScope()
             val connectionStage =
                 resolveConnectionStage(
-                    signedIn = signedIn, accessState = accessState, isVpnPrepared = isPrepared)
+                    authentikState = authentikState,
+                    hasHeadscaleProfile = hasHeadscaleProfile,
+                    accessState = accessState,
+                    isVpnPrepared = isPrepared)
             val refreshAccess: () -> Unit = {
-              refreshScope.launch { accessRepository.refresh(context, authSessionRepository) }
+              refreshScope.launch { sessionController.refreshAccess(context) }
               Unit
             }
 
@@ -234,8 +237,8 @@ fun MainView(
                     }
                   }
                 })
-            if (signedIn) {
-              AccessStatusView(accessRepository, authSessionRepository)
+            if (hasHeadscaleProfile) {
+              AccessStatusView(sessionController)
             }
             when {
               shouldRenderPeerContent(state, connectionStage) -> {
@@ -848,7 +851,6 @@ fun MainViewPreview() {
           onNavigateToHealth = {},
           onNavigateToSearch = {}),
       vm,
-      AccessRepository(),
-      AuthSessionRepository(App.get()),
+      App.get().stardomSessionController,
   )
 }

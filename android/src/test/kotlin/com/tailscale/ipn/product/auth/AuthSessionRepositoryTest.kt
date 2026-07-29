@@ -37,6 +37,27 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
+  fun persistedAuthorizedSessionStartsInAuthorizedState() {
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway())
+
+    assertEquals(AuthentikState.Authorized, repository.authentikState.value)
+  }
+
+  @Test
+  fun authorizationStartsByEmittingAuthorizing() {
+    val gateway = FakeAppAuthGateway(deferDiscovery = true)
+    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+
+    repository.startAuthorization(context) {}
+
+    assertEquals(AuthentikState.Authorizing, repository.authentikState.value)
+  }
+
+  @Test
   fun authorizationCodeExchangePersistsStateAndCompletesLogin() {
     val storage = InMemoryAuthStateStorage()
     val state = FakeSessionState()
@@ -55,6 +76,7 @@ class AuthSessionRepositoryTest {
     assertEquals(1, state.tokenUpdates)
     assertEquals(listOf("state", "state"), storage.writes)
     assertTrue(completion.single().isSuccess)
+    assertEquals(AuthentikState.Authorized, repository.authentikState.value)
   }
 
   @Test
@@ -86,6 +108,7 @@ class AuthSessionRepositoryTest {
     assertTrue(completion.single().isFailure)
     assertEquals("state", storage.read())
     assertEquals(0, storage.clearCalls)
+    assertEquals(AuthentikState.Authorized, repository.authentikState.value)
   }
 
   @Test
@@ -101,6 +124,43 @@ class AuthSessionRepositoryTest {
     assertTrue(completion.single().isFailure)
     assertNull(storage.read())
     assertEquals(1, storage.clearCalls)
+    assertEquals(AuthentikState.ReauthenticationRequired, repository.authentikState.value)
+  }
+
+  @Test
+  fun invalidTokenRefreshFailureRequiresReauthentication() {
+    val storage = InMemoryAuthStateStorage("state")
+    val gateway =
+        FakeAppAuthGateway(
+            freshException =
+                AuthorizationException(
+                    AuthorizationException.TYPE_OAUTH_TOKEN_ERROR,
+                    0,
+                    "invalid_token",
+                    null,
+                    null,
+                    null))
+    val completion = mutableListOf<Result<String>>()
+    val repository = AuthSessionRepository(storage, FakeSessionState(isAuthorized = true), gateway)
+
+    repository.withFreshBearerToken(context, completion::add)
+
+    assertTrue(completion.single().isFailure)
+    assertNull(storage.read())
+    assertEquals(AuthentikState.ReauthenticationRequired, repository.authentikState.value)
+  }
+
+  @Test
+  fun explicitClearEmitsSignedOut() {
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway())
+
+    repository.clearSession()
+
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
   }
 
   @Test
@@ -125,14 +185,17 @@ private class FakeAppAuthGateway(
     private val authorizationResult: AuthorizationResult? = null,
     private val tokenResponse: TokenResponse? = null,
     private val freshToken: String? = null,
-    private val freshException: AuthorizationException? = null
+    private val freshException: AuthorizationException? = null,
+    private val deferDiscovery: Boolean = false,
 ) : AppAuthGateway {
   var authorizationStarts = 0
 
   override fun discover(
       callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit
   ) {
-    callback(if (discoveryException == null) mock() else null, discoveryException)
+    if (!deferDiscovery) {
+      callback(if (discoveryException == null) mock() else null, discoveryException)
+    }
   }
 
   override fun startAuthorization(

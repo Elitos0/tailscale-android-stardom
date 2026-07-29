@@ -13,6 +13,19 @@ import org.junit.Test
 
 class AccessRepositoryTest {
   @Test
+  fun clearRemovesPreviouslyActiveAccess() {
+    val repository =
+        repository(status = 200, body = "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+
+    repository.load("token")
+
+    assertEquals(AccessState.Active(emptySet()), repository.state.value)
+    repository.clear()
+
+    assertEquals(AccessState.Unavailable, repository.state.value)
+  }
+
+  @Test
   fun forbiddenResponseDisablesAccess() {
     val repository = repository(status = 403)
 

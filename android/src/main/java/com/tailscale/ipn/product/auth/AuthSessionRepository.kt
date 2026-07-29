@@ -11,6 +11,9 @@ import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.ProductConfig
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -89,14 +92,18 @@ class AuthSessionRepository(
   constructor(context: Context) : this(EncryptedAuthStateStorage(context.applicationContext))
 
   private var completion: ((Result<Unit>) -> Unit)? = null
+  private val _authentikState = MutableStateFlow(authentikStateFor(authState))
+  val authentikState: StateFlow<AuthentikState> = _authentikState.asStateFlow()
 
   val isSignedOut: Boolean
     get() = !authState.isAuthorized
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
     completion = onComplete
+    _authentikState.value = AuthentikState.Authorizing
     appAuth.discover { configuration, exception ->
       if (configuration == null) {
+        _authentikState.value = AuthentikState.SignedOut
         finish(Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")))
       } else {
         appAuth.startAuthorization(context, configuration)
@@ -114,6 +121,7 @@ class AuthSessionRepository(
     persist()
     val response = result.response
     if (response == null) {
+      _authentikState.value = AuthentikState.SignedOut
       finish(
           Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")))
       return
@@ -123,10 +131,14 @@ class AuthSessionRepository(
       authState.updateToken(tokenResponse, tokenException)
       persist()
       if (tokenResponse == null) {
+        _authentikState.value = AuthentikState.SignedOut
         finish(
             Result.failure(tokenException ?: IllegalStateException("Unable to exchange OIDC code")))
       } else if (!finish(Result.success(Unit))) {
+        _authentikState.value = AuthentikState.Authorized
         onRecoveredAuthorization()
+      } else {
+        _authentikState.value = AuthentikState.Authorized
       }
     }
   }
@@ -141,18 +153,24 @@ class AuthSessionRepository(
       persist()
       if (exception != null || accessToken.isNullOrBlank()) {
         if (isInvalidOrRevokedCredential(exception)) {
-          clearSession()
+          clearSession(AuthentikState.ReauthenticationRequired)
         }
         onResult(Result.failure(exception ?: IllegalStateException("Unable to refresh token")))
       } else {
+        _authentikState.value = AuthentikState.Authorized
         onResult(Result.success(accessToken))
       }
     }
   }
 
   fun clearSession() {
+    clearSession(AuthentikState.SignedOut)
+  }
+
+  private fun clearSession(state: AuthentikState) {
     authState = PersistedAuthSessionState(AuthState())
     storage.clear()
+    _authentikState.value = state
   }
 
   private fun finish(result: Result<Unit>): Boolean {
@@ -171,6 +189,9 @@ class AuthSessionRepository(
     return exception?.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR &&
         exception.error in setOf("invalid_grant", "invalid_token")
   }
+
+  private fun authentikStateFor(state: AuthSessionState): AuthentikState =
+      if (state.isAuthorized) AuthentikState.Authorized else AuthentikState.SignedOut
 }
 
 private class PersistedAuthSessionState(override val appAuthState: AuthState) : AuthSessionState {

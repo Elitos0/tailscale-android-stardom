@@ -3,6 +3,7 @@
 
 package com.tailscale.ipn.product.ui
 
+import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.policy.AccessState
 
 sealed interface ConnectionStage {
@@ -18,12 +19,15 @@ sealed interface ConnectionStage {
 }
 
 fun resolveConnectionStage(
-    signedIn: Boolean,
+    authentikState: AuthentikState,
+    hasHeadscaleProfile: Boolean,
     accessState: AccessState,
     isVpnPrepared: Boolean,
 ): ConnectionStage =
     when {
-      !signedIn -> ConnectionStage.SignIn
+      authentikState == AuthentikState.SignedOut ||
+          authentikState == AuthentikState.ReauthenticationRequired -> ConnectionStage.SignIn
+      !hasHeadscaleProfile -> ConnectionStage.SignIn
       accessState == AccessState.Unavailable -> ConnectionStage.AccessUnavailable
       accessState == AccessState.Disabled -> ConnectionStage.AccessDisabled
       !isVpnPrepared -> ConnectionStage.RequestVpnPermission
