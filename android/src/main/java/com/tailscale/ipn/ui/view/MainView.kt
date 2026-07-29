@@ -53,6 +53,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -83,8 +85,9 @@ import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
-import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.ui.AccessStatusView
+import com.tailscale.ipn.product.ui.ConnectionStage
+import com.tailscale.ipn.product.ui.resolveConnectionStage
 import com.tailscale.ipn.ui.Links
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
@@ -117,10 +120,12 @@ import com.tailscale.ipn.ui.viewModel.IpnViewModel.NodeState
 import com.tailscale.ipn.ui.viewModel.MainViewModel
 import com.tailscale.ipn.util.FeatureFlags
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 
 // Navigation actions for the MainView
 data class MainViewNavigation(
     val onNavigateToSettings: () -> Unit,
+    val onNavigateStardomLogin: () -> Unit,
     val onNavigateToPeerDetails: (Tailcfg.Node) -> Unit,
     val onNavigateToExitNodes: () -> Unit,
     val onNavigateToHealth: () -> Unit,
@@ -158,7 +163,16 @@ fun MainView(
             val disableToggle by MDMSettings.forceEnabled.flow.collectAsState()
             val showKeyExpiry by viewModel.showExpiry.collectAsState(initial = false)
             val accessState by accessRepository.state.collectAsState()
-            val accessAllowed = accessState is AccessState.Active
+            val signedIn = state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
+            val context = LocalContext.current
+            val refreshScope = rememberCoroutineScope()
+            val connectionStage =
+                resolveConnectionStage(
+                    signedIn = signedIn, accessState = accessState, isVpnPrepared = isPrepared)
+            val refreshAccess: () -> Unit = {
+              refreshScope.launch { accessRepository.refresh(context, authSessionRepository) }
+              Unit
+            }
 
             // Hide the header only on Android TV when the user needs to login
             val hideHeader = (isAndroidTV() && state == Ipn.State.NeedsLogin)
@@ -171,9 +185,9 @@ fun MainView(
                         enabled =
                             !disableToggle.value &&
                                 !viewModel.isToggleInProgress.value &&
-                                (isOn || accessAllowed),
+                                (isOn || connectionStage == ConnectionStage.Connect),
                         onCheckedChange = { desiredState ->
-                          if (!desiredState || accessAllowed) {
+                          if (!desiredState || connectionStage == ConnectionStage.Connect) {
                             viewModel.toggleVpn(desiredState)
                           }
                         })
@@ -221,7 +235,9 @@ fun MainView(
                     }
                   }
                 })
-            AccessStatusView(accessRepository, authSessionRepository)
+            if (signedIn) {
+              AccessStatusView(accessRepository, authSessionRepository)
+            }
             when (state) {
               Ipn.State.Running -> {
                 viewModel.maybeRequestVpnPermission()
@@ -246,18 +262,11 @@ fun MainView(
               else -> {
                 ConnectView(
                     state,
-                    isPrepared,
-                    // If Tailscale is stopping, don't automatically restart; wait for user to take
-                    // action (eg, if the user connected to another VPN).
-                    state != Ipn.State.Stopping && accessAllowed,
+                    connectionStage,
                     user,
-                    {
-                      if (accessAllowed) {
-                        viewModel.toggleVpn(desiredState = !isOn)
-                      }
-                    },
-                    accessAllowed,
-                    { viewModel.login() },
+                    { viewModel.toggleVpn(desiredState = !isOn) },
+                    refreshAccess,
+                    navigation.onNavigateStardomLogin,
                     loginAtUrl,
                     netmap?.SelfNode,
                     { viewModel.showVPNPermissionLauncherIfUnauthorized() })
@@ -448,21 +457,15 @@ fun StartingView() {
 @Composable
 fun ConnectView(
     state: Ipn.State,
-    isPrepared: Boolean,
-    shouldStartAutomatically: Boolean,
+    connectionStage: ConnectionStage,
     user: IpnLocal.LoginProfile?,
     connectAction: () -> Unit,
-    connectEnabled: Boolean,
+    refreshAccess: () -> Unit,
     loginAction: () -> Unit,
     loginAtUrlAction: (String) -> Unit,
     selfNode: Tailcfg.Node?,
     showVPNPermissionLauncher: () -> Unit,
 ) {
-  LaunchedEffect(isPrepared) {
-    if (!isPrepared && shouldStartAutomatically) {
-      showVPNPermissionLauncher()
-    }
-  }
   Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
       Column(
@@ -470,24 +473,7 @@ fun ConnectView(
           verticalArrangement = Arrangement.spacedBy(8.dp, alignment = Alignment.CenterVertically),
           horizontalAlignment = Alignment.CenterHorizontally,
       ) {
-        if (!isPrepared) {
-          TailscaleLogoView(modifier = Modifier.size(50.dp))
-          Spacer(modifier = Modifier.size(1.dp))
-          Text(
-              text = stringResource(id = R.string.welcome_to_tailscale),
-              style = MaterialTheme.typography.titleMedium,
-              textAlign = TextAlign.Center)
-          Text(
-              stringResource(R.string.give_permissions),
-              style = MaterialTheme.typography.titleSmall,
-              textAlign = TextAlign.Center)
-          Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = connectAction, enabled = connectEnabled) {
-            Text(
-                text = stringResource(id = R.string.connect),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
-        } else if (state == Ipn.State.NeedsMachineAuth) {
+        if (state == Ipn.State.NeedsMachineAuth) {
           Icon(
               modifier = Modifier.size(40.dp),
               imageVector = Icons.Outlined.Lock,
@@ -508,38 +494,7 @@ fun ConnectView(
                   fontSize = MaterialTheme.typography.titleMedium.fontSize)
             }
           }
-        } else if (state != Ipn.State.NeedsLogin && user != null && !user.isEmpty()) {
-          Icon(
-              painter = painterResource(id = R.drawable.power),
-              contentDescription = null,
-              modifier = Modifier.size(40.dp),
-              tint = MaterialTheme.colorScheme.disabled)
-          Text(
-              text = stringResource(id = R.string.not_connected),
-              fontSize = MaterialTheme.typography.titleMedium.fontSize,
-              fontWeight = FontWeight.SemiBold,
-              textAlign = TextAlign.Center,
-              fontFamily = MaterialTheme.typography.titleMedium.fontFamily)
-          val tailnetName = user.NetworkProfile?.tailnetNameForDisplay() ?: ""
-          Text(
-              buildAnnotatedString {
-                append(stringResource(id = R.string.connect_to_tailnet_prefix))
-                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                append(tailnetName)
-                pop()
-                append(stringResource(id = R.string.connect_to_tailnet_suffix))
-              },
-              fontSize = MaterialTheme.typography.titleMedium.fontSize,
-              fontWeight = FontWeight.Normal,
-              textAlign = TextAlign.Center,
-          )
-          Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = connectAction, enabled = connectEnabled) {
-            Text(
-                text = stringResource(id = R.string.connect),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
-        } else {
+        } else if (connectionStage == ConnectionStage.SignIn) {
           TailscaleLogoView(modifier = Modifier.size(50.dp))
           Spacer(modifier = Modifier.size(1.dp))
           Text(
@@ -554,6 +509,69 @@ fun ConnectView(
           PrimaryActionButton(onClick = loginAction) {
             Text(
                 text = stringResource(id = R.string.log_in),
+                fontSize = MaterialTheme.typography.titleMedium.fontSize)
+          }
+        } else if (connectionStage == ConnectionStage.AccessUnavailable) {
+          Text(
+              text = stringResource(id = R.string.vpn_access_unavailable),
+              style = MaterialTheme.typography.titleMedium,
+              textAlign = TextAlign.Center)
+          PrimaryActionButton(onClick = refreshAccess) {
+            Text(
+                text = stringResource(id = R.string.try_again),
+                fontSize = MaterialTheme.typography.titleMedium.fontSize)
+          }
+        } else if (connectionStage == ConnectionStage.AccessDisabled) {
+          Text(
+              text = stringResource(id = R.string.vpn_access_disabled),
+              style = MaterialTheme.typography.titleMedium,
+              textAlign = TextAlign.Center)
+        } else if (connectionStage == ConnectionStage.RequestVpnPermission) {
+          TailscaleLogoView(modifier = Modifier.size(50.dp))
+          Spacer(modifier = Modifier.size(1.dp))
+          Text(
+              text = stringResource(id = R.string.welcome_to_tailscale),
+              style = MaterialTheme.typography.titleMedium,
+              textAlign = TextAlign.Center)
+          Text(
+              stringResource(R.string.give_permissions),
+              style = MaterialTheme.typography.titleSmall,
+              textAlign = TextAlign.Center)
+          Spacer(modifier = Modifier.size(1.dp))
+          PrimaryActionButton(onClick = showVPNPermissionLauncher) {
+            Text(
+                text = stringResource(id = R.string.connect),
+                fontSize = MaterialTheme.typography.titleMedium.fontSize)
+          }
+        } else if (connectionStage == ConnectionStage.Connect) {
+          Icon(
+              painter = painterResource(id = R.drawable.power),
+              contentDescription = null,
+              modifier = Modifier.size(40.dp),
+              tint = MaterialTheme.colorScheme.disabled)
+          Text(
+              text = stringResource(id = R.string.not_connected),
+              fontSize = MaterialTheme.typography.titleMedium.fontSize,
+              fontWeight = FontWeight.SemiBold,
+              textAlign = TextAlign.Center,
+              fontFamily = MaterialTheme.typography.titleMedium.fontFamily)
+          val tailnetName = user?.NetworkProfile?.tailnetNameForDisplay() ?: ""
+          Text(
+              buildAnnotatedString {
+                append(stringResource(id = R.string.connect_to_tailnet_prefix))
+                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                append(tailnetName)
+                pop()
+                append(stringResource(id = R.string.connect_to_tailnet_suffix))
+              },
+              fontSize = MaterialTheme.typography.titleMedium.fontSize,
+              fontWeight = FontWeight.Normal,
+              textAlign = TextAlign.Center,
+          )
+          Spacer(modifier = Modifier.size(1.dp))
+          PrimaryActionButton(onClick = connectAction) {
+            Text(
+                text = stringResource(id = R.string.connect),
                 fontSize = MaterialTheme.typography.titleMedium.fontSize)
           }
         }
@@ -842,6 +860,7 @@ fun MainViewPreview() {
       {},
       MainViewNavigation(
           onNavigateToSettings = {},
+          onNavigateStardomLogin = {},
           onNavigateToPeerDetails = {},
           onNavigateToExitNodes = {},
           onNavigateToHealth = {},

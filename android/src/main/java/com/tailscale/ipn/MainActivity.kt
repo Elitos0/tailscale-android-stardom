@@ -297,6 +297,7 @@ class MainActivity : ComponentActivity() {
                   val mainViewNav =
                       MainViewNavigation(
                           onNavigateToSettings = { navController.navigate("settings") },
+                          onNavigateStardomLogin = { navController.navigate("loginWithStardom") },
                           onNavigateToPeerDetails = {
                             navController.navigate("peerDetails/${it.StableID}")
                           },

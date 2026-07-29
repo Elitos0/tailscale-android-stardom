@@ -12,6 +12,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.tailscale.ipn.R
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
@@ -23,8 +26,11 @@ fun AccessStatusView(
     authSessionRepository: AuthSessionRepository,
 ) {
   val context = LocalContext.current
-  LaunchedEffect(accessRepository, authSessionRepository) {
-    accessRepository.refresh(context, authSessionRepository)
+  val lifecycleOwner = LocalLifecycleOwner.current
+  LaunchedEffect(accessRepository, authSessionRepository, lifecycleOwner) {
+    lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+      accessRepository.refresh(context, authSessionRepository)
+    }
   }
   val accessState by accessRepository.state.collectAsState()
   AccessStatusView(accessState)
