@@ -28,6 +28,7 @@ class AuthFirstOnboardingTest {
     getStarted.click()
 
     assertNotNull(device.wait(Until.findObject(By.text("Log in")), 5_000))
+    assertNotNull(device.wait(Until.findObject(By.desc("Stardom VPN")), 5_000))
     assertNull(device.findObject(By.text("Connection request")))
     assertNull(device.findObject(By.text("VPN access is unavailable")))
   }
@@ -38,6 +39,7 @@ class AuthFirstOnboardingTest {
     val onboarding =
         listOf(
             context.getString(R.string.welcome1),
+            context.getString(R.string.welcome2),
             context.getString(R.string.welcome_to_tailscale),
             context.getString(R.string.give_permissions),
             context.getString(R.string.login_to_join_your_tailnet))

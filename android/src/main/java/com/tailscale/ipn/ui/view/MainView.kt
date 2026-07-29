@@ -449,8 +449,7 @@ fun StartingView() {
       modifier = Modifier.fillMaxSize(),
       verticalArrangement = Arrangement.Center,
       horizontalAlignment = Alignment.CenterHorizontally) {
-        TailscaleLogoView(
-            animated = true, usesOnBackgroundColors = false, Modifier.size(40.dp).alpha(0.3f))
+        StardomLogoView(modifier = Modifier.size(40.dp).alpha(0.3f))
       }
 }
 
