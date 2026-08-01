@@ -11,6 +11,7 @@ import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.policy.VpnServiceRunCoordinator
 import com.tailscale.ipn.product.policy.VpnStartOrigin
+import com.tailscale.ipn.product.policy.VpnStopCommandRegistration
 import com.tailscale.ipn.product.policy.VpnWantRunningWriter
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
@@ -30,6 +31,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   private val randomID: String = UUID.randomUUID().toString()
   private lateinit var app: App
   private lateinit var runCoordinator: VpnServiceRunCoordinator
+  private lateinit var stopCommandRegistration: VpnStopCommandRegistration
   private val serviceJob = SupervisorJob()
   private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
   private val closed = AtomicBoolean(false)
@@ -61,13 +63,13 @@ open class IPNService : VpnService(), libtailscale.IPNService {
                 },
             scope = scope,
         )
+    stopCommandRegistration = app.vpnStopCommandDispatcher.register(::handleStopCommand)
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       ACTION_STOP_VPN -> {
-        app.setWantRunning(false)
-        close()
+        handleStopCommand()
       }
       ACTION_RESTART_VPN -> {
         scope.launch {
@@ -169,6 +171,11 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     stopSelfResult(startId)
   }
 
+  private fun handleStopCommand() {
+    app.setWantRunning(false)
+    close()
+  }
+
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
     runCoordinator.close {
@@ -185,6 +192,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   override fun onDestroy() {
     serviceJob.cancel()
     close()
+    stopCommandRegistration.unregister()
     updateVpnStatus(false)
     super.onDestroy()
   }

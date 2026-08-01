@@ -37,6 +37,7 @@ import com.tailscale.ipn.product.policy.VpnRuntimeStateTracker
 import com.tailscale.ipn.product.policy.VpnStartDispatchBoundary
 import com.tailscale.ipn.product.policy.VpnStartDispatchResult
 import com.tailscale.ipn.product.policy.VpnStartOrigin
+import com.tailscale.ipn.product.policy.VpnStopCommandDispatcher
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -73,8 +74,14 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val stardomSessionController: StardomSessionController by lazy {
     StardomSessionController(AuthSessionRepository(applicationContext), AccessRepository())
   }
+  val vpnStopCommandDispatcher: VpnStopCommandDispatcher by lazy {
+    VpnStopCommandDispatcher(::stopVPN)
+  }
   val vpnRuntimeTracker: VpnRuntimeStateTracker by lazy {
-    VpnRuntimeStateTracker(::revokeVpnEntitlement)
+    VpnRuntimeStateTracker(
+        revokeVpn = vpnStopCommandDispatcher::dispatchStopCommand,
+        rejectVpnStart = ::rejectVpnStart,
+    )
   }
   val vpnEntitlementController: VpnEntitlementController by lazy {
     val sessionController = stardomSessionController
@@ -280,7 +287,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
         .editPrefs(Ipn.MaskedPrefs().apply { WantRunning = wantRunning }, callback)
   }
 
-  private fun revokeVpnEntitlement() {
+  private fun rejectVpnStart() {
     setWantRunning(false)
     stopService(Intent(this, IPNService::class.java))
   }

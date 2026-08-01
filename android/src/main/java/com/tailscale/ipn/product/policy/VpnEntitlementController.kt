@@ -45,9 +45,45 @@ interface VpnEntitlementRuntime {
   val state: StateFlow<VpnRuntimeState>
 
   fun revoke()
+
+  fun rejectStart() {
+    revoke()
+  }
 }
 
-class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlementRuntime {
+fun interface VpnStopCommandRegistration {
+  fun unregister()
+}
+
+class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
+  private val lock = Any()
+  private var generation = 0L
+  private var registeredHandler: Pair<Long, () -> Unit>? = null
+
+  fun register(handler: () -> Unit): VpnStopCommandRegistration {
+    val registrationGeneration =
+        synchronized(lock) {
+          val nextGeneration = ++generation
+          registeredHandler = nextGeneration to handler
+          nextGeneration
+        }
+    return VpnStopCommandRegistration {
+      synchronized(lock) {
+        if (registeredHandler?.first == registrationGeneration) registeredHandler = null
+      }
+    }
+  }
+
+  fun dispatchStopCommand() {
+    val handler = synchronized(lock) { registeredHandler?.second }
+    (handler ?: fallbackDispatch).invoke()
+  }
+}
+
+class VpnRuntimeStateTracker(
+    private val rejectVpnStart: (() -> Unit)? = null,
+    private val revokeVpn: () -> Unit,
+) : VpnEntitlementRuntime {
   private val lock = Any()
   private val _state = MutableStateFlow(VpnRuntimeState.Idle)
   override val state: StateFlow<VpnRuntimeState> = _state.asStateFlow()
@@ -99,6 +135,10 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
 
   override fun revoke() {
     revokeVpn()
+  }
+
+  override fun rejectStart() {
+    (rejectVpnStart ?: revokeVpn).invoke()
   }
 }
 
@@ -326,7 +366,11 @@ class VpnEntitlementController(
   }
 
   suspend fun revokeRejectedRuntimeStart() {
-    revokeOnce()
+    revocationMutex.withLock {
+      if (revokedForCurrentRun) return
+      revokedForCurrentRun = true
+      if (runtime.state.value.isStartingOrRunning()) runtime.revoke() else runtime.rejectStart()
+    }
   }
 
   private suspend fun refreshAndEnforce() {

@@ -316,6 +316,67 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun runtimePolicyRevocationAfterHandoffDispatchesRegisteredFencedStop() = runTest {
+    val fallbackCommands = AtomicInteger()
+    val stopCommands = AtomicInteger()
+    val wantRunningFalseWrites = AtomicInteger()
+    val disconnects = AtomicInteger()
+    val dispatcher = VpnStopCommandDispatcher { fallbackCommands.incrementAndGet() }
+    val runtime =
+        VpnRuntimeStateTracker(
+            revokeVpn = dispatcher::dispatchStopCommand,
+            rejectVpnStart = {},
+        )
+    val writer = CapturingWantRunningWriter()
+    lateinit var coordinator: VpnServiceRunCoordinator
+    var requests = 0
+    coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+    val registration =
+        dispatcher.register {
+          stopCommands.incrementAndGet()
+          wantRunningFalseWrites.incrementAndGet()
+          coordinator.close { disconnects.incrementAndGet() }
+        }
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = {
+          runtime.revoke()
+          assertEquals(1, stopCommands.get())
+          assertEquals(1, wantRunningFalseWrites.get())
+          assertEquals(0, disconnects.get())
+          requests++
+        },
+        rejectStart = {},
+    )
+    writer.succeed()
+    runCurrent()
+    registration.unregister()
+
+    assertEquals(1, requests)
+    assertEquals(1, stopCommands.get())
+    assertEquals(0, fallbackCommands.get())
+    assertEquals(1, disconnects.get())
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+  }
+
+  @Test
+  fun idleRejectedStartUsesSeparateFailClosedCallback() {
+    val activeStopCommands = AtomicInteger()
+    val rejectedStarts = AtomicInteger()
+    val runtime =
+        VpnRuntimeStateTracker(
+            revokeVpn = { activeStopCommands.incrementAndGet() },
+            rejectVpnStart = { rejectedStarts.incrementAndGet() },
+        )
+
+    runtime.rejectStart()
+
+    assertEquals(0, activeStopCommands.get())
+    assertEquals(1, rejectedStarts.get())
+  }
+
+  @Test
   fun duplicateStartWhileWantRunningIsPendingIsCoalescedBeforeWriterFailure() = runTest {
     val runtime = VpnRuntimeStateTracker {}
     val writer = CapturingWantRunningWriter(throwOnCall = 2)
