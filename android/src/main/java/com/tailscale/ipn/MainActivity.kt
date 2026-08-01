@@ -80,9 +80,6 @@ import com.tailscale.ipn.ui.view.MDMSettingsDebugView
 import com.tailscale.ipn.ui.view.MainView
 import com.tailscale.ipn.ui.view.MainViewNavigation
 import com.tailscale.ipn.ui.view.ManagedByView
-import com.tailscale.ipn.ui.view.MullvadExitNodePicker
-import com.tailscale.ipn.ui.view.MullvadExitNodePickerList
-import com.tailscale.ipn.ui.view.MullvadInfoView
 import com.tailscale.ipn.ui.view.NotificationsView
 import com.tailscale.ipn.ui.view.PeerDetails
 import com.tailscale.ipn.ui.view.PermissionsView
@@ -339,10 +336,10 @@ class MainActivity : ComponentActivity() {
                             navController.popBackStack(route = "main", inclusive = false)
                           },
                           onNavigateBackToExitNodes = backTo("exitNodes"),
-                          onNavigateToMullvad = { navController.navigate("mullvad") },
-                          onNavigateToMullvadInfo = { navController.navigate("mullvad_info") },
-                          onNavigateBackToMullvad = backTo("mullvad"),
-                          onNavigateToMullvadCountry = { navController.navigate("mullvad/$it") },
+                          onNavigateToMullvad = {},
+                          onNavigateToMullvadInfo = {},
+                          onNavigateBackToMullvad = {},
+                          onNavigateToMullvadCountry = {},
                           onNavigateToRunAsExitNode = { navController.navigate("runExitNode") })
                   val userSwitcherNav =
                       UserSwitcherNav(
@@ -374,15 +371,6 @@ class MainActivity : ComponentActivity() {
                     ExitNodePicker(exitNodePickerNav, stardomSessionController.accessState)
                   }
                   composable("health") { HealthView(backTo("main")) }
-                  composable("mullvad") { MullvadExitNodePickerList(exitNodePickerNav) }
-                  composable("mullvad_info") { MullvadInfoView(exitNodePickerNav) }
-                  composable(
-                      "mullvad/{countryCode}",
-                      arguments =
-                          listOf(navArgument("countryCode") { type = NavType.StringType })) {
-                        MullvadExitNodePicker(
-                            it.arguments!!.getString("countryCode")!!, exitNodePickerNav)
-                      }
                   composable("runExitNode") { RunExitNodeView(exitNodePickerNav) }
                   composable(
                       "peerDetails/{nodeId}",

@@ -109,8 +109,8 @@ class Tailcfg {
     // These checks are intentionally redundant to avoid false negatives.
     val isMullvadNode: Boolean
       get() =
-          Name.endsWith(".mullvad.ts.net") ||
-              ComputedName?.endsWith(".mullvad.ts.net") == true ||
+          Name.trimEnd('.').endsWith(".mullvad.ts.net") ||
+              ComputedName?.trimEnd('.')?.endsWith(".mullvad.ts.net") == true ||
               Hostinfo.Location != null
 
     val displayName: String

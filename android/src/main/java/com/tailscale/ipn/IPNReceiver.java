@@ -16,7 +16,7 @@ import androidx.work.WorkManager;
 import java.util.Objects;
 
 /**
- * IPNReceiver allows external applications to start the VPN.
+ * Package-scoped receiver for explicit notification/internal helper intents.
  */
 public class IPNReceiver extends BroadcastReceiver {
 

@@ -10,17 +10,13 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.tailscale.ipn.UninitializedApp.Companion.STATUS_CHANNEL_ID
-import com.tailscale.ipn.ui.localapi.Client
-import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.ui.notifier.Notifier
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 
 class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
     CoroutineWorker(appContext, workerParams) {
   override suspend fun doWork(): Result {
-    val app = UninitializedApp.get()
+    val app = App.get()
     suspend fun runAndGetResult(): String? {
       val exitNodeName = inputData.getString(EXIT_NODE_NAME)
 
@@ -48,7 +44,7 @@ class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
               return app.getString(R.string.no_peers_with_name_found, exitNodeName)
             } else if (filteredPeers.size > 1) {
               return app.getString(R.string.multiple_peers_with_name_found, exitNodeName)
-            } else if (!filteredPeers[0].isExitNode) {
+            } else if (!isStardomExitNodeCandidate(filteredPeers[0])) {
               return app.getString(R.string.peer_with_name_is_not_an_exit_node, exitNodeName)
             }
 
@@ -56,24 +52,11 @@ class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
           }
 
       val allowLanAccess = inputData.getBoolean(ALLOW_LAN_ACCESS, false)
-      val prefsOut = Ipn.MaskedPrefs()
-      prefsOut.ExitNodeID = exitNodeId
-      prefsOut.ExitNodeAllowLANAccess = allowLanAccess
+      val mutation =
+          exitNodeId?.let { ExitNodeMutation.Manual(it, allowLanAccess) }
+              ?: ExitNodeMutation.Clear(allowLanAccess)
 
-      val scope = CoroutineScope(Dispatchers.Default + Job())
-      var result: String? = null
-      Client(scope).editPrefs(prefsOut) {
-        result =
-            if (it.isFailure) {
-              it.exceptionOrNull()?.message
-            } else {
-              null
-            }
-      }
-
-      scope.coroutineContext[Job]?.join()
-
-      return result
+      return app.mutateExitNodePrefs(mutation).exceptionOrNull()?.message
     }
 
     val result = runAndGetResult()
@@ -110,3 +93,6 @@ class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
     const val ERROR_KEY = "error"
   }
 }
+
+internal fun isStardomExitNodeCandidate(node: com.tailscale.ipn.ui.model.Tailcfg.Node): Boolean =
+    node.isExitNode && !node.isMullvadNode

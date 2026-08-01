@@ -9,6 +9,8 @@ import android.os.Build;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
 
+import com.tailscale.ipn.product.policy.VpnStartOrigin;
+
 public class QuickToggleService extends TileService {
     // lock protects the static fields below it.
     private static final Object lock = new Object();
@@ -90,7 +92,7 @@ public class QuickToggleService extends TileService {
       } else {
           boolean vpnPrepared = App.get().getAppScopedViewModel().getVpnPrepared().getValue();
           if (vpnPrepared) {
-              app.startVPN();
+              app.startVPN(VpnStartOrigin.QuickSettings);
           } else {
               launchMainActivity();
           }

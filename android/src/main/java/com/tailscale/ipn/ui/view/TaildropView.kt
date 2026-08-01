@@ -3,6 +3,8 @@
 
 package com.tailscale.ipn.ui.view
 
+import android.content.Context
+import android.content.Intent
 import android.text.format.Formatter
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.tailscale.ipn.MainActivity
 import com.tailscale.ipn.R
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Tailcfg
@@ -51,6 +54,7 @@ fun TaildropView(
 ) {
   val TAG = "TaildropView"
   val focusRequester = remember { FocusRequester() }
+  val context = LocalContext.current
 
   // Automatically request focus when the composable is displayed
   LaunchedEffect(Unit) {
@@ -74,7 +78,6 @@ fun TaildropView(
     when (viewModel.state.collectAsState().value) {
       Ipn.State.Running -> {
         val peers by viewModel.myPeers.collectAsState()
-        val context = LocalContext.current
         FileSharePeerList(
             peers = peers,
             stateViewGenerator = { peerId -> viewModel.TrailingContentForPeer(peerId = peerId) },
@@ -82,11 +85,14 @@ fun TaildropView(
         )
       }
       else -> {
-        FileShareConnectView { viewModel.startVPN() }
+        FileShareConnectView { context.startActivity(stardomMainFlowIntent(context)) }
       }
     }
   }
 }
+
+fun stardomMainFlowIntent(context: Context): Intent =
+    Intent(context, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
 
 @Composable
 fun FileSharePeerList(

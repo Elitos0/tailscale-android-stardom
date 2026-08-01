@@ -4,6 +4,8 @@
 package com.tailscale.ipn.ui.viewModel
 
 import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.ExitNodeMutation
+import com.tailscale.ipn.product.policy.ExitNodeMutationBoundary
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.Tailcfg
@@ -21,6 +23,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.ArgumentMatchers.anyString
@@ -108,30 +111,25 @@ class ExitNodePickerViewModelTest {
   }
 
   @Test
-  fun selectingAutoSendsNativeAutoExpressionWithoutStableNodeId() = runTest {
-    var sent: Ipn.MaskedPrefs? = null
+  fun selectingAutoUsesTheNativeAutoMutationCommand() = runTest {
+    val boundary = CapturingMutationBoundary()
     val viewModel =
         ExitNodePickerViewModel(
             nav = testNavigation,
             accessState = MutableStateFlow(AccessState.Active(emptySet())),
-            editPrefsOverride = { prefs, callback ->
-              sent = prefs
-              callback(Result.success(Ipn.Prefs()))
-            },
+            mutationBoundaryOverride = boundary,
         )
 
     viewModel.setAutoExitNode()
+    advanceUntilIdle()
 
-    assertEquals("any", sent?.AutoExitNode)
-    assertEquals(true, sent?.AutoExitNodeSet)
-    assertNull(sent?.ExitNodeID)
-    assertNull(sent?.ExitNodeIDSet)
+    assertEquals(listOf(ExitNodeMutation.Auto()), boundary.mutations)
   }
 
   @Test
   fun selectingManualExitNodeKeepsExistingStableNodePreferencePath() = runTest {
-    var sent: Ipn.MaskedPrefs? = null
-    val viewModel = pickerViewModelCapturing { sent = it }
+    val boundary = CapturingMutationBoundary()
+    val viewModel = pickerViewModelCapturing(boundary)
 
     viewModel.setExitNode(
         ExitNodePickerViewModel.ExitNode(
@@ -140,17 +138,15 @@ class ExitNodePickerViewModelTest {
             online = MutableStateFlow(true),
             selected = false,
         ))
+    advanceUntilIdle()
 
-    assertEquals("node-a", sent?.ExitNodeID)
-    assertEquals(true, sent?.ExitNodeIDSet)
-    assertNull(sent?.AutoExitNode)
-    assertNull(sent?.AutoExitNodeSet)
+    assertEquals(listOf(ExitNodeMutation.Manual("node-a")), boundary.mutations)
   }
 
   @Test
   fun clearingExitNodeKeepsExistingStableNodeClearPath() = runTest {
-    var sent: Ipn.MaskedPrefs? = null
-    val viewModel = pickerViewModelCapturing { sent = it }
+    val boundary = CapturingMutationBoundary()
+    val viewModel = pickerViewModelCapturing(boundary)
 
     viewModel.setExitNode(
         ExitNodePickerViewModel.ExitNode(
@@ -158,23 +154,134 @@ class ExitNodePickerViewModelTest {
             online = MutableStateFlow(true),
             selected = false,
         ))
+    advanceUntilIdle()
 
-    assertNull(sent?.ExitNodeID)
-    assertEquals(true, sent?.ExitNodeIDSet)
-    assertNull(sent?.AutoExitNode)
-    assertNull(sent?.AutoExitNodeSet)
+    assertEquals(listOf(ExitNodeMutation.Clear()), boundary.mutations)
+  }
+
+  @Test
+  fun deniedManualSelectionRemainsInsideApplicationMutationBoundary() = runTest {
+    DenyingMutationBoundary.calls = 0
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(setOf("node-a"))),
+            mutationBoundaryOverride = DenyingMutationBoundary,
+        )
+
+    viewModel.setExitNode(
+        ExitNodePickerViewModel.ExitNode(
+            id = "node-a",
+            label = "Alpha",
+            online = MutableStateFlow(true),
+            selected = false,
+        ))
+    advanceUntilIdle()
+
+    assertEquals(1, DenyingMutationBoundary.calls)
+  }
+
+  @Test
+  fun mullvadSelectionNeverReachesBoundaryOrWriterEvenIfPolicyContainsItsId() = runTest {
+    var authorizations = 0
+    val boundary =
+        object : ExitNodeMutationBoundary {
+          override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> {
+            authorizations++
+            return Result.success(Unit)
+          }
+        }
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(setOf("mullvad-node"))),
+            mutationBoundaryOverride = boundary,
+        )
+
+    viewModel.setExitNode(
+        ExitNodePickerViewModel.ExitNode(
+            id = "mullvad-node",
+            label = "Mullvad",
+            online = MutableStateFlow(true),
+            selected = false,
+            mullvad = true,
+        ))
+    advanceUntilIdle()
+
+    assertEquals(0, authorizations)
+  }
+
+  @Test
+  fun lanToggleThatWouldRetainExitNodeUsesTheSameMutationBoundary() = runTest {
+    val seen = mutableListOf<ExitNodeMutation>()
+    val boundary =
+        object : ExitNodeMutationBoundary {
+          override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> {
+            seen += mutation
+            return Result.failure(IllegalStateException("revoked"))
+          }
+        }
+    var result: Result<Ipn.Prefs>? = null
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(setOf("node-a"))),
+            prefsFlow = MutableStateFlow(Ipn.Prefs(ExitNodeID = "node-a")),
+            mutationBoundaryOverride = boundary,
+        )
+
+    viewModel.toggleAllowLANAccess { result = it }
+    advanceUntilIdle()
+
+    assertEquals(listOf(ExitNodeMutation.Manual("node-a", allowLanAccess = true)), seen)
+    assertTrue(result?.isFailure == true)
+  }
+
+  @Test
+  fun stardomNeverPublishesMullvadNodesOrMullvadInfo() = runTest {
+    val mullvad =
+        exitNode("mullvad-node", "de-fra-wg-001").copy(Name = "de-fra-wg-001.mullvad.ts.net.")
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(setOf("mullvad-node"))),
+            netmapFlow = MutableStateFlow(networkMap(mullvad)),
+            prefsFlow =
+                MutableStateFlow(Ipn.Prefs(ControlURL = "https://controlplane.tailscale.com")),
+        )
+
+    advanceUntilIdle()
+
+    assertTrue(viewModel.mullvadExitNodesByCountryCode.value.isEmpty())
+    assertEquals(0, viewModel.mullvadExitNodeCount.value)
+    assertFalse(viewModel.shouldShowMullvadInfo.value)
   }
 }
 
-private fun pickerViewModelCapturing(capture: (Ipn.MaskedPrefs) -> Unit) =
+private fun pickerViewModelCapturing(boundary: ExitNodeMutationBoundary) =
     ExitNodePickerViewModel(
         nav = testNavigation,
         accessState = MutableStateFlow(AccessState.Active(emptySet())),
-        editPrefsOverride = { prefs, callback ->
-          capture(prefs)
-          callback(Result.success(Ipn.Prefs()))
-        },
+        mutationBoundaryOverride = boundary,
     )
+
+private class CapturingMutationBoundary : ExitNodeMutationBoundary {
+  val mutations = mutableListOf<ExitNodeMutation>()
+
+  override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> {
+    mutations += mutation
+    return Result.success(Unit)
+  }
+}
+
+private object DenyingMutationBoundary : ExitNodeMutationBoundary {
+  var calls = 0
+
+  override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> {
+    calls++
+    return Result.failure(IllegalStateException("denied"))
+  }
+}
 
 private val testNavigation =
     ExitNodePickerNav(

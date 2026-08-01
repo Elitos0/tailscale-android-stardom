@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -258,7 +259,7 @@ class AllowedSuggestedExitNodePolicyTest {
     runCurrent()
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "  ")
     runCurrent()
-    fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "foreign-node")
+    fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a")
     runCurrent()
 
     assertEquals(1, fixture.revocations)
@@ -283,7 +284,193 @@ class AllowedSuggestedExitNodePolicyTest {
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "node-a")
     assertEquals(true, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "foreign-node")
+    assertEquals(false, fixture.controller.isVpnStartAllowed(active))
+    fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a")
     assertEquals(true, fixture.controller.isVpnStartAllowed(active))
+  }
+
+  @Test
+  fun disallowedManualSelectionIsClearedAndStopsRunningTunnel() = runTest {
+    val events = mutableListOf<String>()
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a"),
+            runtimeState = VpnRuntimeState.Running,
+            onRevoke = { events += "revoke" },
+            onClear = { events += "clear" },
+        )
+
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(listOf("revoke", "clear"), events)
+    assertEquals(1, fixture.revocations)
+    assertEquals(1, fixture.clears)
+  }
+
+  @Test
+  fun staleAutoSelectionRevokesButPreservesNativeAutoModeForFailover() = runTest {
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "node-a"),
+            runtimeState = VpnRuntimeState.Running,
+        )
+
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(1, fixture.revocations)
+    assertEquals(0, fixture.clears)
+  }
+
+  @Test
+  fun unknownPrefsAndMdmForcedManualSelectionAreNeverCleared() = runTest {
+    val unknownPrefs =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-a")),
+            prefs = null,
+            runtimeState = VpnRuntimeState.Running,
+        )
+    val mdmForced =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(ExitNodeID = "node-a"),
+            runtimeState = VpnRuntimeState.Running,
+            canClear = false,
+        )
+
+    unknownPrefs.controller.start(backgroundScope)
+    mdmForced.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(0, unknownPrefs.clears)
+    assertEquals(0, mdmForced.clears)
+    assertEquals(1, unknownPrefs.revocations)
+    assertEquals(1, mdmForced.revocations)
+  }
+
+  @Test
+  fun failedManualClearRetriesWithoutAnotherPolicyEmission() = runTest {
+    var clearAttempts = 0
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(ExitNodeID = "node-a"),
+            onClearResult = {
+              clearAttempts++
+              if (clearAttempts == 1) Result.failure(IllegalStateException("write failed"))
+              else Result.success(Unit)
+            },
+        )
+
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+    advanceTimeBy(251)
+    runCurrent()
+
+    assertEquals(2, fixture.clears)
+  }
+
+  @Test
+  fun persistentlyFailingManualClearHasABoundedRetryCount() = runTest {
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(ExitNodeID = "node-a"),
+            onClearResult = { Result.failure(IllegalStateException("still failing")) },
+        )
+
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+    advanceTimeBy(2_000)
+    runCurrent()
+
+    assertEquals(3, fixture.clears)
+  }
+
+  @Test
+  fun safeTransitionResetsBoundedClearRetryBudgetForLaterRecurrence() = runTest {
+    var attempts = 0
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(ExitNodeID = "node-a"),
+            onClearResult = {
+              attempts++
+              if (attempts <= 4) Result.failure(IllegalStateException("transient"))
+              else Result.success(Unit)
+            },
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+    advanceTimeBy(1_000)
+    runCurrent()
+    assertEquals(3, fixture.clears)
+
+    fixture.prefs.value = Ipn.Prefs(ExitNodeID = "node-b")
+    runCurrent()
+    fixture.prefs.value = Ipn.Prefs(ExitNodeID = "node-a")
+    runCurrent()
+    advanceTimeBy(251)
+    runCurrent()
+
+    assertEquals(5, fixture.clears)
+  }
+
+  @Test
+  fun removingMdmForcedExitNodeTriggersMutableManualClear() = runTest {
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-b")),
+            prefs = Ipn.Prefs(ExitNodeID = "node-a"),
+            canClear = false,
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+    assertEquals(0, fixture.clears)
+
+    fixture.forcedExitNode.value = SettingState(null, false)
+    runCurrent()
+
+    assertEquals(1, fixture.clears)
+  }
+
+  @Test
+  fun mdmIntersectionRejectsManualMutationOutsideEffectiveCandidates() {
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-a", "node-b")),
+        )
+    fixture.mdm.value = SettingState(listOf("node-b"), true)
+    val active = AccessState.Active(setOf("node-a", "node-b"))
+
+    assertEquals(
+        false,
+        fixture.controller.isExitNodeMutationAllowed(active, ExitNodeMutation.Manual("node-a")),
+    )
+    assertEquals(
+        true,
+        fixture.controller.isExitNodeMutationAllowed(active, ExitNodeMutation.Manual("node-b")),
+    )
+    assertEquals(
+        true,
+        fixture.controller.isExitNodeMutationAllowed(active, ExitNodeMutation.Auto()),
+    )
+    assertEquals(
+        false,
+        fixture.controller.isExitNodeMutationAllowed(active, ExitNodeMutation.Manual("auto:any")),
+    )
   }
 
   @Test
@@ -510,10 +697,15 @@ class AllowedSuggestedExitNodePolicyTest {
           AllowedSuggestedExitNodePolicyController.Companion::encodeJSON,
       onNotify: () -> Unit = {},
       onRevoke: () -> Unit = {},
+      onClear: () -> Unit = {},
+      onClearResult: () -> Result<Unit> = { Result.success(Unit) },
+      canClear: Boolean = true,
   ): Fixture {
     val authentikFlow = MutableStateFlow(authentik)
     val accessFlow = MutableStateFlow(access)
     val mdmFlow = MutableStateFlow(SettingState<List<String>?>(null, false))
+    val forcedExitNodeFlow =
+        MutableStateFlow(SettingState<String?>(if (canClear) null else "forced-node", !canClear))
     val prefsFlow = MutableStateFlow(prefs)
     val runtimeFlow =
         MutableStateFlow(
@@ -523,11 +715,13 @@ class AllowedSuggestedExitNodePolicyTest {
             ))
     var notifications = 0
     var revocations = 0
+    var clears = 0
     val controller =
         AllowedSuggestedExitNodePolicyController(
             authentikState = authentikFlow,
             accessState = accessFlow,
             mdmAllowedSuggestedExitNodes = mdmFlow,
+            mdmForcedExitNodeId = forcedExitNodeFlow,
             prefs = prefsFlow,
             runtimeSnapshot = runtimeFlow,
             notifyPolicyChanged = {
@@ -538,6 +732,11 @@ class AllowedSuggestedExitNodePolicyTest {
               revocations++
               onRevoke()
             },
+            clearDisallowedExitNode = { complete ->
+              clears++
+              onClear()
+              complete(onClearResult())
+            },
             candidateMapper = candidateMapper,
             jsonEncoder = jsonEncoder,
         )
@@ -546,10 +745,12 @@ class AllowedSuggestedExitNodePolicyTest {
         authentikFlow,
         accessFlow,
         mdmFlow,
+        forcedExitNodeFlow,
         prefsFlow,
         runtimeFlow,
         notificationCount = { notifications },
         revocationCount = { revocations },
+        clearCount = { clears },
     )
   }
 
@@ -558,15 +759,20 @@ class AllowedSuggestedExitNodePolicyTest {
       val authentik: MutableStateFlow<AuthentikState>,
       val access: MutableStateFlow<AccessState>,
       val mdm: MutableStateFlow<SettingState<List<String>?>>,
+      val forcedExitNode: MutableStateFlow<SettingState<String?>>,
       val prefs: MutableStateFlow<Ipn.Prefs?>,
       val runtime: MutableStateFlow<VpnRuntimeSnapshot>,
       private val notificationCount: () -> Int,
       private val revocationCount: () -> Int,
+      private val clearCount: () -> Int,
   ) {
     val notifications: Int
       get() = notificationCount()
 
     val revocations: Int
       get() = revocationCount()
+
+    val clears: Int
+      get() = clearCount()
   }
 }

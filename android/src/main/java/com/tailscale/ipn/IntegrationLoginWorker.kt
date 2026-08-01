@@ -6,6 +6,7 @@ package com.tailscale.ipn
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.util.TSLog
@@ -53,12 +54,12 @@ class IntegrationLoginWorker(context: Context, params: WorkerParameters) :
         }
 
     val prefs = await<Ipn.Prefs> { client.editPrefs(maskedPrefs, it) }.getOrThrow()
-    prefs.WantRunning = true
+    prefs.WantRunning = false
 
     val opts = Ipn.Options(UpdatePrefs = prefs, AuthKey = authKey)
     await<Unit> { client.start(opts, it) }.getOrThrow()
     await<Unit> { client.startLoginInteractive(it) }.getOrThrow()
-    app.startVPN()
+    app.startVPN(VpnStartOrigin.InternalWorker)
   }
 
   private suspend fun <T> await(call: ((kotlin.Result<T>) -> Unit) -> Unit): kotlin.Result<T> {

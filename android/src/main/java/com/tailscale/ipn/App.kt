@@ -32,6 +32,8 @@ import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
+import com.tailscale.ipn.product.policy.ExitNodeMutation
+import com.tailscale.ipn.product.policy.ExitNodePreferenceWriter
 import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
 import com.tailscale.ipn.product.policy.SyspolicyStringArrayJSONBridge
 import com.tailscale.ipn.product.policy.VpnEntitlementController
@@ -101,6 +103,15 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
           ::allowedSuggestedExitNodePolicyController.isInitialized &&
               allowedSuggestedExitNodePolicyController.isVpnStartAllowed(activeAccess)
         },
+        exitNodeMutationPolicyGuard = { activeAccess, mutation ->
+          ::allowedSuggestedExitNodePolicyController.isInitialized &&
+              allowedSuggestedExitNodePolicyController.isExitNodeMutationAllowed(
+                  activeAccess, mutation)
+        },
+        exitNodePreferenceWriter =
+            ExitNodePreferenceWriter { prefs, complete ->
+              Client(applicationScope).editPrefs(prefs) { result -> complete(result.map { Unit }) }
+            },
     )
   }
   val vpnStartDispatchBoundary: VpnStartDispatchBoundary by lazy {
@@ -293,11 +304,15 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             authentikState = sessionController.authentikState,
             accessState = sessionController.accessState,
             mdmAllowedSuggestedExitNodes = MDMSettings.allowedSuggestedExitNodes.flow,
+            mdmForcedExitNodeId = MDMSettings.exitNodeID.flow,
             prefs = Notifier.prefs,
             runtimeSnapshot = vpnRuntimeTracker.snapshot,
             notifyPolicyChanged = ::notifyPolicyChanged,
             revokeDisallowedAutoExitNode = {
               vpnEntitlementController.revokeDisallowedAutoExitNode()
+            },
+            clearDisallowedExitNode = { complete ->
+              applicationScope.launch { complete(mutateExitNodePrefs(ExitNodeMutation.Clear())) }
             },
             onCallbackError = { operation, error ->
               TSLog.e(
@@ -327,6 +342,9 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     }
     serializedWantRunningWriter.write(wantRunning, callback)
   }
+
+  suspend fun mutateExitNodePrefs(mutation: ExitNodeMutation): Result<Unit> =
+      vpnEntitlementController.mutateExitNode(mutation)
   // encryptToPref a byte array of data using the Jetpack Security
   // library and writes it to a global encrypted preference store.
   @Throws(IOException::class, GeneralSecurityException::class)
@@ -680,34 +698,37 @@ open class UninitializedApp : Application() {
   @JvmOverloads
   fun startVPN(origin: VpnStartOrigin = VpnStartOrigin.AppStart) {
     val initializedApp = this as? App ?: return
-    initializedApp.applicationScope.launch {
-      when (val result =
-          initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
-            val intent =
-                Intent(initializedApp, IPNService::class.java).apply {
-                  action = IPNService.ACTION_START_VPN
-                }
-            // FLAG_UPDATE_CURRENT ensures that if the intent is already pending, the existing
-            // intent will be updated rather than creating multiple redundant instances.
-            val pendingIntent =
-                PendingIntent.getForegroundService(
-                    initializedApp,
-                    0,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or
-                        PendingIntent.FLAG_IMMUTABLE // FLAG_IMMUTABLE for Android 12+
-                    )
-            pendingIntent.send()
-          }) {
-        VpnStartDispatchResult.Denied,
-        VpnStartDispatchResult.Dispatched -> Unit
-        is VpnStartDispatchResult.Failed -> {
-          when (val error = result.error) {
-            is IllegalStateException ->
-                TSLog.e(TAG, "startVPN hit ForegroundServiceStartNotAllowedException: $error")
-            is SecurityException -> TSLog.e(TAG, "startVPN hit SecurityException: $error")
-            else -> TSLog.e(TAG, "startVPN hit exception: $error")
+    initializedApp.applicationScope.launch { logVpnStartResult(startVPNIfAuthorized(origin)) }
+  }
+
+  suspend fun startVPNIfAuthorized(origin: VpnStartOrigin): VpnStartDispatchResult {
+    val initializedApp = this as? App ?: return VpnStartDispatchResult.Denied
+    return initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
+      val intent =
+          Intent(initializedApp, IPNService::class.java).apply {
+            action = IPNService.ACTION_START_VPN
           }
+      val pendingIntent =
+          PendingIntent.getForegroundService(
+              initializedApp,
+              0,
+              intent,
+              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+          )
+      pendingIntent.send()
+    }
+  }
+
+  private fun logVpnStartResult(result: VpnStartDispatchResult) {
+    when (result) {
+      VpnStartDispatchResult.Denied,
+      VpnStartDispatchResult.Dispatched -> Unit
+      is VpnStartDispatchResult.Failed -> {
+        when (val error = result.error) {
+          is IllegalStateException ->
+              TSLog.e(TAG, "startVPN hit ForegroundServiceStartNotAllowedException: $error")
+          is SecurityException -> TSLog.e(TAG, "startVPN hit SecurityException: $error")
+          else -> TSLog.e(TAG, "startVPN hit exception: $error")
         }
       }
     }

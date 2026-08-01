@@ -6,8 +6,10 @@ package com.tailscale.ipn.ui.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.tailscale.ipn.App
 import com.tailscale.ipn.product.policy.AccessState
-import com.tailscale.ipn.ui.localapi.Client
+import com.tailscale.ipn.product.policy.ExitNodeMutation
+import com.tailscale.ipn.product.policy.ExitNodeMutationBoundary
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.StableNodeID
@@ -46,7 +48,7 @@ class ExitNodePickerViewModel(
     private val accessState: StateFlow<AccessState>,
     private val netmapFlow: StateFlow<Netmap.NetworkMap?> = Notifier.netmap,
     private val prefsFlow: StateFlow<Ipn.Prefs?> = Notifier.prefs,
-    private val editPrefsOverride: ((Ipn.MaskedPrefs, (Result<Ipn.Prefs>) -> Unit) -> Unit)? = null,
+    private val mutationBoundaryOverride: ExitNodeMutationBoundary? = null,
 ) : IpnViewModel(observeUserProfiles = false) {
   data class ExitNode(
       val id: StableNodeID? = null,
@@ -104,7 +106,7 @@ class ExitNodePickerViewModel(
                             label = it.displayName,
                             online = MutableStateFlow(it.Online ?: false),
                             selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
-                            mullvad = it.Name.endsWith(".mullvad.ts.net."),
+                            mullvad = it.isMullvadNode,
                             priority = it.Hostinfo.Location?.Priority ?: 0,
                             countryCode = it.Hostinfo.Location?.CountryCode ?: "",
                             country = it.Hostinfo.Location?.Country ?: "",
@@ -117,49 +119,6 @@ class ExitNodePickerViewModel(
               val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
               tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
 
-              val allMullvadExitNodes =
-                  allNodes.filter { node ->
-                    // Pick all mullvad nodes that are online or the currently selected
-                    val online = node.online.value
-                    node.mullvad && (node.selected || online)
-                  }
-              val mullvadExitNodes =
-                  allMullvadExitNodes
-                      .groupBy {
-                        // Group by countryCode
-                        it.countryCode
-                      }
-                      .mapValues { (_, nodes) ->
-                        // Group by city
-                        nodes
-                            .groupBy { it.city }
-                            .mapValues { (_, nodes) ->
-                              // Pick one node per city, either the selected one or the best
-                              // available
-                              nodes
-                                  .sortedWith { a, b ->
-                                    if (a.selected && !b.selected) {
-                                      -1
-                                    } else if (b.selected && !a.selected) {
-                                      1
-                                    } else {
-                                      b.priority.compareTo(a.priority)
-                                    }
-                                  }
-                                  .first()
-                            }
-                            .values
-                            .sortedBy { it.city.lowercase() }
-                      }
-              mullvadExitNodesByCountryCode.set(mullvadExitNodes)
-              mullvadExitNodeCount.set(allMullvadExitNodes.size)
-
-              val bestAvailableByCountry =
-                  mullvadExitNodes.mapValues { (_, nodes) ->
-                    nodes.minByOrNull { -1 * it.priority }!!
-                  }
-              mullvadBestAvailableByCountry.set(bestAvailableByCountry)
-
               val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
               autoExitNode.set(
                   AutoExitNode(
@@ -168,47 +127,61 @@ class ExitNodePickerViewModel(
                       effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
                   ))
               anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
-
-              prefs?.let { prefs ->
-                // Only show the Mullvad info view if the user is an admin and is using a Tailscale
-                // control server, as it wouldn't be actionable information otherwise.
-                shouldShowMullvadInfo.set(
-                    netmap.SelfNode.isAdmin && prefs.ControlURL.endsWith(".tailscale.com"))
-              }
             }
           }
     }
   }
 
   fun setExitNode(node: ExitNode) {
-    setExitNodePrefs(Ipn.MaskedPrefs().apply { ExitNodeID = node.id })
+    if (node.mullvad) return
+    val nodeId = node.id?.trim().orEmpty()
+    val mutation =
+        if (nodeId.isEmpty()) ExitNodeMutation.Clear() else ExitNodeMutation.Manual(nodeId)
+    setExitNodePrefs(mutation)
   }
 
   fun setAutoExitNode() {
-    setExitNodePrefs(Ipn.MaskedPrefs().apply { AutoExitNode = "any" })
+    setExitNodePrefs(ExitNodeMutation.Auto())
   }
 
-  private fun setExitNodePrefs(prefs: Ipn.MaskedPrefs) {
+  private fun setExitNodePrefs(mutation: ExitNodeMutation) {
     LoadingIndicator.start()
-    val callback: (Result<Ipn.Prefs>) -> Unit = {
-      nav.onNavigateBackHome()
+    viewModelScope.launch {
+      val result = mutationBoundary().mutateExitNode(mutation)
+      if (result.isSuccess) nav.onNavigateBackHome()
       LoadingIndicator.stop()
     }
-    editPrefsOverride?.invoke(prefs, callback) ?: Client(viewModelScope).editPrefs(prefs, callback)
   }
 
   fun toggleAllowLANAccess(callback: (Result<Ipn.Prefs>) -> Unit) {
     val prefs =
-        Notifier.prefs.value
+        prefsFlow.value
             ?: run {
               callback(Result.failure(Exception("no prefs")))
               return@toggleAllowLANAccess
             }
 
-    val prefsOut = Ipn.MaskedPrefs()
-    prefsOut.ExitNodeAllowLANAccess = !prefs.ExitNodeAllowLANAccess
-    Client(viewModelScope).editPrefs(prefsOut, callback)
+    val allowLanAccess = !prefs.ExitNodeAllowLANAccess
+    val mutation =
+        when {
+          prefs.AutoExitNode == "any" -> ExitNodeMutation.Auto(allowLanAccess)
+          !prefs.activeExitNodeID.isNullOrBlank() ->
+              ExitNodeMutation.Manual(checkNotNull(prefs.activeExitNodeID), allowLanAccess)
+          !prefs.selectedExitNodeID.isNullOrBlank() ->
+              ExitNodeMutation.Manual(checkNotNull(prefs.selectedExitNodeID), allowLanAccess)
+          else -> ExitNodeMutation.Clear(allowLanAccess)
+        }
+    viewModelScope.launch {
+      val result = mutationBoundary().mutateExitNode(mutation)
+      result.fold(
+          onSuccess = { callback(Result.success(prefs)) },
+          onFailure = { callback(Result.failure(it)) },
+      )
+    }
   }
+
+  private fun mutationBoundary(): ExitNodeMutationBoundary =
+      mutationBoundaryOverride ?: App.get().vpnEntitlementController
 }
 
 val List<ExitNodePickerViewModel.ExitNode>.selected

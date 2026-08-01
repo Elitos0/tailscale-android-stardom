@@ -4,10 +4,13 @@
 package com.tailscale.ipn.product.policy
 
 import com.tailscale.ipn.product.auth.AuthentikState
+import com.tailscale.ipn.ui.model.Ipn
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +23,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class VpnStartOrigin {
   PermissionRequest,
@@ -30,7 +35,44 @@ enum class VpnStartOrigin {
   ServiceRestart,
   AlwaysOn,
   StickyRestart,
+  QuickSettings,
+  InternalWorker,
 }
+
+sealed interface ExitNodeMutation {
+  val allowLanAccess: Boolean?
+
+  data class Clear(override val allowLanAccess: Boolean? = null) : ExitNodeMutation
+
+  data class Auto(override val allowLanAccess: Boolean? = null) : ExitNodeMutation
+
+  data class Manual(
+      val nodeId: String,
+      override val allowLanAccess: Boolean? = null,
+  ) : ExitNodeMutation
+}
+
+fun interface ExitNodeMutationPolicyGuard {
+  fun isAllowed(activeAccess: AccessState.Active, mutation: ExitNodeMutation): Boolean
+
+  companion object {
+    val DenySelections = ExitNodeMutationPolicyGuard { _, mutation ->
+      mutation is ExitNodeMutation.Clear
+    }
+  }
+}
+
+interface ExitNodeMutationBoundary {
+  suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit>
+}
+
+fun interface ExitNodePreferenceWriter {
+  fun write(prefs: Ipn.MaskedPrefs, onComplete: (Result<Unit>) -> Unit)
+}
+
+class ExitNodeMutationDeniedException : IllegalStateException("exit-node mutation denied")
+
+class ExitNodeMutationTimeoutException : IllegalStateException("exit-node mutation timed out")
 
 enum class VpnRuntimeState {
   Idle,
@@ -429,14 +471,30 @@ class VpnRequestBoundary(private val authorizer: VpnStartAuthorizer) {
 class VpnEntitlementController(
     private val decisionSource: VpnEntitlementDecisionSource,
     private val runtime: VpnEntitlementRuntime,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     refreshInterval: Duration = Duration.ofSeconds(30),
     private val startPolicyGuard: VpnStartPolicyGuard = VpnStartPolicyGuard.AllowAll,
-) : VpnStartAuthorizer {
+    private val exitNodeMutationPolicyGuard: ExitNodeMutationPolicyGuard =
+        ExitNodeMutationPolicyGuard.DenySelections,
+    private val beforeExitNodeMutationWrite: suspend () -> Unit = {},
+    private val exitNodeMutationTimeout: Duration = Duration.ofSeconds(35),
+    private val exitNodePreferenceWriter: ExitNodePreferenceWriter =
+        ExitNodePreferenceWriter { _, complete ->
+          complete(Result.failure(IllegalStateException("exit-node writer unavailable")))
+        },
+) : VpnStartAuthorizer, ExitNodeMutationBoundary {
   private val decisionMutex = Mutex()
+  private val exitNodeMutationWriteMutex = Mutex()
   private val revocationMutex = Mutex()
   private val refreshIntervalMillis = refreshInterval.toMillis().coerceAtLeast(1)
+  private val exitNodeMutationTimeoutMillis = exitNodeMutationTimeout.toMillis().coerceAtLeast(1)
   private var revokedForCurrentRun = false
+  private var exitNodeMutationStateUncertain = false
+
+  private data class MutationDispatchOutcome(
+      val result: Result<Unit>,
+      val completion: CompletableDeferred<Result<Unit>>?,
+  )
 
   init {
     scope.launch {
@@ -468,7 +526,7 @@ class VpnEntitlementController(
   }
 
   override suspend fun authorizeStart(origin: VpnStartOrigin): Boolean {
-    val active = freshActiveAccess(origin) != null
+    val active = freshActiveAccess(origin, requireStartPolicy = true) != null
     if (active && runtime.state.value == VpnRuntimeState.Idle) {
       resetRevocationGuard()
     } else if (!active && runtime.state.value.isStartingOrRunning()) {
@@ -489,19 +547,239 @@ class VpnEntitlementController(
     runtime.revoke()
   }
 
+  suspend fun authorizeExitNodeMutation(nodeId: String?): Boolean {
+    val normalized = nodeId?.trim().orEmpty()
+    if (normalized.isEmpty()) return true
+    return try {
+      decisionMutex.withLock {
+        authorizeExitNodeMutationLocked(ExitNodeMutation.Manual(normalized))
+      }
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  suspend fun authorizeAutoExitNodeMutation(): Boolean =
+      try {
+        decisionMutex.withLock { authorizeExitNodeMutationLocked(ExitNodeMutation.Auto()) }
+      } catch (_: Throwable) {
+        false
+      }
+
+  override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> =
+      exitNodeMutationWriteMutex.withLock {
+        // Once a LocalAPI PATCH has been dispatched, keep this independent write fence until its
+        // callback arrives even if the caller is cancelled. A later mutation cannot overtake it.
+        withContext(NonCancellable) {
+          val normalizedMutation = mutation.normalized()
+          if (exitNodeMutationStateUncertain) {
+            return@withContext Result.failure(ExitNodeMutationDeniedException())
+          }
+          val authorizationFailure = authorizeMutationForDispatch(normalizedMutation)
+          if (authorizationFailure != null) return@withContext Result.failure(authorizationFailure)
+
+          val dispatch = dispatchMutation(normalizedMutation)
+          if (dispatch.result.isFailure) {
+            if (dispatch.result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
+              markMutationStateUncertain()
+              dispatch.completion?.let { recoverAfterTimedOutMutation(normalizedMutation, it) }
+            }
+            return@withContext dispatch.result
+          }
+
+          if (normalizedMutation is ExitNodeMutation.Clear) {
+            exitNodeMutationStateUncertain = false
+          }
+
+          if (!isMutationStillAllowedFresh(normalizedMutation)) {
+            if (normalizedMutation is ExitNodeMutation.Manual) {
+              val compensation = dispatchMutation(ExitNodeMutation.Clear())
+              if (compensation.result.isFailure) {
+                markMutationStateUncertain()
+                if (compensation.result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
+                  compensation.completion?.let {
+                    recoverAfterTimedOutMutation(ExitNodeMutation.Clear(), it)
+                  }
+                } else {
+                  scheduleCompensatingClearRetry()
+                }
+              }
+            }
+            if (runtime.state.value.isStartingOrRunning()) runtime.revoke()
+            return@withContext Result.failure(ExitNodeMutationDeniedException())
+          }
+          dispatch.result
+        }
+      }
+
+  private suspend fun authorizeMutationForDispatch(
+      mutation: ExitNodeMutation
+  ): ExitNodeMutationDeniedException? =
+      try {
+        decisionMutex.withLock {
+          if (mutation is ExitNodeMutation.Clear) return@withLock null
+          val active = freshActiveAccessLocked(origin = null, requireStartPolicy = false)
+          if (active == null || !isExitNodeMutationAllowed(active, mutation)) {
+            return@withLock ExitNodeMutationDeniedException()
+          }
+
+          beforeExitNodeMutationWrite()
+
+          val finalActive = currentActiveAccess()
+          if (finalActive == null || !isExitNodeMutationAllowed(finalActive, mutation)) {
+            ExitNodeMutationDeniedException()
+          } else {
+            null
+          }
+        }
+      } catch (_: Throwable) {
+        ExitNodeMutationDeniedException()
+      }
+
+  private suspend fun dispatchMutation(mutation: ExitNodeMutation): MutationDispatchOutcome {
+    val completion = CompletableDeferred<Result<Unit>>()
+    return try {
+      exitNodePreferenceWriter.write(mutation.toMaskedPrefs()) { result ->
+        completion.complete(result)
+      }
+      val result =
+          withTimeoutOrNull(exitNodeMutationTimeoutMillis) { completion.await() }
+              ?: Result.failure(ExitNodeMutationTimeoutException())
+      MutationDispatchOutcome(result, completion)
+    } catch (error: Throwable) {
+      MutationDispatchOutcome(Result.failure(error), null)
+    }
+  }
+
+  private suspend fun isMutationStillAllowedFresh(mutation: ExitNodeMutation): Boolean {
+    if (mutation is ExitNodeMutation.Clear) return true
+    return try {
+      decisionMutex.withLock {
+        val active =
+            freshActiveAccessLocked(origin = null, requireStartPolicy = false)
+                ?: return@withLock false
+        isExitNodeMutationAllowed(active, mutation)
+      }
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  private fun markMutationStateUncertain() {
+    exitNodeMutationStateUncertain = true
+    if (runtime.state.value.isStartingOrRunning()) runtime.revoke()
+  }
+
+  private fun recoverAfterTimedOutMutation(
+      mutation: ExitNodeMutation,
+      completion: CompletableDeferred<Result<Unit>>,
+  ) {
+    scope.launch {
+      val lateResult = completion.await()
+      exitNodeMutationWriteMutex.withLock {
+        if (!exitNodeMutationStateUncertain) return@withLock
+        if (lateResult.isFailure) {
+          exitNodeMutationStateUncertain = false
+        } else if (mutation is ExitNodeMutation.Clear) {
+          exitNodeMutationStateUncertain = false
+        } else {
+          retryCompensatingClearLocked()
+        }
+      }
+    }
+  }
+
+  private fun scheduleCompensatingClearRetry() {
+    scope.launch {
+      exitNodeMutationWriteMutex.withLock {
+        if (exitNodeMutationStateUncertain) retryCompensatingClearLocked()
+      }
+    }
+  }
+
+  private suspend fun retryCompensatingClearLocked() {
+    repeat(MAX_COMPENSATING_CLEAR_ATTEMPTS) {
+      val dispatch = dispatchMutation(ExitNodeMutation.Clear())
+      var result = dispatch.result
+      if (result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
+        result = dispatch.completion?.await() ?: result
+      }
+      if (result.isSuccess) {
+        exitNodeMutationStateUncertain = false
+        return
+      }
+      delay(COMPENSATING_CLEAR_RETRY_DELAY_MILLIS)
+    }
+  }
+
   private suspend fun refreshAndEnforce() {
-    if (freshActiveAccess(origin = null) == null && runtime.state.value.isStartingOrRunning()) {
+    if (freshActiveAccess(origin = null, requireStartPolicy = true) == null &&
+        runtime.state.value.isStartingOrRunning()) {
       revokeOnce()
     }
   }
 
-  private suspend fun freshActiveAccess(origin: VpnStartOrigin?): AccessState.Active? =
-      decisionMutex.withLock {
-        if (decisionSource.authentikState.value != AuthentikState.Authorized) return@withLock null
-        val access = decisionSource.refreshAccess(origin)
-        if (decisionSource.authentikState.value != AuthentikState.Authorized) return@withLock null
-        val activeAccess = access as? AccessState.Active ?: return@withLock null
-        activeAccess.takeIf { runCatching { startPolicyGuard.isAllowed(it) }.getOrDefault(false) }
+  private suspend fun freshActiveAccess(
+      origin: VpnStartOrigin?,
+      requireStartPolicy: Boolean,
+  ): AccessState.Active? =
+      decisionMutex.withLock { freshActiveAccessLocked(origin, requireStartPolicy) }
+
+  private suspend fun freshActiveAccessLocked(
+      origin: VpnStartOrigin?,
+      requireStartPolicy: Boolean,
+  ): AccessState.Active? {
+    if (decisionSource.authentikState.value != AuthentikState.Authorized) return null
+    val access = decisionSource.refreshAccess(origin)
+    if (decisionSource.authentikState.value != AuthentikState.Authorized) return null
+    val activeAccess = access as? AccessState.Active ?: return null
+    if (!requireStartPolicy) return activeAccess
+    return activeAccess.takeIf {
+      runCatching { startPolicyGuard.isAllowed(it) }.getOrDefault(false)
+    }
+  }
+
+  private suspend fun authorizeExitNodeMutationLocked(mutation: ExitNodeMutation): Boolean {
+    if (mutation is ExitNodeMutation.Clear) return true
+    val active = freshActiveAccessLocked(origin = null, requireStartPolicy = false) ?: return false
+    return isExitNodeMutationAllowed(active, mutation.normalized())
+  }
+
+  private fun currentActiveAccess(): AccessState.Active? {
+    if (decisionSource.authentikState.value != AuthentikState.Authorized) return null
+    return decisionSource.accessState.value as? AccessState.Active
+  }
+
+  private fun isExitNodeMutationAllowed(
+      active: AccessState.Active,
+      mutation: ExitNodeMutation,
+  ): Boolean =
+      runCatching { exitNodeMutationPolicyGuard.isAllowed(active, mutation) }.getOrDefault(false)
+
+  private fun ExitNodeMutation.normalized(): ExitNodeMutation =
+      when (this) {
+        is ExitNodeMutation.Clear -> this
+        is ExitNodeMutation.Auto -> this
+        is ExitNodeMutation.Manual -> copy(nodeId = nodeId.trim())
+      }
+
+  private fun ExitNodeMutation.toMaskedPrefs(): Ipn.MaskedPrefs =
+      Ipn.MaskedPrefs().apply {
+        when (this@toMaskedPrefs) {
+          is ExitNodeMutation.Clear -> {
+            ExitNodeID = null
+            AutoExitNode = null
+          }
+          is ExitNodeMutation.Auto -> {
+            AutoExitNode = "any"
+            ExitNodeID = null
+          }
+          is ExitNodeMutation.Manual -> {
+            ExitNodeID = nodeId
+            AutoExitNode = null
+          }
+        }
+        this@toMaskedPrefs.allowLanAccess?.let { ExitNodeAllowLANAccess = it }
       }
 
   private suspend fun revokeOnce() {
@@ -518,4 +796,9 @@ class VpnEntitlementController(
 
   private fun VpnRuntimeState.isStartingOrRunning(): Boolean =
       this == VpnRuntimeState.Starting || this == VpnRuntimeState.Running
+
+  companion object {
+    private const val MAX_COMPENSATING_CLEAR_ATTEMPTS = 3
+    private const val COMPENSATING_CLEAR_RETRY_DELAY_MILLIS = 250L
+  }
 }

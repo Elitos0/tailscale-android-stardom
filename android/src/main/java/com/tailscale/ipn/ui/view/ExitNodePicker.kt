@@ -35,7 +35,6 @@ import com.tailscale.ipn.ui.util.itemsWithDividers
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerNav
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModelFactory
-import com.tailscale.ipn.ui.viewModel.selected
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -50,11 +49,8 @@ fun ExitNodePicker(
     Scaffold(topBar = { Header(R.string.choose_exit_node, onBack = nav.onNavigateBackHome) }) {
         innerPadding ->
       val tailnetExitNodes by model.tailnetExitNodes.collectAsState()
-      val mullvadExitNodesByCountryCode by model.mullvadExitNodesByCountryCode.collectAsState()
-      val mullvadExitNodeCount by model.mullvadExitNodeCount.collectAsState()
       val anyActive by model.anyActive.collectAsState()
       val autoExitNode by model.autoExitNode.collectAsState()
-      val shouldShowMullvadInfo by model.shouldShowMullvadInfo.collectAsState()
       val allowLANAccess = Notifier.prefs.collectAsState().value?.ExitNodeAllowLANAccess == true
       val showRunAsExitNode by MDMSettings.runExitNode.flow.collectAsState()
       val allowLanAccessMDMDisposition by MDMSettings.exitNodeAllowLANAccess.flow.collectAsState()
@@ -91,19 +87,6 @@ fun ExitNodePicker(
         item(key = "divider1") { Lists.SectionDivider() }
 
         itemsWithDividers(tailnetExitNodes, key = { it.id!! }) { node -> ExitNodeItem(model, node) }
-
-        if (mullvadExitNodeCount > 0) {
-          item(key = "mullvad") {
-            Lists.SectionDivider()
-            MullvadItem(
-                nav, mullvadExitNodesByCountryCode.size, mullvadExitNodesByCountryCode.selected)
-          }
-        } else if (shouldShowMullvadInfo) {
-          item(key = "mullvad_info") {
-            Lists.SectionDivider()
-            MullvadInfoItem(nav)
-          }
-        }
 
         if (!allowLanAccessMDMDisposition.value.hiddenFromUser) {
           item(key = "allowLANAccess") {
