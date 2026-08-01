@@ -35,6 +35,7 @@ import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.product.policy.ExitNodePreferenceWriter
 import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
+import com.tailscale.ipn.product.policy.StardomSyspolicyBridge
 import com.tailscale.ipn.product.policy.SyspolicyStringArrayJSONBridge
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
@@ -489,39 +490,44 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   @Throws(
       IOException::class, GeneralSecurityException::class, MDMSettings.NoSuchKeyException::class)
   override fun getSyspolicyStringValue(key: String): String {
-    val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
-    if (setting?.isSet != true) {
-      throw MDMSettings.NoSuchKeyException()
+    return StardomSyspolicyBridge.getString(key) {
+      val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
+      if (setting?.isSet != true) {
+        throw MDMSettings.NoSuchKeyException()
+      }
+      setting.value?.toString() ?: ""
     }
-    return setting.value?.toString() ?: ""
   }
 
   @Throws(
       IOException::class, GeneralSecurityException::class, MDMSettings.NoSuchKeyException::class)
   override fun getSyspolicyStringArrayJSONValue(key: String): String {
-    return SyspolicyStringArrayJSONBridge.get(
-        key = key,
-        productCandidatesJSON = {
-          if (::allowedSuggestedExitNodePolicyController.isInitialized) {
-            allowedSuggestedExitNodePolicyController.currentCandidatesJSON()
-          } else {
-            "[]"
-          }
-        },
-        fallbackValue = {
-          val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
-          if (setting?.isSet != true) {
-            throw MDMSettings.NoSuchKeyException()
-          }
-          try {
-            val list = setting.value as? List<*>
-            Json.encodeToString(list)
-          } catch (e: Exception) {
-            TSLog.d("MDM", "$key value cannot be serialized to JSON. Throwing NoSuchKeyException.")
-            throw MDMSettings.NoSuchKeyException()
-          }
-        },
-    )
+    return StardomSyspolicyBridge.get(key) {
+      SyspolicyStringArrayJSONBridge.get(
+          key = key,
+          productCandidatesJSON = {
+            if (::allowedSuggestedExitNodePolicyController.isInitialized) {
+              allowedSuggestedExitNodePolicyController.currentCandidatesJSON()
+            } else {
+              "[]"
+            }
+          },
+          fallbackValue = {
+            val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
+            if (setting?.isSet != true) {
+              throw MDMSettings.NoSuchKeyException()
+            }
+            try {
+              val list = setting.value as? List<*>
+              Json.encodeToString(list)
+            } catch (e: Exception) {
+              TSLog.d(
+                  "MDM", "$key value cannot be serialized to JSON. Throwing NoSuchKeyException.")
+              throw MDMSettings.NoSuchKeyException()
+            }
+          },
+      )
+    }
   }
 
   fun notifyPolicyChanged() {

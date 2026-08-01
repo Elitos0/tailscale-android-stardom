@@ -242,10 +242,10 @@ fun MainView(
             }
             when {
               shouldRenderPeerContent(state, connectionStage) -> {
-                PromptForMissingPermissions(viewModel)
+                PromptForMissingPermissions()
 
                 if (showKeyExpiry) {
-                  ExpiryNotification(netmap = netmap, action = { viewModel.login() })
+                  ExpiryNotification(netmap = netmap, action = navigation.onNavigateStardomLogin)
                 }
                 if (showExitNodePicker.value == ShowHide.Show) {
                   ExitNodeStatus(
@@ -792,10 +792,7 @@ fun ExpiryNotification(netmap: Netmap.NetworkMap?, action: () -> Unit = {}) {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun PromptForMissingPermissions(viewModel: MainViewModel) {
-  if (viewModel.skipPromptsForAuthKeyLogin()) {
-    return
-  }
+fun PromptForMissingPermissions() {
   Permissions.prompt.forEach { (permission, state) ->
     ErrorDialog(
         title = permission.title,

@@ -19,7 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSetting
-import com.tailscale.ipn.mdm.MDMSettings
+import com.tailscale.ipn.product.policy.StardomSyspolicyBridge
 import com.tailscale.ipn.ui.util.itemsWithDividers
 import com.tailscale.ipn.ui.viewModel.IpnViewModel
 
@@ -32,10 +32,11 @@ fun MDMSettingsDebugView(
   Scaffold(topBar = { Header(R.string.current_mdm_settings, onBack = backToSettings) }) {
       innerPadding ->
     LazyColumn(modifier = Modifier.padding(innerPadding)) {
-      itemsWithDividers(MDMSettings.allSettings.sortedBy { "${it::class.java.name}|${it.key}" }) {
-          setting ->
-        MDMSettingView(setting)
-      }
+      itemsWithDividers(
+          StardomSyspolicyBridge.visibleSettings.sortedBy { "${it::class.java.name}|${it.key}" }) {
+              setting ->
+            MDMSettingView(setting)
+          }
     }
   }
 }

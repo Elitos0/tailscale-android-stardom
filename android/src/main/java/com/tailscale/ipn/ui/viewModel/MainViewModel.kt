@@ -120,13 +120,6 @@ class MainViewModel(
     this.pingViewModel.handleDismissal()
   }
 
-  // Returns true if we should skip all of the user-interactive permissions prompts
-  // (with the exception of the VPN permission prompt)
-  fun skipPromptsForAuthKeyLogin(): Boolean {
-    val v = MDMSettings.authKey.flow.value.value
-    return v != null && v != ""
-  }
-
   private val peerCategorizer = PeerCategorizer()
 
   init {

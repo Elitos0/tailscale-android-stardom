@@ -3,34 +3,60 @@
 
 package com.tailscale.ipn
 
-import androidx.test.ext.junit.rules.activityScenarioRule
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Rule
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AuthFirstOnboardingTest {
-  @get:Rule val activityRule = activityScenarioRule<MainActivity>()
+  private var scenario: ActivityScenario<MainActivity>? = null
+
+  @Before
+  fun cleanBeforeLaunch() {
+    StardomInstrumentationState.cleanBeforeActivityLaunch()
+  }
+
+  @After
+  fun closeActivity() {
+    scenario?.close()
+  }
 
   @Test
   fun cleanInstallOffersStardomLoginBeforeVpnPermission() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
     val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-    val getStarted = device.wait(Until.findObject(By.text("Get Started")), 5_000)
+    scenario = ActivityScenario.launch(MainActivity::class.java)
+
+    StardomInstrumentationState.assertForegroundProductUi(device)
+    val getStarted =
+        device.wait(Until.findObject(By.text(context.getString(R.string.getStarted))), 5_000)
     assertNotNull(getStarted)
     getStarted.click()
 
-    assertNotNull(device.wait(Until.findObject(By.text("Log in")), 5_000))
-    assertNotNull(device.wait(Until.findObject(By.desc("Stardom VPN")), 5_000))
-    assertNull(device.findObject(By.text("Connection request")))
-    assertNull(device.findObject(By.text("VPN access is unavailable")))
+    val login = device.wait(Until.findObject(By.text(context.getString(R.string.log_in))), 5_000)
+    assertNotNull(login)
+    assertNotNull(
+        device.wait(
+            Until.findObject(By.text(context.getString(R.string.welcome_to_tailscale))), 5_000))
+    assertNull(device.findObject(By.text(context.getString(R.string.auth_key_title))))
+    assertNull(device.findObject(By.text(context.getString(R.string.mullvad_exit_nodes))))
+    login.click()
+    assertNotNull(
+        device.wait(
+            Until.findObject(By.text(context.getString(R.string.stardom_login_title))), 5_000))
+    assertNull(device.findObject(By.text(context.getString(R.string.add_account))))
+    assertNull(device.findObject(By.text(context.getString(R.string.auth_key_menu))))
+    StardomInstrumentationState.assertForegroundProductUi(device)
   }
 
   @Test

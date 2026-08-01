@@ -39,12 +39,6 @@
         android:title="@string/required_suggested_tailnet" />
 
     <restriction
-        android:description="@string/use_this_field_to_specify_a_custom_coordination_server_url_such_as_a_headscale_instance"
-        android:key="LoginURL"
-        android:restrictionType="string"
-        android:title="@string/custom_control_server_url" />
-
-    <restriction
         android:description="@string/hides_the_specified_categories_of_network_devices_from_the_devices_list_in_the_client"
         android:entries="@array/hidden_network_devices_labels"
         android:entryValues="@array/hidden_network_devices"
@@ -128,12 +122,6 @@
         android:key="IncludedPackageNames"
         android:restrictionType="string"
         android:title="@string/included_packages" />
-
-    <restriction
-        android:description="@string/defines_an_auth_key_that_will_be_used_for_login"
-        android:key="AuthKey"
-        android:restrictionType="string"
-        android:title="@string/auth_key" />
 
     <restriction
         android:description="@string/specifies_a_device_name_to_be_used_instead_of_the_automatic_default"

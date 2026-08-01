@@ -58,7 +58,7 @@ fun LoginWithCustomControlURLView(
   Scaffold(
       topBar = {
         Header(
-            R.string.add_account,
+            R.string.stardom_login_title,
             onBack = backToSettings,
         )
       }) { innerPadding ->
@@ -99,7 +99,7 @@ fun LoginWithAuthKeyView(
   Scaffold(
       topBar = {
         Header(
-            R.string.add_account,
+            R.string.auth_key_title,
             onBack = backToSettings,
         )
       }) { innerPadding ->

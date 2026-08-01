@@ -59,6 +59,8 @@ import androidx.navigation.navArgument
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.ProductConfig
+import com.tailscale.ipn.product.StardomProductionRoutes
+import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
@@ -74,7 +76,6 @@ import com.tailscale.ipn.ui.view.ExitNodePicker
 import com.tailscale.ipn.ui.view.HealthView
 import com.tailscale.ipn.ui.view.IntroView
 import com.tailscale.ipn.ui.view.LoginQRView
-import com.tailscale.ipn.ui.view.LoginWithAuthKeyView
 import com.tailscale.ipn.ui.view.LoginWithCustomControlURLView
 import com.tailscale.ipn.ui.view.MDMSettingsDebugView
 import com.tailscale.ipn.ui.view.MainView
@@ -153,8 +154,7 @@ class MainActivity : ComponentActivity() {
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
-    if (MDMSettings.onboardingFlow.flow.value.value == ShowHide.Hide ||
-        MDMSettings.authKey.flow.value.value != null) {
+    if (MDMSettings.onboardingFlow.flow.value.value == ShowHide.Hide) {
       setIntroScreenViewed(true)
     }
     // (jonathan) TODO: Force the app to be portrait on small screens until we have
@@ -275,7 +275,7 @@ class MainActivity : ComponentActivity() {
           Surface(modifier = Modifier.universalFit()) { // Letterbox for AndroidTV
             NavHost(
                 navController = navController,
-                startDestination = "main",
+                startDestination = StardomRoute.MAIN.path,
                 enterTransition = {
                   slideInHorizontally(
                       animationSpec = tween(250, easing = LinearOutSlowInEasing),
@@ -305,58 +305,91 @@ class MainActivity : ComponentActivity() {
                   }
                   val mainViewNav =
                       MainViewNavigation(
-                          onNavigateToSettings = { navController.navigate("settings") },
-                          onNavigateStardomLogin = { navController.navigate("loginWithStardom") },
-                          onNavigateToPeerDetails = {
-                            navController.navigate("peerDetails/${it.StableID}")
+                          onNavigateToSettings = {
+                            navController.navigate(StardomRoute.SETTINGS.path)
                           },
-                          onNavigateToExitNodes = { navController.navigate("exitNodes") },
-                          onNavigateToHealth = { navController.navigate("health") },
+                          onNavigateStardomLogin = {
+                            stardomSessionController.clearSession()
+                            navController.navigate(StardomRoute.LOGIN_WITH_STARDOM.path)
+                          },
+                          onNavigateToPeerDetails = {
+                            navController.navigate(StardomProductionRoutes.peerDetails(it.StableID))
+                          },
+                          onNavigateToExitNodes = {
+                            navController.navigate(StardomRoute.EXIT_NODES.path)
+                          },
+                          onNavigateToHealth = { navController.navigate(StardomRoute.HEALTH.path) },
                           onNavigateToSearch = {
                             viewModel.enableSearchAutoFocus()
-                            navController.navigate("search")
+                            navController.navigate(StardomRoute.SEARCH.path)
                           })
                   val settingsNav =
                       SettingsNav(
-                          onNavigateToBugReport = { navController.navigate("bugReport") },
-                          onNavigateToAbout = { navController.navigate("about") },
-                          onNavigateToDNSSettings = { navController.navigate("dnsSettings") },
-                          onNavigateToSplitTunneling = { navController.navigate("splitTunneling") },
-                          onNavigateToTailnetLock = { navController.navigate("tailnetLock") },
-                          onNavigateToSubnetRouting = { navController.navigate("subnetRouting") },
-                          onNavigateToMDMSettings = { navController.navigate("mdmSettings") },
-                          onNavigateToManagedBy = { navController.navigate("managedBy") },
-                          onNavigateToUserSwitcher = { navController.navigate("userSwitcher") },
-                          onNavigateToPermissions = { navController.navigate("permissions") },
-                          onBackToSettings = backTo("settings"),
-                          onNavigateBackHome = backTo("main"))
+                          onNavigateToBugReport = {
+                            navController.navigate(StardomRoute.BUG_REPORT.path)
+                          },
+                          onNavigateToAbout = { navController.navigate(StardomRoute.ABOUT.path) },
+                          onNavigateToDNSSettings = {
+                            navController.navigate(StardomRoute.DNS_SETTINGS.path)
+                          },
+                          onNavigateToSplitTunneling = {
+                            navController.navigate(StardomRoute.SPLIT_TUNNELING.path)
+                          },
+                          onNavigateToTailnetLock = {
+                            navController.navigate(StardomRoute.TAILNET_LOCK.path)
+                          },
+                          onNavigateToSubnetRouting = {
+                            navController.navigate(StardomRoute.SUBNET_ROUTING.path)
+                          },
+                          onNavigateToMDMSettings = {
+                            navController.navigate(StardomRoute.MDM_SETTINGS.path)
+                          },
+                          onNavigateToManagedBy = {
+                            navController.navigate(StardomRoute.MANAGED_BY.path)
+                          },
+                          onNavigateToUserSwitcher = {
+                            navController.navigate(StardomRoute.ACCOUNT.path)
+                          },
+                          onNavigateToPermissions = {
+                            navController.navigate(StardomRoute.PERMISSIONS.path)
+                          },
+                          onBackToSettings = backTo(StardomRoute.SETTINGS.path),
+                          onNavigateBackHome = backTo(StardomRoute.MAIN.path))
                   val exitNodePickerNav =
                       ExitNodePickerNav(
                           onNavigateBackHome = {
-                            navController.popBackStack(route = "main", inclusive = false)
+                            navController.popBackStack(
+                                route = StardomRoute.MAIN.path, inclusive = false)
                           },
-                          onNavigateBackToExitNodes = backTo("exitNodes"),
+                          onNavigateBackToExitNodes = backTo(StardomRoute.EXIT_NODES.path),
                           onNavigateToMullvad = {},
                           onNavigateToMullvadInfo = {},
                           onNavigateBackToMullvad = {},
                           onNavigateToMullvadCountry = {},
-                          onNavigateToRunAsExitNode = { navController.navigate("runExitNode") })
+                          onNavigateToRunAsExitNode = {
+                            navController.navigate(StardomRoute.RUN_EXIT_NODE.path)
+                          })
                   val userSwitcherNav =
                       UserSwitcherNav(
-                          backToSettings = backTo("settings"),
-                          onNavigateHome = backTo("main"),
-                          onNavigateStardomLogin = { navController.navigate("loginWithStardom") },
-                          onNavigateToAuthKey = { navController.navigate("loginWithAuthKey") })
+                          backToSettings = backTo(StardomRoute.SETTINGS.path),
+                          onNavigateHome = backTo(StardomRoute.MAIN.path),
+                          onReauthenticate = {
+                            stardomSessionController.clearSession()
+                            navController.navigate(StardomRoute.LOGIN_WITH_STARDOM.path)
+                          },
+                          onClearStardomSession = stardomSessionController::clearSession)
 
-                  composable("main", enterTransition = { fadeIn(animationSpec = tween(150)) }) {
-                    MainView(
-                        loginAtUrl = ::login,
-                        navigation = mainViewNav,
-                        viewModel = viewModel,
-                        sessionController = stardomSessionController,
-                    )
-                  }
-                  composable("search") {
+                  composable(
+                      StardomRoute.MAIN.path,
+                      enterTransition = { fadeIn(animationSpec = tween(150)) }) {
+                        MainView(
+                            loginAtUrl = ::login,
+                            navigation = mainViewNav,
+                            viewModel = viewModel,
+                            sessionController = stardomSessionController,
+                        )
+                      }
+                  composable(StardomRoute.SEARCH.path) {
                     val autoFocus = viewModel.autoFocusSearch
                     SearchView(
                         viewModel = viewModel,
@@ -364,60 +397,80 @@ class MainActivity : ComponentActivity() {
                         onNavigateBack = { navController.popBackStack() },
                         autoFocus = autoFocus)
                   }
-                  composable("settings") {
+                  composable(StardomRoute.SETTINGS.path) {
                     SettingsView(settingsNav = settingsNav, appViewModel = appViewModel)
                   }
-                  composable("exitNodes") {
+                  composable(StardomRoute.EXIT_NODES.path) {
                     ExitNodePicker(exitNodePickerNav, stardomSessionController.accessState)
                   }
-                  composable("health") { HealthView(backTo("main")) }
-                  composable("runExitNode") { RunExitNodeView(exitNodePickerNav) }
+                  composable(StardomRoute.HEALTH.path) {
+                    HealthView(backTo(StardomRoute.MAIN.path))
+                  }
+                  composable(StardomRoute.RUN_EXIT_NODE.path) { RunExitNodeView(exitNodePickerNav) }
                   composable(
-                      "peerDetails/{nodeId}",
+                      StardomRoute.PEER_DETAILS.path,
                       arguments = listOf(navArgument("nodeId") { type = NavType.StringType })) {
                         PeerDetails(
                             { navController.popBackStack() },
                             it.arguments?.getString("nodeId") ?: "",
                             PingViewModel())
                       }
-                  composable("bugReport") { BugReportView(backTo("settings")) }
-                  composable("dnsSettings") { DNSSettingsView(backTo("settings")) }
-                  composable("splitTunneling") { SplitTunnelAppPickerView(backTo("settings")) }
-                  composable("tailnetLock") { TailnetLockSetupView(backTo("settings")) }
-                  composable("subnetRouting") { SubnetRoutingView(backTo("settings")) }
-                  composable("about") { AboutView(backTo("settings")) }
-                  composable("mdmSettings") { MDMSettingsDebugView(backTo("settings")) }
-                  composable("managedBy") { ManagedByView(backTo("settings")) }
-                  composable("userSwitcher") { UserSwitcherView(userSwitcherNav) }
-                  composable("permissions") {
+                  composable(StardomRoute.BUG_REPORT.path) {
+                    BugReportView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.DNS_SETTINGS.path) {
+                    DNSSettingsView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.SPLIT_TUNNELING.path) {
+                    SplitTunnelAppPickerView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.TAILNET_LOCK.path) {
+                    TailnetLockSetupView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.SUBNET_ROUTING.path) {
+                    SubnetRoutingView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.ABOUT.path) {
+                    AboutView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.MDM_SETTINGS.path) {
+                    MDMSettingsDebugView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.MANAGED_BY.path) {
+                    ManagedByView(backTo(StardomRoute.SETTINGS.path))
+                  }
+                  composable(StardomRoute.ACCOUNT.path) { UserSwitcherView(userSwitcherNav) }
+                  composable(StardomRoute.PERMISSIONS.path) {
                     PermissionsView(
-                        backTo("settings"),
-                        { navController.navigate("taildropDir") },
-                        { navController.navigate("notifications") })
+                        backTo(StardomRoute.SETTINGS.path),
+                        { navController.navigate(StardomRoute.TAILDROP_DIR.path) },
+                        { navController.navigate(StardomRoute.NOTIFICATIONS.path) })
                   }
-                  composable("taildropDir") {
+                  composable(StardomRoute.TAILDROP_DIR.path) {
                     TaildropDirView(
-                        backTo("permissions"), directoryPickerLauncher, permissionsViewModel)
+                        backTo(StardomRoute.PERMISSIONS.path),
+                        directoryPickerLauncher,
+                        permissionsViewModel)
                   }
-                  composable("notifications") {
-                    NotificationsView(backTo("permissions"), ::openApplicationSettings)
+                  composable(StardomRoute.NOTIFICATIONS.path) {
+                    NotificationsView(
+                        backTo(StardomRoute.PERMISSIONS.path), ::openApplicationSettings)
                   }
-                  composable("intro", exitTransition = { fadeOut(animationSpec = tween(150)) }) {
-                    IntroView(backTo("main"))
-                  }
-                  composable("loginWithAuthKey") {
-                    LoginWithAuthKeyView(onNavigateHome = backTo("main"), backTo("userSwitcher"))
-                  }
-                  composable("loginWithStardom") {
+                  composable(
+                      StardomRoute.INTRO.path,
+                      exitTransition = { fadeOut(animationSpec = tween(150)) }) {
+                        IntroView(backTo(StardomRoute.MAIN.path))
+                      }
+                  composable(StardomRoute.LOGIN_WITH_STARDOM.path) {
                     LoginWithCustomControlURLView(
                         context = this@MainActivity,
                         authSessionRepository = stardomSessionController.authSessionRepository,
-                        onNavigateHome = backTo("main"),
-                        backToSettings = backTo("userSwitcher"))
+                        onNavigateHome = backTo(StardomRoute.MAIN.path),
+                        backToSettings = backTo(StardomRoute.MAIN.path))
                   }
                 }
             if (isIntroScreenViewedSet()) {
-              navController.navigate("intro")
+              navController.navigate(StardomRoute.INTRO.path)
               setIntroScreenViewed(true)
             }
           }
@@ -488,12 +541,14 @@ class MainActivity : ComponentActivity() {
         val previousEntry = navController.previousBackStackEntry
         TSLog.d("MainActivity", "onNewIntent: previousBackStackEntry = $previousEntry")
         if (previousEntry != null) {
-          navController.popBackStack(route = "main", inclusive = false)
+          navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
         } else {
           TSLog.e(
               "MainActivity",
               "onNewIntent: No previous back stack entry, navigating directly to 'main'")
-          navController.navigate("main") { popUpTo("main") { inclusive = true } }
+          navController.navigate(StardomRoute.MAIN.path) {
+            popUpTo(StardomRoute.MAIN.path) { inclusive = true }
+          }
         }
       }
     }
@@ -503,7 +558,7 @@ class MainActivity : ComponentActivity() {
     viewModel.loginWithCustomControlURL(ProductConfig.headscaleControlUrl) { result ->
       result.onSuccess {
         if (this::navController.isInitialized) {
-          navController.popBackStack(route = "main", inclusive = false)
+          navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
         }
       }
     }

@@ -92,9 +92,6 @@ android {
         applicationTest {
             initWith debug
             manifestPlaceholders.leanbackRequired = isTV()
-            buildConfigField "String", "GITHUB_USERNAME", "\"" + getLocalProperty("githubUsername", "")+"\""
-            buildConfigField "String", "GITHUB_PASSWORD", "\"" + getLocalProperty("githubPassword", "")+"\""
-            buildConfigField "String", "GITHUB_2FA_SECRET", "\"" + getLocalProperty("github2FASecret", "")+"\""
         }
         debug {
             manifestPlaceholders.leanbackRequired = isTV()
@@ -176,10 +173,6 @@ dependencies {
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4:1.7.3'
     implementation 'androidx.test.uiautomator:uiautomator:2.3.0'
 
-
-    // Authentication only for tests
-    androidTestImplementation 'dev.turingcomplete:kotlin-onetimepassword:2.4.0'
-    androidTestImplementation 'commons-codec:commons-codec:1.16.1'
 
     // Unit Tests
     testImplementation 'junit:junit:4.13.2'
