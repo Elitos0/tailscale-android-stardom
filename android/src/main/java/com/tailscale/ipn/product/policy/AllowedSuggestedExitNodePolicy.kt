@@ -51,7 +51,7 @@ class AllowedSuggestedExitNodePolicyController(
     private val accessState: StateFlow<AccessState>,
     private val mdmAllowedSuggestedExitNodes: StateFlow<SettingState<List<String>?>>,
     private val prefs: StateFlow<Ipn.Prefs?>,
-    private val runtimeState: StateFlow<VpnRuntimeState>,
+    private val runtimeSnapshot: StateFlow<VpnRuntimeSnapshot>,
     private val notifyPolicyChanged: () -> Unit,
     private val revokeDisallowedAutoExitNode: () -> Unit,
     private val candidateMapper:
@@ -70,20 +70,20 @@ class AllowedSuggestedExitNodePolicyController(
       val accessState: AccessState,
       val mdm: ManagedAllowedSuggestedExitNodes,
       val prefs: AutoExitPrefs?,
-      val runtimeState: VpnRuntimeState,
+      val runtimeSnapshot: VpnRuntimeSnapshot,
   )
 
   private data class Evaluation(
       val candidates: List<String>,
       val json: String,
       val prefs: AutoExitPrefs?,
-      val runtimeState: VpnRuntimeState,
+      val runtimeSnapshot: VpnRuntimeSnapshot,
   )
 
   private val observerStarted = AtomicBoolean(false)
   private val lock = Any()
   private var lastNativeCandidates: List<String>? = null
-  private var activeUnsafeRunRevoked = false
+  private var revokedRuntimeGeneration: Long? = null
 
   fun currentCandidatesJSON(): String {
     val evaluation = evaluateStable()
@@ -112,14 +112,14 @@ class AllowedSuggestedExitNodePolicyController(
               accessState,
               mdmAllowedSuggestedExitNodes,
               prefs,
-              runtimeState,
+              runtimeSnapshot,
           ) { currentAuthentik, currentAccess, currentMdm, currentPrefs, currentRuntime ->
             Inputs(
                 authentikState = currentAuthentik,
                 accessState = currentAccess.snapshot(),
                 mdm = currentMdm.toManagedAllowList(),
                 prefs = currentPrefs.snapshot(),
-                runtimeState = currentRuntime,
+                runtimeSnapshot = currentRuntime,
             )
           }
           .collect { process(evaluate(it)) }
@@ -144,7 +144,7 @@ class AllowedSuggestedExitNodePolicyController(
           accessState = accessState.value.snapshot(),
           mdm = mdmAllowedSuggestedExitNodes.value.toManagedAllowList(),
           prefs = prefs.value.snapshot(),
-          runtimeState = runtimeState.value,
+          runtimeSnapshot = runtimeSnapshot.value,
       )
 
   private fun evaluate(inputs: Inputs): Evaluation {
@@ -155,14 +155,14 @@ class AllowedSuggestedExitNodePolicyController(
               inputs.accessState,
               inputs.mdm,
           )
-      Evaluation(candidates, jsonEncoder(candidates), inputs.prefs, inputs.runtimeState)
+      Evaluation(candidates, jsonEncoder(candidates), inputs.prefs, inputs.runtimeSnapshot)
     } catch (_: Throwable) {
       failClosed(inputs)
     }
   }
 
   private fun failClosed(inputs: Inputs): Evaluation =
-      Evaluation(emptyList(), "[]", inputs.prefs, inputs.runtimeState)
+      Evaluation(emptyList(), "[]", inputs.prefs, inputs.runtimeSnapshot)
 
   private fun process(evaluation: Evaluation) {
     val (shouldRevoke, notificationChange) =
@@ -189,10 +189,8 @@ class AllowedSuggestedExitNodePolicyController(
         revokeDisallowedAutoExitNode()
       } catch (error: Throwable) {
         synchronized(lock) {
-          when (evaluation.runtimeState) {
-            VpnRuntimeState.Idle -> Unit
-            VpnRuntimeState.Starting,
-            VpnRuntimeState.Running -> activeUnsafeRunRevoked = false
+          if (revokedRuntimeGeneration == evaluation.runtimeSnapshot.generation) {
+            revokedRuntimeGeneration = null
           }
         }
         reportCallbackError("revoke", error)
@@ -221,25 +219,24 @@ class AllowedSuggestedExitNodePolicyController(
   }
 
   private fun shouldRevokeLocked(evaluation: Evaluation): Boolean {
-    val currentRuntimeState = evaluation.runtimeState
+    val currentRuntime = evaluation.runtimeSnapshot
     val isUnsafe = evaluation.prefs.hasDisallowedEffectiveAutoExitNode(evaluation.candidates)
     if (!isUnsafe) {
-      activeUnsafeRunRevoked = false
+      revokedRuntimeGeneration = null
       return false
     }
 
     val shouldRevoke =
-        when (currentRuntimeState) {
+        when (currentRuntime.state) {
           VpnRuntimeState.Idle -> {
-            activeUnsafeRunRevoked = false
             false
           }
           VpnRuntimeState.Starting,
           VpnRuntimeState.Running -> {
-            if (activeUnsafeRunRevoked) {
+            if (revokedRuntimeGeneration == currentRuntime.generation) {
               false
             } else {
-              activeUnsafeRunRevoked = true
+              revokedRuntimeGeneration = currentRuntime.generation
               true
             }
           }

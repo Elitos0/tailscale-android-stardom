@@ -9,11 +9,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,6 +37,11 @@ enum class VpnRuntimeState {
   Starting,
   Running,
 }
+
+data class VpnRuntimeSnapshot(
+    val state: VpnRuntimeState,
+    val generation: Long,
+)
 
 interface VpnEntitlementDecisionSource {
   val authentikState: StateFlow<AuthentikState>
@@ -85,8 +93,9 @@ class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
 
 class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlementRuntime {
   private val lock = Any()
-  private val _state = MutableStateFlow(VpnRuntimeState.Idle)
-  override val state: StateFlow<VpnRuntimeState> = _state.asStateFlow()
+  private val _snapshot = MutableStateFlow(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 0))
+  val snapshot: StateFlow<VpnRuntimeSnapshot> = _snapshot.asStateFlow()
+  override val state: StateFlow<VpnRuntimeState> = VpnRuntimeStateFlow(snapshot)
   private var generation = 0L
   private var requestGeneration: Long? = null
 
@@ -95,10 +104,12 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
 
   fun tryBeginStarting(): VpnRuntimeLease? =
       synchronized(lock) {
-        if (requestGeneration != null || _state.value != VpnRuntimeState.Idle) {
+        if (requestGeneration != null || _snapshot.value.state != VpnRuntimeState.Idle) {
           return@synchronized null
         }
-        VpnRuntimeLease(++generation).also { _state.value = VpnRuntimeState.Starting }
+        VpnRuntimeLease(++generation).also {
+          _snapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation)
+        }
       }
 
   fun isCurrent(lease: VpnRuntimeLease): Boolean = synchronized(lock) { isCurrentLocked(lease) }
@@ -106,15 +117,14 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
   fun markRunning(lease: VpnRuntimeLease): Boolean =
       synchronized(lock) {
         if (!isCurrentLocked(lease)) return@synchronized false
-        _state.value = VpnRuntimeState.Running
+        _snapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Running, generation)
         true
       }
 
   fun finish(lease: VpnRuntimeLease): Boolean =
       synchronized(lock) {
         if (!isCurrentLocked(lease)) return@synchronized false
-        generation++
-        _state.value = VpnRuntimeState.Idle
+        _snapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation)
         true
       }
 
@@ -130,11 +140,25 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
   }
 
   private fun isCurrentLocked(lease: VpnRuntimeLease): Boolean {
-    return lease.generation == generation && _state.value != VpnRuntimeState.Idle
+    return lease.generation == generation && _snapshot.value.state != VpnRuntimeState.Idle
   }
 
   override fun revoke() {
     revokeVpn()
+  }
+}
+
+private class VpnRuntimeStateFlow(private val snapshots: StateFlow<VpnRuntimeSnapshot>) :
+    StateFlow<VpnRuntimeState> {
+  override val value: VpnRuntimeState
+    get() = snapshots.value.state
+
+  override val replayCache: List<VpnRuntimeState>
+    get() = listOf(value)
+
+  override suspend fun collect(collector: FlowCollector<VpnRuntimeState>): Nothing {
+    snapshots.map { it.state }.distinctUntilChanged().collect(collector)
+    error("runtime snapshot StateFlow completed")
   }
 }
 

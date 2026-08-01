@@ -72,6 +72,24 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun runtimeTrackerPublishesStateAndLeaseGenerationAtomically() {
+    val runtime = VpnRuntimeStateTracker {}
+
+    assertEquals(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 0), runtime.snapshot.value)
+    val firstLease = runtime.beginStarting()
+    assertEquals(
+        VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation = 1), runtime.snapshot.value)
+    assertTrue(runtime.markRunning(firstLease))
+    assertEquals(
+        VpnRuntimeSnapshot(VpnRuntimeState.Running, generation = 1), runtime.snapshot.value)
+    assertTrue(runtime.finish(firstLease))
+    assertEquals(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 1), runtime.snapshot.value)
+    runtime.beginStarting()
+    assertEquals(
+        VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation = 2), runtime.snapshot.value)
+  }
+
+  @Test
   fun disallowedAutoExitNodeRevocationUsesTheRuntimeBoundary() = runTest {
     val runtime = FakeRuntime(VpnRuntimeState.Running)
     val controller = controller(FakeDecisionSource(defaultDecision = ACTIVE), runtime)
@@ -94,7 +112,8 @@ class VpnEntitlementControllerTest {
             mdmAllowedSuggestedExitNodes =
                 MutableStateFlow(com.tailscale.ipn.mdm.SettingState<List<String>?>(null, false)),
             prefs = prefs,
-            runtimeState = MutableStateFlow(VpnRuntimeState.Idle),
+            runtimeSnapshot =
+                MutableStateFlow(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 0)),
             notifyPolicyChanged = {},
             revokeDisallowedAutoExitNode = {},
         )
@@ -143,7 +162,8 @@ class VpnEntitlementControllerTest {
               mdmAllowedSuggestedExitNodes =
                   MutableStateFlow(com.tailscale.ipn.mdm.SettingState<List<String>?>(null, false)),
               prefs = MutableStateFlow(currentPrefs),
-              runtimeState = MutableStateFlow(VpnRuntimeState.Idle),
+              runtimeSnapshot =
+                  MutableStateFlow(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 0)),
               notifyPolicyChanged = {},
               revokeDisallowedAutoExitNode = {},
           )

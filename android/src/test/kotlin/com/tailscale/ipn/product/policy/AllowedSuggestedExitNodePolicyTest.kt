@@ -358,12 +358,41 @@ class AllowedSuggestedExitNodePolicyTest {
 
     assertEquals(1, fixture.revocations)
 
-    fixture.runtime.value = VpnRuntimeState.Idle
+    fixture.runtime.value = VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 1)
     runCurrent()
-    fixture.runtime.value = VpnRuntimeState.Starting
+    fixture.runtime.value = VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation = 2)
     runCurrent()
 
     assertEquals(2, fixture.revocations)
+  }
+
+  @Test
+  fun conflatedIdleBetweenUnsafeRuntimeGenerationsStillRevokesTheNewRun() = runTest {
+    val runtimeSnapshot =
+        MutableStateFlow(VpnRuntimeSnapshot(VpnRuntimeState.Running, generation = 1))
+    var revocations = 0
+    val controller =
+        AllowedSuggestedExitNodePolicyController(
+            authentikState = MutableStateFlow(AuthentikState.Authorized),
+            accessState = MutableStateFlow(AccessState.Active(setOf("node-b"))),
+            mdmAllowedSuggestedExitNodes =
+                MutableStateFlow(SettingState<List<String>?>(null, false)),
+            prefs = MutableStateFlow(Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "node-a")),
+            runtimeSnapshot = runtimeSnapshot,
+            notifyPolicyChanged = {},
+            revokeDisallowedAutoExitNode = { revocations++ },
+        )
+    controller.start(backgroundScope)
+    runCurrent()
+    assertEquals(1, revocations)
+
+    runtimeSnapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 1)
+    runtimeSnapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation = 2)
+    runCurrent()
+    runtimeSnapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Running, generation = 2)
+    runCurrent()
+
+    assertEquals(2, revocations)
   }
 
   @Test
@@ -486,7 +515,12 @@ class AllowedSuggestedExitNodePolicyTest {
     val accessFlow = MutableStateFlow(access)
     val mdmFlow = MutableStateFlow(SettingState<List<String>?>(null, false))
     val prefsFlow = MutableStateFlow(prefs)
-    val runtimeFlow = MutableStateFlow(runtimeState)
+    val runtimeFlow =
+        MutableStateFlow(
+            VpnRuntimeSnapshot(
+                runtimeState,
+                generation = if (runtimeState == VpnRuntimeState.Idle) 0 else 1,
+            ))
     var notifications = 0
     var revocations = 0
     val controller =
@@ -495,7 +529,7 @@ class AllowedSuggestedExitNodePolicyTest {
             accessState = accessFlow,
             mdmAllowedSuggestedExitNodes = mdmFlow,
             prefs = prefsFlow,
-            runtimeState = runtimeFlow,
+            runtimeSnapshot = runtimeFlow,
             notifyPolicyChanged = {
               notifications++
               onNotify()
@@ -525,7 +559,7 @@ class AllowedSuggestedExitNodePolicyTest {
       val access: MutableStateFlow<AccessState>,
       val mdm: MutableStateFlow<SettingState<List<String>?>>,
       val prefs: MutableStateFlow<Ipn.Prefs?>,
-      val runtime: MutableStateFlow<VpnRuntimeState>,
+      val runtime: MutableStateFlow<VpnRuntimeSnapshot>,
       private val notificationCount: () -> Int,
       private val revocationCount: () -> Int,
   ) {
