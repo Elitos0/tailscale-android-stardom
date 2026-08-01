@@ -5,6 +5,7 @@ package com.tailscale.ipn.product.policy
 
 import com.tailscale.ipn.product.auth.AuthentikState
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -45,10 +46,6 @@ interface VpnEntitlementRuntime {
   val state: StateFlow<VpnRuntimeState>
 
   fun revoke()
-
-  fun rejectStart() {
-    revoke()
-  }
 }
 
 fun interface VpnStopCommandRegistration {
@@ -80,10 +77,7 @@ class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
   }
 }
 
-class VpnRuntimeStateTracker(
-    private val rejectVpnStart: (() -> Unit)? = null,
-    private val revokeVpn: () -> Unit,
-) : VpnEntitlementRuntime {
+class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlementRuntime {
   private val lock = Any()
   private val _state = MutableStateFlow(VpnRuntimeState.Idle)
   override val state: StateFlow<VpnRuntimeState> = _state.asStateFlow()
@@ -136,10 +130,6 @@ class VpnRuntimeStateTracker(
   override fun revoke() {
     revokeVpn()
   }
-
-  override fun rejectStart() {
-    (rejectVpnStart ?: revokeVpn).invoke()
-  }
 }
 
 data class VpnRuntimeLease internal constructor(internal val generation: Long)
@@ -177,6 +167,54 @@ class VpnStartDispatchBoundary(private val authorizer: VpnStartAuthorizer) {
 
 fun interface VpnWantRunningWriter {
   fun setWantRunning(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit)
+}
+
+fun interface VpnWantRunningPersistence {
+  fun write(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit)
+}
+
+class SerializedVpnWantRunningWriter(private val persistence: VpnWantRunningPersistence) {
+  private data class PendingWrite(
+      val wantRunning: Boolean,
+      val onComplete: (Result<Unit>) -> Unit,
+      val completed: AtomicBoolean = AtomicBoolean(false),
+  )
+
+  private val lock = Any()
+  private val queuedWrites = ArrayDeque<PendingWrite>()
+  private var writeInFlight = false
+
+  fun write(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit = {}) {
+    val nextWrite =
+        synchronized(lock) {
+          queuedWrites.addLast(PendingWrite(wantRunning, onComplete))
+          if (writeInFlight) return@synchronized null
+          writeInFlight = true
+          queuedWrites.removeFirst()
+        }
+    nextWrite?.let(::dispatch)
+  }
+
+  private fun dispatch(write: PendingWrite) {
+    try {
+      persistence.write(write.wantRunning) { result -> complete(write, result) }
+    } catch (error: Throwable) {
+      complete(write, Result.failure(error))
+    }
+  }
+
+  private fun complete(write: PendingWrite, result: Result<Unit>) {
+    if (!write.completed.compareAndSet(false, true)) return
+    val nextWrite =
+        synchronized(lock) {
+          queuedWrites.removeFirstOrNull().also { if (it == null) writeInFlight = false }
+        }
+    try {
+      write.onComplete(result)
+    } finally {
+      nextWrite?.let(::dispatch)
+    }
+  }
 }
 
 class VpnServiceRunCoordinator(
@@ -366,11 +404,7 @@ class VpnEntitlementController(
   }
 
   suspend fun revokeRejectedRuntimeStart() {
-    revocationMutex.withLock {
-      if (revokedForCurrentRun) return
-      revokedForCurrentRun = true
-      if (runtime.state.value.isStartingOrRunning()) runtime.revoke() else runtime.rejectStart()
-    }
+    revokeOnce()
   }
 
   private suspend fun refreshAndEnforce() {

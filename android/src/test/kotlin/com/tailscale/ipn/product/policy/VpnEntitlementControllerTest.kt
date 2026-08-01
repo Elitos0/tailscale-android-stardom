@@ -325,7 +325,6 @@ class VpnEntitlementControllerTest {
     val runtime =
         VpnRuntimeStateTracker(
             revokeVpn = dispatcher::dispatchStopCommand,
-            rejectVpnStart = {},
         )
     val writer = CapturingWantRunningWriter()
     lateinit var coordinator: VpnServiceRunCoordinator
@@ -361,19 +360,72 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
-  fun idleRejectedStartUsesSeparateFailClosedCallback() {
-    val activeStopCommands = AtomicInteger()
-    val rejectedStarts = AtomicInteger()
-    val runtime =
-        VpnRuntimeStateTracker(
-            revokeVpn = { activeStopCommands.incrementAndGet() },
-            rejectVpnStart = { rejectedStarts.incrementAndGet() },
-        )
+  fun serviceBoundaryRejectionUsesFenceWhenIdleBecomesStartingDuringDispatch() = runTest {
+    val stopCommands = AtomicInteger()
+    val disconnects = AtomicInteger()
+    val dispatcher = VpnStopCommandDispatcher {}
+    lateinit var coordinator: VpnServiceRunCoordinator
+    val runtime = VpnRuntimeStateTracker(dispatcher::dispatchStopCommand)
+    val writer = CapturingWantRunningWriter()
+    coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+    val registration =
+        dispatcher.register {
+          stopCommands.incrementAndGet()
+          coordinator.beginAuthorizedStart(
+              VpnStartOrigin.ServiceStart,
+              requestVpn = {},
+              rejectStart = {},
+          )
+          coordinator.close { disconnects.incrementAndGet() }
+        }
+    val entitlementController = controller(FakeDecisionSource(defaultDecision = ACTIVE), runtime)
 
-    runtime.rejectStart()
+    entitlementController.revokeRejectedRuntimeStart()
+    registration.unregister()
 
-    assertEquals(0, activeStopCommands.get())
-    assertEquals(1, rejectedStarts.get())
+    assertEquals(1, stopCommands.get())
+    assertEquals(1, disconnects.get())
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+  }
+
+  @Test
+  fun pendingWantRunningTrueIsDrainedBeforeRevocationFalseAndCannotRequestVpn() = runTest {
+    val persistence = ControllableWantRunningPersistence()
+    val serializedWriter = SerializedVpnWantRunningWriter(persistence)
+    val dispatcher = VpnStopCommandDispatcher {}
+    val runtime = VpnRuntimeStateTracker(revokeVpn = dispatcher::dispatchStopCommand)
+    val writer = VpnWantRunningWriter { wantRunning, onComplete ->
+      serializedWriter.write(wantRunning, onComplete)
+    }
+    lateinit var coordinator: VpnServiceRunCoordinator
+    var requests = 0
+    var disconnects = 0
+    coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+    val registration =
+        dispatcher.register {
+          serializedWriter.write(false) {}
+          coordinator.close { disconnects++ }
+        }
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { requests++ },
+        rejectStart = {},
+    )
+    assertEquals(listOf(true), persistence.startedWrites)
+    runtime.revoke()
+    assertEquals(listOf(true), persistence.startedWrites)
+    assertEquals(1, disconnects)
+
+    persistence.completeNext(Result.success(Unit))
+    runCurrent()
+    assertEquals(listOf(true, false), persistence.startedWrites)
+    assertEquals(0, requests)
+    persistence.completeNext(Result.success(Unit))
+    registration.unregister()
+
+    assertEquals(false, persistence.persistedValue)
+    assertEquals(0, requests)
   }
 
   @Test
@@ -880,5 +932,23 @@ private class CapturingWantRunningWriter(private val throwOnCall: Int? = null) :
 
   fun fail(error: Throwable) {
     callback?.also { callback = null }?.invoke(Result.failure(error))
+  }
+}
+
+private class ControllableWantRunningPersistence : VpnWantRunningPersistence {
+  private val pendingWrites = ArrayDeque<Pair<Boolean, (Result<Unit>) -> Unit>>()
+  val startedWrites = mutableListOf<Boolean>()
+  var persistedValue: Boolean? = null
+    private set
+
+  override fun write(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit) {
+    startedWrites += wantRunning
+    pendingWrites += wantRunning to onComplete
+  }
+
+  fun completeNext(result: Result<Unit>) {
+    val (wantRunning, callback) = pendingWrites.removeFirst()
+    if (result.isSuccess) persistedValue = wantRunning
+    callback(result)
   }
 }

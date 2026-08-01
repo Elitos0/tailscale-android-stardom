@@ -31,6 +31,7 @@ import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
 import com.tailscale.ipn.product.policy.VpnRuntimeStateTracker
@@ -38,6 +39,7 @@ import com.tailscale.ipn.product.policy.VpnStartDispatchBoundary
 import com.tailscale.ipn.product.policy.VpnStartDispatchResult
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.product.policy.VpnStopCommandDispatcher
+import com.tailscale.ipn.product.policy.VpnWantRunningPersistence
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -78,10 +80,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     VpnStopCommandDispatcher(::stopVPN)
   }
   val vpnRuntimeTracker: VpnRuntimeStateTracker by lazy {
-    VpnRuntimeStateTracker(
-        revokeVpn = vpnStopCommandDispatcher::dispatchStopCommand,
-        rejectVpnStart = ::rejectVpnStart,
-    )
+    VpnRuntimeStateTracker(vpnStopCommandDispatcher::dispatchStopCommand)
   }
   val vpnEntitlementController: VpnEntitlementController by lazy {
     val sessionController = stardomSessionController
@@ -100,6 +99,15 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   }
   val vpnStartDispatchBoundary: VpnStartDispatchBoundary by lazy {
     VpnStartDispatchBoundary(vpnEntitlementController)
+  }
+  private val serializedWantRunningWriter: SerializedVpnWantRunningWriter by lazy {
+    SerializedVpnWantRunningWriter(
+        VpnWantRunningPersistence { wantRunning, onComplete ->
+          Client(applicationScope).editPrefs(
+              Ipn.MaskedPrefs().apply { WantRunning = wantRunning }) { result ->
+                onComplete(result.map { Unit })
+              }
+        })
   }
 
   companion object {
@@ -275,7 +283,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
       onSuccess: (() -> Unit)? = null,
       onFailure: ((Throwable) -> Unit)? = null,
   ) {
-    val callback: (Result<Ipn.Prefs>) -> Unit = { result ->
+    val callback: (Result<Unit>) -> Unit = { result ->
       result.fold(
           onSuccess = { onSuccess?.invoke() },
           onFailure = { error ->
@@ -283,13 +291,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             onFailure?.invoke(error)
           })
     }
-    Client(applicationScope)
-        .editPrefs(Ipn.MaskedPrefs().apply { WantRunning = wantRunning }, callback)
-  }
-
-  private fun rejectVpnStart() {
-    setWantRunning(false)
-    stopService(Intent(this, IPNService::class.java))
+    serializedWantRunningWriter.write(wantRunning, callback)
   }
   // encryptToPref a byte array of data using the Jetpack Security
   // library and writes it to a global encrypted preference store.
