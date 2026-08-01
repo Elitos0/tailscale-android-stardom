@@ -10,6 +10,7 @@ import android.os.Build
 import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.policy.VpnServiceRunCoordinator
+import com.tailscale.ipn.product.policy.VpnServiceStartRejectionBoundary
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.product.policy.VpnStopCommandRegistration
 import com.tailscale.ipn.product.policy.VpnWantRunningWriter
@@ -31,6 +32,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   private val randomID: String = UUID.randomUUID().toString()
   private lateinit var app: App
   private lateinit var runCoordinator: VpnServiceRunCoordinator
+  private lateinit var startRejectionBoundary: VpnServiceStartRejectionBoundary
   private lateinit var stopCommandRegistration: VpnStopCommandRegistration
   private val serviceJob = SupervisorJob()
   private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
@@ -63,6 +65,8 @@ open class IPNService : VpnService(), libtailscale.IPNService {
                 },
             scope = scope,
         )
+    startRejectionBoundary =
+        VpnServiceStartRejectionBoundary(app.vpnEntitlementController::revokeRejectedRuntimeStart)
     stopCommandRegistration = app.vpnStopCommandDispatcher.register(::handleStopCommand)
   }
 
@@ -74,7 +78,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       ACTION_RESTART_VPN -> {
         scope.launch {
           if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.ServiceRestart)) {
-            rejectRuntimeStart(startId)
+            rejectRuntimeStart()
             return@launch
           }
           app.setWantRunning(
@@ -85,7 +89,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
                   app.startVPN()
                 }
               },
-              onFailure = { scope.launch { rejectRuntimeStart(startId) } },
+              onFailure = { rejectRuntimeStart() },
           )
         }
       }
@@ -97,7 +101,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       }
       ACTION_START_VPN -> {
         showForegroundNotification()
-        authorizeAndRequestVpn(VpnStartOrigin.ServiceStart, startId)
+        authorizeAndRequestVpn(VpnStartOrigin.ServiceStart)
       }
       "android.net.VpnService" -> {
         // This means we were started by Android due to Always On VPN.
@@ -105,14 +109,14 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         // started as a foreground service.
         scope.launch {
           if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.AlwaysOn)) {
-            rejectRuntimeStart(startId)
+            rejectRuntimeStart()
             return@launch
           }
           // Collect the first value of hideDisconnectAction asynchronously.
           val hideDisconnectAction = MDMSettings.forceEnabled.flow.first()
           val exitNodeName =
               UninitializedApp.getExitNodeName(Notifier.prefs.value, Notifier.netmap.value)
-          requestVpnAfterAuthorization(VpnStartOrigin.AlwaysOn, startId) {
+          requestVpnAfterAuthorization(VpnStartOrigin.AlwaysOn) {
             app.notifyStatus(true, hideDisconnectAction.value, exitNodeName)
           }
         }
@@ -123,14 +127,14 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         showForegroundNotification()
         scope.launch {
           if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.StickyRestart)) {
-            rejectRuntimeStart(startId)
+            rejectRuntimeStart()
             return@launch
           }
           if (!app.isAbleToStartVPN()) {
-            rejectRuntimeStart(startId)
+            rejectRuntimeStart()
             return@launch
           }
-          requestVpnAfterAuthorization(VpnStartOrigin.StickyRestart, startId)
+          requestVpnAfterAuthorization(VpnStartOrigin.StickyRestart)
         }
       }
     }
@@ -139,19 +143,18 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     return START_NOT_STICKY
   }
 
-  private fun authorizeAndRequestVpn(origin: VpnStartOrigin, startId: Int) {
+  private fun authorizeAndRequestVpn(origin: VpnStartOrigin) {
     scope.launch {
       if (!app.vpnEntitlementController.authorizeStart(origin)) {
-        rejectRuntimeStart(startId)
+        rejectRuntimeStart()
         return@launch
       }
-      requestVpnAfterAuthorization(origin, startId)
+      requestVpnAfterAuthorization(origin)
     }
   }
 
   private fun requestVpnAfterAuthorization(
       origin: VpnStartOrigin,
-      startId: Int,
       beforeRequest: () -> Unit = {},
   ) {
     if (closed.get()) return
@@ -161,14 +164,13 @@ open class IPNService : VpnService(), libtailscale.IPNService {
           beforeRequest()
           Libtailscale.requestVPN(this@IPNService)
         },
-        rejectStart = { scope.launch { rejectRuntimeStart(startId) } },
+        rejectStart = { rejectRuntimeStart() },
     )
   }
 
-  private suspend fun rejectRuntimeStart(startId: Int) {
+  private fun rejectRuntimeStart() {
     if (closed.get()) return
-    app.vpnEntitlementController.revokeRejectedRuntimeStart()
-    stopSelfResult(startId)
+    startRejectionBoundary.reject()
   }
 
   private fun handleStopCommand() {

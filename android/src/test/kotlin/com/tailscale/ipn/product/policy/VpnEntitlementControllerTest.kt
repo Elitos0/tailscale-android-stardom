@@ -429,6 +429,147 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun pendingWantRunningTrueFailureStillDrainsRevocationFalse() {
+    val persistence = ControllableWantRunningPersistence()
+    val writer = SerializedVpnWantRunningWriter(persistence)
+
+    writer.write(true) {}
+    writer.write(false) {}
+    persistence.completeNext(Result.failure(IllegalStateException("true failed")))
+    assertEquals(listOf(true, false), persistence.startedWrites)
+    persistence.completeNext(Result.success(Unit))
+
+    assertEquals(false, persistence.persistedValue)
+  }
+
+  @Test
+  fun reentrantWantRunningWriteWaitsForCurrentCallbackReturn() {
+    val persistence = ControllableWantRunningPersistence()
+    val writer = SerializedVpnWantRunningWriter(persistence)
+    val events = mutableListOf<String>()
+
+    writer.write(true) {
+      events += "true-callback-start"
+      writer.write(false) { events += "false-callback" }
+      assertEquals(listOf(true), persistence.startedWrites)
+      events += "true-callback-end"
+    }
+    persistence.completeNext(Result.success(Unit))
+
+    assertEquals(listOf("true-callback-start", "true-callback-end"), events)
+    assertEquals(listOf(true, false), persistence.startedWrites)
+    persistence.completeNext(Result.success(Unit))
+    assertEquals(listOf("true-callback-start", "true-callback-end", "false-callback"), events)
+  }
+
+  @Test
+  fun callbackExceptionAndDuplicatePersistenceCallbackDoNotCorruptWantRunningFifo() {
+    val callbacks = mutableListOf<String>()
+    val persistence = ControllableWantRunningPersistence()
+    val writer = SerializedVpnWantRunningWriter(persistence)
+
+    writer.write(true) {
+      callbacks += "true"
+      throw IllegalStateException("callback failed")
+    }
+    writer.write(false) { callbacks += "false" }
+    persistence.completeNextTwice(Result.success(Unit))
+    persistence.completeNextTwice(Result.success(Unit))
+
+    assertEquals(listOf(true, false), persistence.startedWrites)
+    assertEquals(listOf("true", "false"), callbacks)
+  }
+
+  @Test
+  fun longSynchronousReentrantWantRunningQueueDoesNotGrowTheStack() {
+    val writes = AtomicInteger()
+    val callbacks = AtomicInteger()
+    val writer =
+        SerializedVpnWantRunningWriter(
+            VpnWantRunningPersistence { _, onComplete ->
+              writes.incrementAndGet()
+              onComplete(Result.success(Unit))
+            })
+
+    fun enqueueNext() {
+      writer.write(callbacks.get() % 2 == 0) {
+        if (callbacks.incrementAndGet() < 10_000) enqueueNext()
+      }
+    }
+
+    enqueueNext()
+
+    assertEquals(10_000, writes.get())
+    assertEquals(10_000, callbacks.get())
+  }
+
+  @Test
+  fun serviceBoundaryDenialDuringRequestHandoffDefersStopUntilRequestReturns() = runTest {
+    val writer = CapturingWantRunningWriter()
+    lateinit var coordinator: VpnServiceRunCoordinator
+    val stopActions = AtomicInteger()
+    var requests = 0
+    val dispatcher = VpnStopCommandDispatcher {}
+    val registration = dispatcher.register { coordinator.close { stopActions.incrementAndGet() } }
+    val fencedRuntime = VpnRuntimeStateTracker(dispatcher::dispatchStopCommand)
+    val rejectionController =
+        controller(FakeDecisionSource(defaultDecision = ACTIVE), fencedRuntime)
+    val rejectionBoundary =
+        VpnServiceStartRejectionBoundary(rejectionController::revokeRejectedRuntimeStart)
+    coordinator = VpnServiceRunCoordinator(fencedRuntime, AlwaysAuthorizer, writer, backgroundScope)
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = {
+          rejectionBoundary.reject()
+          assertEquals(0, stopActions.get())
+          requests++
+        },
+        rejectStart = {},
+    )
+    writer.succeed()
+    runCurrent()
+    registration.unregister()
+
+    assertEquals(1, requests)
+    assertEquals(1, stopActions.get())
+    assertEquals(VpnRuntimeState.Idle, fencedRuntime.state.value)
+  }
+
+  @Test
+  fun sequentialIdleServiceGenerationsEachDispatchOneFencedStop() = runTest {
+    val stopCommands = AtomicInteger()
+    val stopActions = AtomicInteger()
+    val dispatcher = VpnStopCommandDispatcher {}
+    val runtime = VpnRuntimeStateTracker(dispatcher::dispatchStopCommand)
+    val controller = controller(FakeDecisionSource(defaultDecision = AccessState.Disabled), runtime)
+
+    repeat(2) {
+      val coordinator =
+          VpnServiceRunCoordinator(
+              runtime,
+              AlwaysAuthorizer,
+              CapturingWantRunningWriter(),
+              backgroundScope,
+          )
+      val registration =
+          dispatcher.register {
+            stopCommands.incrementAndGet()
+            coordinator.close { stopActions.incrementAndGet() }
+          }
+      val rejectionBoundary =
+          VpnServiceStartRejectionBoundary(controller::revokeRejectedRuntimeStart)
+
+      rejectionBoundary.reject()
+      rejectionBoundary.reject()
+      registration.unregister()
+    }
+
+    assertEquals(2, stopCommands.get())
+    assertEquals(2, stopActions.get())
+  }
+
+  @Test
   fun duplicateStartWhileWantRunningIsPendingIsCoalescedBeforeWriterFailure() = runTest {
     val runtime = VpnRuntimeStateTracker {}
     val writer = CapturingWantRunningWriter(throwOnCall = 2)
@@ -567,10 +708,11 @@ class VpnEntitlementControllerTest {
     val decisions = FakeDecisionSource(defaultDecision = AccessState.Disabled)
     val runtime = FakeRuntime()
     val controller = controller(decisions, runtime)
+    val rejectionBoundary = VpnServiceStartRejectionBoundary(controller::revokeRejectedRuntimeStart)
 
     assertFalse(controller.authorizeStart(VpnStartOrigin.AlwaysOn))
-    controller.revokeRejectedRuntimeStart()
-    controller.revokeRejectedRuntimeStart()
+    rejectionBoundary.reject()
+    rejectionBoundary.reject()
 
     assertEquals(1, runtime.revocations)
   }
@@ -580,9 +722,10 @@ class VpnEntitlementControllerTest {
     val decisions = FakeDecisionSource(AccessState.Disabled, ACTIVE, AccessState.Unavailable)
     val runtime = FakeRuntime()
     val controller = controller(decisions, runtime)
+    val rejectionBoundary = VpnServiceStartRejectionBoundary(controller::revokeRejectedRuntimeStart)
 
     assertFalse(controller.authorizeStart(VpnStartOrigin.AlwaysOn))
-    controller.revokeRejectedRuntimeStart()
+    rejectionBoundary.reject()
     assertTrue(controller.authorizeStart(VpnStartOrigin.AppStart))
     runtime.state.value = VpnRuntimeState.Starting
     assertFalse(controller.authorizeStart(VpnStartOrigin.ServiceStart))
@@ -949,6 +1092,13 @@ private class ControllableWantRunningPersistence : VpnWantRunningPersistence {
   fun completeNext(result: Result<Unit>) {
     val (wantRunning, callback) = pendingWrites.removeFirst()
     if (result.isSuccess) persistedValue = wantRunning
+    callback(result)
+  }
+
+  fun completeNextTwice(result: Result<Unit>) {
+    val (wantRunning, callback) = pendingWrites.removeFirst()
+    if (result.isSuccess) persistedValue = wantRunning
+    callback(result)
     callback(result)
   }
 }

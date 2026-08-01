@@ -182,38 +182,77 @@ class SerializedVpnWantRunningWriter(private val persistence: VpnWantRunningPers
 
   private val lock = Any()
   private val queuedWrites = ArrayDeque<PendingWrite>()
-  private var writeInFlight = false
+  private val queuedTasks = ArrayDeque<() -> Unit>()
+  private var activeWrite: PendingWrite? = null
+  private var drainingTasks = false
 
   fun write(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit = {}) {
     val nextWrite =
         synchronized(lock) {
           queuedWrites.addLast(PendingWrite(wantRunning, onComplete))
-          if (writeInFlight) return@synchronized null
-          writeInFlight = true
-          queuedWrites.removeFirst()
+          if (activeWrite != null) return@synchronized null
+          queuedWrites.removeFirst().also { activeWrite = it }
         }
-    nextWrite?.let(::dispatch)
+    nextWrite?.let { enqueueTask { dispatch(it) } }
   }
 
   private fun dispatch(write: PendingWrite) {
     try {
-      persistence.write(write.wantRunning) { result -> complete(write, result) }
+      persistence.write(write.wantRunning) { result -> enqueueTask { complete(write, result) } }
     } catch (error: Throwable) {
-      complete(write, Result.failure(error))
+      enqueueTask { complete(write, Result.failure(error)) }
     }
   }
 
   private fun complete(write: PendingWrite, result: Result<Unit>) {
     if (!write.completed.compareAndSet(false, true)) return
-    val nextWrite =
-        synchronized(lock) {
-          queuedWrites.removeFirstOrNull().also { if (it == null) writeInFlight = false }
-        }
     try {
       write.onComplete(result)
     } finally {
-      nextWrite?.let(::dispatch)
+      val nextWrite =
+          synchronized(lock) {
+            check(activeWrite === write) { "completed WantRunning write is not active" }
+            queuedWrites.removeFirstOrNull().also { activeWrite = it }
+          }
+      nextWrite?.let { enqueueTask { dispatch(it) } }
     }
+  }
+
+  private fun enqueueTask(task: () -> Unit) {
+    val shouldDrain =
+        synchronized(lock) {
+          queuedTasks.addLast(task)
+          if (drainingTasks) return@synchronized false
+          drainingTasks = true
+          true
+        }
+    if (shouldDrain) drainTasks()
+  }
+
+  private fun drainTasks() {
+    while (true) {
+      val task =
+          synchronized(lock) {
+            queuedTasks.removeFirstOrNull()
+                ?: run {
+                  drainingTasks = false
+                  return
+                }
+          }
+      try {
+        task()
+      } catch (_: Throwable) {
+        // A persistence/client callback must not strand the remaining FIFO work.
+      }
+    }
+  }
+}
+
+class VpnServiceStartRejectionBoundary(private val dispatchFencedStop: () -> Unit) {
+  private val rejected = AtomicBoolean(false)
+
+  fun reject() {
+    if (rejected.compareAndSet(false, true)) dispatchFencedStop()
   }
 }
 
@@ -403,8 +442,8 @@ class VpnEntitlementController(
     if (runtime.state.value.isStartingOrRunning()) refreshAndEnforce()
   }
 
-  suspend fun revokeRejectedRuntimeStart() {
-    revokeOnce()
+  fun revokeRejectedRuntimeStart() {
+    runtime.revoke()
   }
 
   private suspend fun refreshAndEnforce() {
