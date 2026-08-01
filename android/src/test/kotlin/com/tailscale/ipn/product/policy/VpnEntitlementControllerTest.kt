@@ -9,6 +9,7 @@ import com.tailscale.ipn.ui.notifier.Notifier
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -198,7 +199,13 @@ class VpnEntitlementControllerTest {
         requestVpn = { newRequests++ },
         rejectStart = {},
     )
+    assertFalse(newWriter.hasPendingCallback)
     oldCoordinator.close()
+    newCoordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { newRequests++ },
+        rejectStart = {},
+    )
     oldWriter.succeed()
     newWriter.succeed()
     runCurrent()
@@ -207,6 +214,165 @@ class VpnEntitlementControllerTest {
     assertEquals(0, oldRequests)
     assertEquals(1, newRequests)
     assertTrue(newCoordinator.updateVpnStatus(true))
+    assertEquals(VpnRuntimeState.Running, runtime.state.value)
+  }
+
+  @Test
+  fun closeAfterPermitBeforeCallbackEntrySuppressesRequestAndFencesANewRun() = runTest {
+    val runtime = VpnRuntimeStateTracker {}
+    val oldWriter = CapturingWantRunningWriter()
+    val newWriter = CapturingWantRunningWriter()
+    val permitClaimed = CountDownLatch(1)
+    val resumeHandoff = CountDownLatch(1)
+    val closeCompleted = CountDownLatch(1)
+    val disconnects = AtomicInteger()
+    var oldRequests = 0
+    var newRequests = 0
+    lateinit var oldCoordinator: VpnServiceRunCoordinator
+    val newCoordinator =
+        VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, newWriter, backgroundScope)
+    oldCoordinator =
+        VpnServiceRunCoordinator(
+            runtime,
+            AlwaysAuthorizer,
+            oldWriter,
+            backgroundScope,
+            beforeRequestHandoff = {
+              permitClaimed.countDown()
+              assertTrue(resumeHandoff.await(1, TimeUnit.SECONDS))
+            },
+        )
+    val closer =
+        thread(start = false, name = "vpn-close-before-handoff-test") {
+          assertTrue(permitClaimed.await(1, TimeUnit.SECONDS))
+          oldCoordinator.close {
+            disconnects.incrementAndGet()
+            newCoordinator.beginAuthorizedStart(
+                VpnStartOrigin.ServiceStart,
+                requestVpn = { newRequests++ },
+                rejectStart = {},
+            )
+            assertFalse(newWriter.hasPendingCallback)
+          }
+          closeCompleted.countDown()
+          resumeHandoff.countDown()
+        }
+
+    oldCoordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { oldRequests++ },
+        rejectStart = {},
+    )
+    closer.start()
+    oldWriter.succeed()
+    runCurrent()
+    assertTrue(closeCompleted.await(1, TimeUnit.SECONDS))
+    closer.join(1_000)
+    assertFalse(closer.isAlive)
+
+    assertEquals(0, oldRequests)
+    assertEquals(1, disconnects.get())
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+    newCoordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { newRequests++ },
+        rejectStart = {},
+    )
+    assertTrue(newWriter.hasPendingCallback)
+    newWriter.succeed()
+    runCurrent()
+    assertEquals(1, newRequests)
+  }
+
+  @Test
+  fun closeAfterCallbackEntryDefersDisconnectUntilRequestReturns() = runTest {
+    val runtime = VpnRuntimeStateTracker {}
+    val writer = CapturingWantRunningWriter()
+    val disconnects = AtomicInteger()
+    val closeReturned = CountDownLatch(1)
+    lateinit var coordinator: VpnServiceRunCoordinator
+    var requests = 0
+    coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = {
+          thread(start = true, name = "vpn-close-after-handoff-test") {
+            coordinator.close { disconnects.incrementAndGet() }
+            closeReturned.countDown()
+          }
+          assertTrue(closeReturned.await(1, TimeUnit.SECONDS))
+          assertEquals(0, disconnects.get())
+          requests++
+        },
+        rejectStart = {},
+    )
+    writer.succeed()
+    runCurrent()
+
+    assertEquals(1, requests)
+    assertEquals(1, disconnects.get())
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+  }
+
+  @Test
+  fun duplicateStartWhileWantRunningIsPendingIsCoalescedBeforeWriterFailure() = runTest {
+    val runtime = VpnRuntimeStateTracker {}
+    val writer = CapturingWantRunningWriter(throwOnCall = 2)
+    val coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+    var requests = 0
+    var duplicateRequests = 0
+    var rejections = 0
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { requests++ },
+        rejectStart = { rejections++ },
+    )
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceRestart,
+        requestVpn = { duplicateRequests++ },
+        rejectStart = { rejections++ },
+    )
+
+    assertEquals(1, writer.callCount)
+    assertEquals(VpnRuntimeState.Starting, runtime.state.value)
+    writer.succeed()
+    runCurrent()
+    assertEquals(1, requests)
+    assertEquals(0, duplicateRequests)
+    assertEquals(0, rejections)
+  }
+
+  @Test
+  fun duplicateStartWhileRunningIsCoalescedBeforeAsyncWriterFailure() = runTest {
+    val runtime = VpnRuntimeStateTracker {}
+    val writer = CapturingWantRunningWriter()
+    val coordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, writer, backgroundScope)
+    var requests = 0
+    var duplicateRequests = 0
+    var rejections = 0
+
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { requests++ },
+        rejectStart = { rejections++ },
+    )
+    writer.succeed()
+    runCurrent()
+    assertTrue(coordinator.updateVpnStatus(true))
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceRestart,
+        requestVpn = { duplicateRequests++ },
+        rejectStart = { rejections++ },
+    )
+    writer.fail(IllegalStateException("duplicate patch failed"))
+    runCurrent()
+
+    assertEquals(1, writer.callCount)
+    assertEquals(1, requests)
+    assertEquals(0, duplicateRequests)
+    assertEquals(0, rejections)
     assertEquals(VpnRuntimeState.Running, runtime.state.value)
   }
 
@@ -629,14 +795,20 @@ private class LambdaAuthorizer(private val beforeReturn: () -> Unit) : VpnStartA
   }
 }
 
-private class CapturingWantRunningWriter : VpnWantRunningWriter {
+private class CapturingWantRunningWriter(private val throwOnCall: Int? = null) :
+    VpnWantRunningWriter {
   private var callback: ((Result<Unit>) -> Unit)? = null
+
+  var callCount = 0
+    private set
 
   val hasPendingCallback: Boolean
     get() = callback != null
 
   override fun setWantRunning(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit) {
     assertTrue(wantRunning)
+    callCount++
+    if (callCount == throwOnCall) throw IllegalStateException("writer failed synchronously")
     check(callback == null) { "writer already has a pending callback" }
     callback = onComplete
   }

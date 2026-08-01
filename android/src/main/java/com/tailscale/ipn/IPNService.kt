@@ -171,10 +171,11 @@ open class IPNService : VpnService(), libtailscale.IPNService {
 
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
-    runCoordinator.close()
-    Notifier.setState(Ipn.State.Stopping)
-    disconnectVPN()
-    Libtailscale.serviceDisconnect(this)
+    runCoordinator.close {
+      Notifier.setState(Ipn.State.Stopping)
+      disconnectVPN()
+      Libtailscale.serviceDisconnect(this)
+    }
   }
 
   override fun disconnectVPN() {
