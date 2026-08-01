@@ -167,7 +167,9 @@ class AuthSessionRepository(
             }
     if (!transactionStorage.consumeIf { pending ->
       nowMillis() - pending.createdAtMillis in 0..AUTH_TRANSACTION_MAX_AGE_MILLIS &&
-          appAuth.matchesPendingAuthorization(intent, result.response, pending.request)
+          callbackMatchesCurrentTransaction(intent, result, pending.request) &&
+          (result.response == null ||
+              appAuth.matchesPendingAuthorization(intent, result.response, pending.request))
     }) {
       onFinished()
       return
@@ -291,10 +293,32 @@ internal fun callbackMatchesPendingAuthorization(
     response: AuthorizationResponse?,
     pendingRequest: AuthorizationRequest,
 ): Boolean {
+  if (intent.action != AUTH_CALLBACK_ACTION) return false
   if (intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA) != pendingRequest.state) return false
-  if (response == null) return true
+  if (response == null) return false
   return responseMatchesPendingRequest(response, pendingRequest)
 }
+
+private fun callbackMatchesCurrentTransaction(
+    intent: Intent,
+    result: AuthorizationResult,
+    pendingRequest: AuthorizationRequest,
+): Boolean {
+  if (result.response != null && result.exception == null) {
+    return intent.action == AUTH_CALLBACK_ACTION
+  }
+  return intent.action == AUTH_CANCEL_ACTION &&
+      result.response == null &&
+      isExplicitAuthorizationCancellation(result.exception) &&
+      intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA) == pendingRequest.state
+}
+
+private fun isExplicitAuthorizationCancellation(exception: AuthorizationException?): Boolean =
+    exception?.type == AuthorizationException.TYPE_GENERAL_ERROR &&
+        exception.code in
+            setOf(
+                AuthorizationException.GeneralErrors.USER_CANCELED_AUTH_FLOW.code,
+                AuthorizationException.GeneralErrors.PROGRAM_CANCELED_AUTH_FLOW.code)
 
 private fun responseMatchesPendingRequest(
     response: AuthorizationResponse,
@@ -303,12 +327,23 @@ private fun responseMatchesPendingRequest(
   val request = response.request
   return response.state == pending.state &&
       request.state == pending.state &&
+      request.configuration.toJsonString() == pending.configuration.toJsonString() &&
       request.clientId == pending.clientId &&
+      request.display == pending.display &&
+      request.loginHint == pending.loginHint &&
+      request.prompt == pending.prompt &&
+      request.uiLocales == pending.uiLocales &&
       request.redirectUri == pending.redirectUri &&
       request.responseType == pending.responseType &&
+      request.scope == pending.scope &&
+      request.nonce == pending.nonce &&
       request.codeVerifier == pending.codeVerifier &&
       request.codeVerifierChallenge == pending.codeVerifierChallenge &&
-      request.codeVerifierChallengeMethod == pending.codeVerifierChallengeMethod
+      request.codeVerifierChallengeMethod == pending.codeVerifierChallengeMethod &&
+      request.responseMode == pending.responseMode &&
+      request.claims?.toString() == pending.claims?.toString() &&
+      request.claimsLocales == pending.claimsLocales &&
+      request.additionalParameters == pending.additionalParameters
 }
 
 private class RealAppAuthGateway : AppAuthGateway {

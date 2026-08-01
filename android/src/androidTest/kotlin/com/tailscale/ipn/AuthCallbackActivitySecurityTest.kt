@@ -51,7 +51,8 @@ class AuthCallbackActivitySecurityTest {
     val pending = request(clientId = "stardom-client", redirect = "com.stardom.vpn:/oauth2redirect")
     val state = requireNotNull(pending.state)
     val clientId = requireNotNull(pending.clientId)
-    val callback = Intent().putExtra(AUTH_TRANSACTION_STATE_EXTRA, state)
+    val callback =
+        Intent("com.stardom.vpn.AUTH_CALLBACK").putExtra(AUTH_TRANSACTION_STATE_EXTRA, state)
     val valid = response(pending, state)
     val differentClient =
         request(clientId = "other-client", redirect = pending.redirectUri.toString())
@@ -63,6 +64,7 @@ class AuthCallbackActivitySecurityTest {
             verifier = "d".repeat(43))
 
     assertTrue(callbackMatchesPendingAuthorization(callback, valid, pending))
+    assertFalse(callbackMatchesPendingAuthorization(callback, response(pending, null), pending))
     assertFalse(
         callbackMatchesPendingAuthorization(callback, response(pending, "wrong-state"), pending))
     assertFalse(
@@ -73,22 +75,73 @@ class AuthCallbackActivitySecurityTest {
         callbackMatchesPendingAuthorization(callback, response(differentPkce, state), pending))
   }
 
+  @Test
+  fun callbackMustMatchTheEntireAuthorizationRequestIdentity() {
+    val pending = request(clientId = "stardom-client", redirect = "com.stardom.vpn:/oauth2redirect")
+    val state = requireNotNull(pending.state)
+    val callback =
+        Intent("com.stardom.vpn.AUTH_CALLBACK").putExtra(AUTH_TRANSACTION_STATE_EXTRA, state)
+
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback, response(request(scope = "openid email"), state), pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback, response(request(nonce = "different-nonce"), state), pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback, response(request(prompt = "login"), state), pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback, response(request(loginHint = "other@example.test"), state), pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback, response(request(uiLocales = "ru-RU"), state), pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback,
+            response(request(additionalParameters = mapOf("resource" to "other")), state),
+            pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            callback,
+            response(request(tokenEndpoint = "https://issuer.example/other-token"), state),
+            pending))
+    assertFalse(
+        callbackMatchesPendingAuthorization(
+            Intent("unexpected-action").putExtra(AUTH_TRANSACTION_STATE_EXTRA, state),
+            response(pending, state),
+            pending))
+  }
+
   private fun request(
-      clientId: String,
-      redirect: String,
+      clientId: String = "stardom-client",
+      redirect: String = "com.stardom.vpn:/oauth2redirect",
       verifier: String = "v".repeat(43),
+      scope: String = "openid profile email",
+      nonce: String = "nonce",
+      prompt: String = "consent",
+      loginHint: String = "tester@example.test",
+      uiLocales: String = "en-US",
+      additionalParameters: Map<String, String> = mapOf("resource" to "stardom"),
+      tokenEndpoint: String = "https://issuer.example/token",
   ): AuthorizationRequest =
       AuthorizationRequest.Builder(
               AuthorizationServiceConfiguration(
-                  Uri.parse("https://issuer.example/authorize"),
-                  Uri.parse("https://issuer.example/token")),
+                  Uri.parse("https://issuer.example/authorize"), Uri.parse(tokenEndpoint)),
               clientId,
               ResponseTypeValues.CODE,
               Uri.parse(redirect))
           .setState("current-state")
+          .setScope(scope)
+          .setNonce(nonce)
+          .setPrompt(prompt)
+          .setLoginHint(loginHint)
+          .setUiLocales(uiLocales)
+          .setAdditionalParameters(additionalParameters)
           .setCodeVerifier(verifier, "challenge-$verifier", "S256")
           .build()
 
-  private fun response(request: AuthorizationRequest, state: String): AuthorizationResponse =
+  private fun response(request: AuthorizationRequest, state: String?): AuthorizationResponse =
       AuthorizationResponse.Builder(request).setAuthorizationCode("code").setState(state).build()
 }

@@ -145,9 +145,7 @@ class MainActivity : ComponentActivity() {
     appViewModel = (application as App).getAppScopedViewModel()
     viewModel =
         ViewModelProvider(this, MainViewModelFactory(appViewModel)).get(MainViewModel::class.java)
-    if (stardomSessionController.consumeFixedHeadscaleContinuation()) {
-      resumeFixedControlLogin()
-    }
+    resumeFixedControlLoginIfPending()
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
@@ -481,6 +479,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    resumeFixedControlLoginIfPending()
     if (intent.getBooleanExtra(START_AT_ROOT, false)) {
       if (this::navController.isInitialized) {
         val previousEntry = navController.previousBackStackEntry
@@ -504,6 +503,12 @@ class MainActivity : ComponentActivity() {
           navController.popBackStack(route = "main", inclusive = false)
         }
       }
+    }
+  }
+
+  private fun resumeFixedControlLoginIfPending() {
+    if (stardomSessionController.consumeFixedHeadscaleContinuation()) {
+      resumeFixedControlLogin()
     }
   }
 

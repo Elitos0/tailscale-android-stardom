@@ -18,10 +18,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.whenever
 
 class AuthSessionRepositoryTest {
   private val context = mock<Context>()
-  private val intent = mock<Intent>()
+  private val intent = callbackIntent("com.stardom.vpn.AUTH_CALLBACK")
 
   @Test
   fun discoveryFailureReturnsErrorWithoutStartingAuthorization() {
@@ -155,6 +156,80 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
+  fun callbackWithUnexpectedActionDoesNotConsumeOrMutateCurrentTransaction() {
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway, transactions) { 1 }
+
+    repository.handleAuthorizationIntent(context, callbackIntent("unexpected-callback-action"))
+
+    assertEquals(0, state.authorizationUpdates)
+    assertEquals(0, state.tokenUpdates)
+    assertEquals(0, gateway.codeExchanges)
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(1, gateway.codeExchanges)
+  }
+
+  @Test
+  fun stateMismatchErrorDoesNotConsumeOrMutateCurrentTransaction() {
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult =
+                AuthorizationResult(
+                    null, AuthorizationException.AuthorizationRequestErrors.STATE_MISMATCH),
+            tokenResponse = mock<TokenResponse>())
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway, transactions) { 1 }
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(0, state.authorizationUpdates)
+    assertEquals(0, state.tokenUpdates)
+    assertEquals(0, gateway.codeExchanges)
+
+    gateway.authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null)
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(1, gateway.codeExchanges)
+  }
+
+  @Test
+  fun explicitCancelConsumesCurrentTransactionAndFinishesAuthorization() {
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult =
+                AuthorizationResult(
+                    null, AuthorizationException.GeneralErrors.USER_CANCELED_AUTH_FLOW))
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    val repository =
+        AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway, transactions) { 1 }
+
+    repository.handleAuthorizationIntent(
+        context, callbackIntent("com.stardom.vpn.AUTH_CANCELLED"), onFinished = {})
+
+    assertEquals(1, state.authorizationUpdates)
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+    assertEquals(0, gateway.codeExchanges)
+    gateway.authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null)
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(0, gateway.codeExchanges)
+  }
+
+  @Test
   fun staleCallbackDoesNotExchangeAuthorizationCode() {
     val gateway =
         FakeAppAuthGateway(
@@ -279,9 +354,12 @@ class AuthSessionRepositoryTest {
   }
 }
 
+private fun callbackIntent(action: String): Intent =
+    mock<Intent>().also { whenever(it.action).thenReturn(action) }
+
 private class FakeAppAuthGateway(
     private val discoveryException: AuthorizationException? = null,
-    private val authorizationResult: AuthorizationResult? = null,
+    var authorizationResult: AuthorizationResult? = null,
     private val tokenResponse: TokenResponse? = null,
     private val freshToken: String? = null,
     private val freshException: AuthorizationException? = null,
