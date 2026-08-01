@@ -34,6 +34,8 @@ import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
 import com.tailscale.ipn.product.policy.VpnRuntimeStateTracker
+import com.tailscale.ipn.product.policy.VpnStartDispatchBoundary
+import com.tailscale.ipn.product.policy.VpnStartDispatchResult
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
@@ -88,6 +90,9 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
         runtime = vpnRuntimeTracker,
         scope = applicationScope,
     )
+  }
+  val vpnStartDispatchBoundary: VpnStartDispatchBoundary by lazy {
+    VpnStartDispatchBoundary(vpnEntitlementController)
   }
 
   companion object {
@@ -258,12 +263,17 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             .get(AppViewModel::class.java)
   }
 
-  fun setWantRunning(wantRunning: Boolean, onSuccess: (() -> Unit)? = null) {
+  fun setWantRunning(
+      wantRunning: Boolean,
+      onSuccess: (() -> Unit)? = null,
+      onFailure: ((Throwable) -> Unit)? = null,
+  ) {
     val callback: (Result<Ipn.Prefs>) -> Unit = { result ->
       result.fold(
           onSuccess = { onSuccess?.invoke() },
           onFailure = { error ->
             TSLog.d("TAG", "Set want running: failed to update preferences: ${error.message}")
+            onFailure?.invoke(error)
           })
     }
     Client(applicationScope)
@@ -616,34 +626,34 @@ open class UninitializedApp : Application() {
   fun startVPN(origin: VpnStartOrigin = VpnStartOrigin.AppStart) {
     val initializedApp = this as? App ?: return
     initializedApp.applicationScope.launch {
-      if (!initializedApp.vpnEntitlementController.authorizeStart(origin)) return@launch
-      val intent =
-          Intent(initializedApp, IPNService::class.java).apply {
-            action = IPNService.ACTION_START_VPN
+      when (val result =
+          initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
+            val intent =
+                Intent(initializedApp, IPNService::class.java).apply {
+                  action = IPNService.ACTION_START_VPN
+                }
+            // FLAG_UPDATE_CURRENT ensures that if the intent is already pending, the existing
+            // intent will be updated rather than creating multiple redundant instances.
+            val pendingIntent =
+                PendingIntent.getForegroundService(
+                    initializedApp,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or
+                        PendingIntent.FLAG_IMMUTABLE // FLAG_IMMUTABLE for Android 12+
+                    )
+            pendingIntent.send()
+          }) {
+        VpnStartDispatchResult.Denied,
+        VpnStartDispatchResult.Dispatched -> Unit
+        is VpnStartDispatchResult.Failed -> {
+          when (val error = result.error) {
+            is IllegalStateException ->
+                TSLog.e(TAG, "startVPN hit ForegroundServiceStartNotAllowedException: $error")
+            is SecurityException -> TSLog.e(TAG, "startVPN hit SecurityException: $error")
+            else -> TSLog.e(TAG, "startVPN hit exception: $error")
           }
-      // FLAG_UPDATE_CURRENT ensures that if the intent is already pending, the existing intent
-      // will be updated rather than creating multiple redundant instances.
-      val pendingIntent =
-          PendingIntent.getForegroundService(
-              initializedApp,
-              0,
-              intent,
-              PendingIntent.FLAG_UPDATE_CURRENT or
-                  PendingIntent.FLAG_IMMUTABLE // FLAG_IMMUTABLE for Android 12+
-              )
-      try {
-        pendingIntent.send()
-      } catch (foregroundServiceStartException: IllegalStateException) {
-        initializedApp.vpnRuntimeTracker.markIdle()
-        TSLog.e(
-            TAG,
-            "startVPN hit ForegroundServiceStartNotAllowedException: $foregroundServiceStartException")
-      } catch (securityException: SecurityException) {
-        initializedApp.vpnRuntimeTracker.markIdle()
-        TSLog.e(TAG, "startVPN hit SecurityException: $securityException")
-      } catch (e: Exception) {
-        initializedApp.vpnRuntimeTracker.markIdle()
-        TSLog.e(TAG, "startVPN hit exception: $e")
+        }
       }
     }
   }

@@ -9,14 +9,18 @@ import android.net.VpnService
 import android.os.Build
 import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
-import com.tailscale.ipn.product.policy.VpnRequestBoundary
+import com.tailscale.ipn.product.policy.VpnServiceRunCoordinator
 import com.tailscale.ipn.product.policy.VpnStartOrigin
+import com.tailscale.ipn.product.policy.VpnWantRunningWriter
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.util.TSLog
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import libtailscale.Libtailscale
@@ -25,9 +29,10 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   private val TAG = "IPNService"
   private val randomID: String = UUID.randomUUID().toString()
   private lateinit var app: App
-  private lateinit var requestBoundary: VpnRequestBoundary
-  val scope = CoroutineScope(Dispatchers.IO)
-  private var closed = false
+  private lateinit var runCoordinator: VpnServiceRunCoordinator
+  private val serviceJob = SupervisorJob()
+  private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
+  private val closed = AtomicBoolean(false)
 
   override fun id(): String {
     return randomID
@@ -35,18 +40,27 @@ open class IPNService : VpnService(), libtailscale.IPNService {
 
   override fun updateVpnStatus(status: Boolean) {
     app.getAppScopedViewModel().setVpnActive(status)
-    if (status && !closed) {
-      app.vpnRuntimeTracker.markRunning()
-    } else {
-      app.vpnRuntimeTracker.markIdle()
-    }
+    runCoordinator.updateVpnStatus(status)
   }
 
   override fun onCreate() {
     super.onCreate()
     // grab app to make sure it initializes
     app = App.get()
-    requestBoundary = VpnRequestBoundary(app.vpnEntitlementController)
+    runCoordinator =
+        VpnServiceRunCoordinator(
+            runtime = app.vpnRuntimeTracker,
+            authorizer = app.vpnEntitlementController,
+            wantRunningWriter =
+                VpnWantRunningWriter { wantRunning, onComplete ->
+                  app.setWantRunning(
+                      wantRunning,
+                      onSuccess = { onComplete(Result.success(Unit)) },
+                      onFailure = { error -> onComplete(Result.failure(error)) },
+                  )
+                },
+            scope = scope,
+        )
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -61,10 +75,16 @@ open class IPNService : VpnService(), libtailscale.IPNService {
             rejectRuntimeStart(startId)
             return@launch
           }
-          app.setWantRunning(false) {
-            close()
-            app.startVPN()
-          }
+          app.setWantRunning(
+              false,
+              onSuccess = {
+                if (!closed.get()) {
+                  close()
+                  app.startVPN()
+                }
+              },
+              onFailure = { scope.launch { rejectRuntimeStart(startId) } },
+          )
         }
       }
       ACTION_START_FOREGROUND_ONLY -> {
@@ -132,31 +152,26 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       startId: Int,
       beforeRequest: () -> Unit = {},
   ) {
-    if (closed) return
-    app.vpnRuntimeTracker.markStarting()
-    app.setWantRunning(true) {
-      scope.launch {
-        val requested =
-            requestBoundary.requestIfAuthorized(origin) {
-              if (!closed) {
-                beforeRequest()
-                Libtailscale.requestVPN(this@IPNService)
-              }
-            }
-        if (!requested) rejectRuntimeStart(startId)
-      }
-    }
+    if (closed.get()) return
+    runCoordinator.beginAuthorizedStart(
+        origin = origin,
+        requestVpn = {
+          beforeRequest()
+          Libtailscale.requestVPN(this@IPNService)
+        },
+        rejectStart = { scope.launch { rejectRuntimeStart(startId) } },
+    )
   }
 
   private suspend fun rejectRuntimeStart(startId: Int) {
+    if (closed.get()) return
     app.vpnEntitlementController.revokeRejectedRuntimeStart()
     stopSelfResult(startId)
   }
 
   override fun close() {
-    if (closed) return
-    closed = true
-    app.vpnRuntimeTracker.markIdle()
+    if (!closed.compareAndSet(false, true)) return
+    runCoordinator.close()
     Notifier.setState(Ipn.State.Stopping)
     disconnectVPN()
     Libtailscale.serviceDisconnect(this)
@@ -167,6 +182,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   }
 
   override fun onDestroy() {
+    serviceJob.cancel()
     close()
     updateVpnStatus(false)
     super.onDestroy()

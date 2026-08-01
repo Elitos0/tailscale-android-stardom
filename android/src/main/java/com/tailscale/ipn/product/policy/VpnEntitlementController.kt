@@ -5,6 +5,7 @@ package com.tailscale.ipn.product.policy
 
 import com.tailscale.ipn.product.auth.AuthentikState
 import java.time.Duration
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,19 +48,51 @@ interface VpnEntitlementRuntime {
 }
 
 class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlementRuntime {
+  private val lock = Any()
   private val _state = MutableStateFlow(VpnRuntimeState.Idle)
   override val state: StateFlow<VpnRuntimeState> = _state.asStateFlow()
+  private var generation = 0L
+  private var requestGeneration: Long? = null
 
-  fun markStarting() {
-    _state.value = VpnRuntimeState.Starting
+  fun beginStarting(): VpnRuntimeLease =
+      checkNotNull(tryBeginStarting()) { "a VPN request is already in flight" }
+
+  fun tryBeginStarting(): VpnRuntimeLease? =
+      synchronized(lock) {
+        if (requestGeneration != null) return@synchronized null
+        VpnRuntimeLease(++generation).also { _state.value = VpnRuntimeState.Starting }
+      }
+
+  fun isCurrent(lease: VpnRuntimeLease): Boolean = synchronized(lock) { isCurrentLocked(lease) }
+
+  fun markRunning(lease: VpnRuntimeLease): Boolean =
+      synchronized(lock) {
+        if (!isCurrentLocked(lease)) return@synchronized false
+        _state.value = VpnRuntimeState.Running
+        true
+      }
+
+  fun finish(lease: VpnRuntimeLease): Boolean =
+      synchronized(lock) {
+        if (!isCurrentLocked(lease)) return@synchronized false
+        generation++
+        _state.value = VpnRuntimeState.Idle
+        true
+      }
+
+  fun claimRequest(lease: VpnRuntimeLease): VpnRuntimeRequestPermit? =
+      synchronized(lock) {
+        if (!isCurrentLocked(lease) || requestGeneration != null) return@synchronized null
+        requestGeneration = lease.generation
+        VpnRuntimeRequestPermit(lease.generation)
+      }
+
+  fun releaseRequest(permit: VpnRuntimeRequestPermit) {
+    synchronized(lock) { if (requestGeneration == permit.generation) requestGeneration = null }
   }
 
-  fun markRunning() {
-    _state.value = VpnRuntimeState.Running
-  }
-
-  fun markIdle() {
-    _state.value = VpnRuntimeState.Idle
+  private fun isCurrentLocked(lease: VpnRuntimeLease): Boolean {
+    return lease.generation == generation && _state.value != VpnRuntimeState.Idle
   }
 
   override fun revoke() {
@@ -67,8 +100,135 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
   }
 }
 
+data class VpnRuntimeLease internal constructor(internal val generation: Long)
+
+data class VpnRuntimeRequestPermit internal constructor(internal val generation: Long)
+
 interface VpnStartAuthorizer {
   suspend fun authorizeStart(origin: VpnStartOrigin): Boolean
+}
+
+sealed interface VpnStartDispatchResult {
+  data object Denied : VpnStartDispatchResult
+
+  data object Dispatched : VpnStartDispatchResult
+
+  data class Failed(val error: Throwable) : VpnStartDispatchResult
+}
+
+class VpnStartDispatchBoundary(private val authorizer: VpnStartAuthorizer) {
+  suspend fun dispatchIfAuthorized(
+      origin: VpnStartOrigin,
+      dispatch: () -> Unit,
+  ): VpnStartDispatchResult {
+    if (!authorizer.authorizeStart(origin)) return VpnStartDispatchResult.Denied
+    return try {
+      dispatch()
+      VpnStartDispatchResult.Dispatched
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Throwable) {
+      VpnStartDispatchResult.Failed(error)
+    }
+  }
+}
+
+fun interface VpnWantRunningWriter {
+  fun setWantRunning(wantRunning: Boolean, onComplete: (Result<Unit>) -> Unit)
+}
+
+class VpnServiceRunCoordinator(
+    private val runtime: VpnRuntimeStateTracker,
+    authorizer: VpnStartAuthorizer,
+    private val wantRunningWriter: VpnWantRunningWriter,
+    private val scope: CoroutineScope,
+) {
+  private val lock = Any()
+  private val requestBoundary = VpnRequestBoundary(authorizer)
+  private var closed = false
+  private var currentLease: VpnRuntimeLease? = null
+
+  fun beginAuthorizedStart(
+      origin: VpnStartOrigin,
+      requestVpn: () -> Unit,
+      rejectStart: () -> Unit,
+  ) {
+    val lease =
+        synchronized(lock) {
+          if (closed) return
+          val nextLease = runtime.tryBeginStarting() ?: return
+          nextLease.also { currentLease = it }
+        }
+    try {
+      wantRunningWriter.setWantRunning(true) { result ->
+        if (!isActionable(lease)) return@setWantRunning
+        result.fold(
+            onSuccess = {
+              scope.launch {
+                if (!isActionable(lease)) return@launch
+                try {
+                  val authorized =
+                      requestBoundary.requestIfAuthorized(origin) {
+                        runRequestIfCurrent(lease, requestVpn)
+                      }
+                  if (!authorized) rejectCurrent(lease, rejectStart)
+                } catch (error: CancellationException) {
+                  throw error
+                } catch (_: Throwable) {
+                  rejectCurrent(lease, rejectStart)
+                }
+              }
+            },
+            onFailure = { rejectCurrent(lease, rejectStart) },
+        )
+      }
+    } catch (_: Throwable) {
+      rejectCurrent(lease, rejectStart)
+    }
+  }
+
+  fun updateVpnStatus(running: Boolean): Boolean {
+    val lease = synchronized(lock) { if (closed) null else currentLease } ?: return false
+    return if (running) runtime.markRunning(lease) else finishCurrent(lease)
+  }
+
+  fun close() {
+    val lease =
+        synchronized(lock) {
+          if (closed) return
+          closed = true
+          currentLease.also { currentLease = null }
+        }
+    lease?.let(runtime::finish)
+  }
+
+  private fun isActionable(lease: VpnRuntimeLease): Boolean =
+      synchronized(lock) { !closed && currentLease == lease && runtime.isCurrent(lease) }
+
+  private fun runRequestIfCurrent(lease: VpnRuntimeLease, requestVpn: () -> Unit): Boolean {
+    val permit = runtime.claimRequest(lease) ?: return false
+    return try {
+      if (!isActionable(lease)) return false
+      requestVpn()
+      true
+    } finally {
+      runtime.releaseRequest(permit)
+    }
+  }
+
+  private fun finishCurrent(lease: VpnRuntimeLease): Boolean {
+    val owned =
+        synchronized(lock) {
+          if (currentLease != lease) return@synchronized false
+          currentLease = null
+          true
+        }
+    return owned && runtime.finish(lease)
+  }
+
+  private fun rejectCurrent(lease: VpnRuntimeLease, rejectStart: () -> Unit) {
+    if (finishCurrent(lease)) rejectStart()
+  }
 }
 
 class VpnRequestBoundary(private val authorizer: VpnStartAuthorizer) {
