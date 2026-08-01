@@ -360,6 +360,112 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun stopDispatchWinningRaceFinishesOldHandlerBeforeNewRegistrationAndTrueWrite() {
+    val dispatcher = VpnStopCommandDispatcher {}
+    val writes = mutableListOf<Boolean>()
+    val writer =
+        SerializedVpnWantRunningWriter(
+            VpnWantRunningPersistence { wantRunning, onComplete ->
+              writes += wantRunning
+              onComplete(Result.success(Unit))
+            })
+    val oldHandlerEntered = CountDownLatch(1)
+    val allowOldHandlerToFinish = CountDownLatch(1)
+    val dispatchFinished = CountDownLatch(1)
+    val registrationAttempted = CountDownLatch(1)
+    val registrationFinished = CountDownLatch(1)
+    val oldStops = AtomicInteger()
+    val newStops = AtomicInteger()
+    val oldRegistration =
+        dispatcher.register {
+          oldHandlerEntered.countDown()
+          assertTrue(allowOldHandlerToFinish.await(1, TimeUnit.SECONDS))
+          writer.write(false) {}
+          oldStops.incrementAndGet()
+        }
+
+    val dispatchThread =
+        thread(start = true, name = "vpn-stop-dispatch-wins-test") {
+          dispatcher.dispatchStopCommand()
+          dispatchFinished.countDown()
+        }
+    assertTrue(oldHandlerEntered.await(1, TimeUnit.SECONDS))
+    val registrationThread =
+        thread(start = true, name = "vpn-stop-register-after-dispatch-test") {
+          registrationAttempted.countDown()
+          oldRegistration.unregister()
+          dispatcher.register { newStops.incrementAndGet() }
+          writer.write(true) {}
+          registrationFinished.countDown()
+        }
+
+    assertTrue(registrationAttempted.await(1, TimeUnit.SECONDS))
+    assertFalse(registrationFinished.await(100, TimeUnit.MILLISECONDS))
+    allowOldHandlerToFinish.countDown()
+    assertTrue(dispatchFinished.await(1, TimeUnit.SECONDS))
+    assertTrue(registrationFinished.await(1, TimeUnit.SECONDS))
+    dispatchThread.join(1_000)
+    registrationThread.join(1_000)
+
+    assertEquals(listOf(false, true), writes)
+    assertEquals(1, oldStops.get())
+    dispatcher.dispatchStopCommand()
+    assertEquals(1, newStops.get())
+  }
+
+  @Test
+  fun newRegistrationWinningRaceReceivesStopInsteadOfOldHandler() {
+    val dispatcher = VpnStopCommandDispatcher {}
+    val oldStops = AtomicInteger()
+    val newStops = AtomicInteger()
+    val registrationFinished = CountDownLatch(1)
+    val allowDispatch = CountDownLatch(1)
+    val oldRegistration = dispatcher.register { oldStops.incrementAndGet() }
+
+    val registrationThread =
+        thread(start = true, name = "vpn-stop-register-wins-test") {
+          oldRegistration.unregister()
+          dispatcher.register { newStops.incrementAndGet() }
+          registrationFinished.countDown()
+          assertTrue(allowDispatch.await(1, TimeUnit.SECONDS))
+        }
+    assertTrue(registrationFinished.await(1, TimeUnit.SECONDS))
+    oldRegistration.unregister()
+    val dispatchThread =
+        thread(start = true, name = "vpn-stop-dispatch-after-register-test") {
+          allowDispatch.countDown()
+          dispatcher.dispatchStopCommand()
+        }
+    registrationThread.join(1_000)
+    dispatchThread.join(1_000)
+
+    assertEquals(0, oldStops.get())
+    assertEquals(1, newStops.get())
+  }
+
+  @Test
+  fun stopHandlerCanReplaceItsRegistrationReentrantlyWithoutDeadlock() {
+    val dispatcher = VpnStopCommandDispatcher {}
+    val dispatchFinished = CountDownLatch(1)
+    val newStops = AtomicInteger()
+    lateinit var oldRegistration: VpnStopCommandRegistration
+    oldRegistration =
+        dispatcher.register {
+          oldRegistration.unregister()
+          dispatcher.register { newStops.incrementAndGet() }
+        }
+
+    thread(start = true, name = "vpn-stop-reentrant-registration-test") {
+      dispatcher.dispatchStopCommand()
+      dispatchFinished.countDown()
+    }
+
+    assertTrue(dispatchFinished.await(1, TimeUnit.SECONDS))
+    dispatcher.dispatchStopCommand()
+    assertEquals(1, newStops.get())
+  }
+
+  @Test
   fun serviceBoundaryRejectionUsesFenceWhenIdleBecomesStartingDuringDispatch() = runTest {
     val stopCommands = AtomicInteger()
     val disconnects = AtomicInteger()

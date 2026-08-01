@@ -72,8 +72,14 @@ class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
   }
 
   fun dispatchStopCommand() {
-    val handler = synchronized(lock) { registeredHandler?.second }
-    (handler ?: fallbackDispatch).invoke()
+    synchronized(lock) {
+      // Delivery must be linearizable with registration lifecycle changes: once STOP selects a
+      // handler, that handler must queue WantRunning=false and enter the close fence before a new
+      // service can register and start. JVM monitors are reentrant, so same-thread unregister or
+      // replacement from a handler is safe. Production handlers do not wait for another thread to
+      // register or unregister.
+      (registeredHandler?.second ?: fallbackDispatch).invoke()
+    }
   }
 }
 
