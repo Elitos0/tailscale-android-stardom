@@ -9,6 +9,8 @@ import android.net.VpnService
 import android.os.Build
 import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
+import com.tailscale.ipn.product.policy.VpnRequestBoundary
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.util.TSLog
@@ -23,6 +25,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   private val TAG = "IPNService"
   private val randomID: String = UUID.randomUUID().toString()
   private lateinit var app: App
+  private lateinit var requestBoundary: VpnRequestBoundary
   val scope = CoroutineScope(Dispatchers.IO)
   private var closed = false
 
@@ -38,63 +41,111 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     super.onCreate()
     // grab app to make sure it initializes
     app = App.get()
+    requestBoundary = VpnRequestBoundary(app.vpnEntitlementController)
   }
 
-  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
-      when (intent?.action) {
-        ACTION_STOP_VPN -> {
-          app.setWantRunning(false)
-          close()
-          START_NOT_STICKY
-        }
-        ACTION_RESTART_VPN -> {
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    when (intent?.action) {
+      ACTION_STOP_VPN -> {
+        app.setWantRunning(false)
+        close()
+      }
+      ACTION_RESTART_VPN -> {
+        scope.launch {
+          if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.ServiceRestart)) {
+            rejectRuntimeStart(startId)
+            return@launch
+          }
           app.setWantRunning(false) {
             close()
             app.startVPN()
           }
-          START_NOT_STICKY
         }
-        ACTION_START_FOREGROUND_ONLY -> {
-          // Start the foreground service notification without creating a VPN tunnel.
-          // This is used during interactive login so that Android does not freeze the process
-          // or restrict network access while the user completes auth in the browser.
-          showForegroundNotification()
-          START_NOT_STICKY
-        }
-        ACTION_START_VPN -> {
-          showForegroundNotification()
-          app.setWantRunning(true)
-          Libtailscale.requestVPN(this)
-          START_STICKY
-        }
-        "android.net.VpnService" -> {
-          // This means we were started by Android due to Always On VPN.
-          // We show a non-foreground notification because we weren't
-          // started as a foreground service.
-          scope.launch {
-            // Collect the first value of hideDisconnectAction asynchronously.
-            val hideDisconnectAction = MDMSettings.forceEnabled.flow.first()
-            val exitNodeName =
-                UninitializedApp.getExitNodeName(Notifier.prefs.value, Notifier.netmap.value)
-            app.notifyStatus(true, hideDisconnectAction.value, exitNodeName)
+      }
+      ACTION_START_FOREGROUND_ONLY -> {
+        // Start the foreground service notification without creating a VPN tunnel.
+        // This is used during interactive login so that Android does not freeze the process
+        // or restrict network access while the user completes auth in the browser.
+        showForegroundNotification()
+      }
+      ACTION_START_VPN -> {
+        showForegroundNotification()
+        authorizeAndRequestVpn(VpnStartOrigin.ServiceStart, startId)
+      }
+      "android.net.VpnService" -> {
+        // This means we were started by Android due to Always On VPN.
+        // We show a non-foreground notification because we weren't
+        // started as a foreground service.
+        scope.launch {
+          if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.AlwaysOn)) {
+            rejectRuntimeStart(startId)
+            return@launch
           }
-          app.setWantRunning(true)
-          Libtailscale.requestVPN(this)
-          START_STICKY
-        }
-        else -> {
-          // This means that we were restarted after the service was killed
-          // (potentially due to OOM).
-          if (UninitializedApp.get().isAbleToStartVPN()) {
-            showForegroundNotification()
-            App.get()
-            Libtailscale.requestVPN(this)
-            START_STICKY
-          } else {
-            START_NOT_STICKY
+          // Collect the first value of hideDisconnectAction asynchronously.
+          val hideDisconnectAction = MDMSettings.forceEnabled.flow.first()
+          val exitNodeName =
+              UninitializedApp.getExitNodeName(Notifier.prefs.value, Notifier.netmap.value)
+          requestVpnAfterAuthorization(VpnStartOrigin.AlwaysOn, startId) {
+            app.notifyStatus(true, hideDisconnectAction.value, exitNodeName)
           }
         }
       }
+      else -> {
+        // This means that we were restarted after the service was killed
+        // (potentially due to OOM).
+        showForegroundNotification()
+        scope.launch {
+          if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.StickyRestart)) {
+            rejectRuntimeStart(startId)
+            return@launch
+          }
+          if (!app.isAbleToStartVPN()) {
+            rejectRuntimeStart(startId)
+            return@launch
+          }
+          requestVpnAfterAuthorization(VpnStartOrigin.StickyRestart, startId)
+        }
+      }
+    }
+    // A killed process must never be restarted from a cached backend-ready bit. Android Always-On
+    // may issue a new service start, which will receive another fresh entitlement decision.
+    return START_NOT_STICKY
+  }
+
+  private fun authorizeAndRequestVpn(origin: VpnStartOrigin, startId: Int) {
+    scope.launch {
+      if (!app.vpnEntitlementController.authorizeStart(origin)) {
+        rejectRuntimeStart(startId)
+        return@launch
+      }
+      requestVpnAfterAuthorization(origin, startId)
+    }
+  }
+
+  private fun requestVpnAfterAuthorization(
+      origin: VpnStartOrigin,
+      startId: Int,
+      beforeRequest: () -> Unit = {},
+  ) {
+    if (closed) return
+    app.setWantRunning(true) {
+      scope.launch {
+        val requested =
+            requestBoundary.requestIfAuthorized(origin) {
+              if (!closed) {
+                beforeRequest()
+                Libtailscale.requestVPN(this@IPNService)
+              }
+            }
+        if (!requested) rejectRuntimeStart(startId)
+      }
+    }
+  }
+
+  private suspend fun rejectRuntimeStart(startId: Int) {
+    app.vpnEntitlementController.revokeRejectedRuntimeStart()
+    stopSelfResult(startId)
+  }
 
   override fun close() {
     if (closed) return

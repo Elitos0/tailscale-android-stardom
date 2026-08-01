@@ -863,7 +863,7 @@ fun Search(
 fun MainViewPreview() {
   val fakePrompt = emptyFlow<Unit>()
   val appViewModel = AppViewModel(App.get(), fakePrompt)
-  val vm = MainViewModel(appViewModel)
+  val vm = MainViewModel(appViewModel, App.get().vpnEntitlementController)
   MainView(
       {},
       MainViewNavigation(

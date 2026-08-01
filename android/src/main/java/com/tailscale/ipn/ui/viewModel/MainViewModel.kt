@@ -17,6 +17,8 @@ import androidx.lifecycle.viewModelScope
 import com.tailscale.ipn.App
 import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSettings
+import com.tailscale.ipn.product.policy.VpnEntitlementController
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Ipn.State
 import com.tailscale.ipn.ui.model.Tailcfg
@@ -36,18 +38,24 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 
-class MainViewModelFactory(private val appViewModel: AppViewModel) : ViewModelProvider.Factory {
+class MainViewModelFactory(
+    private val appViewModel: AppViewModel,
+    private val vpnEntitlementController: VpnEntitlementController,
+) : ViewModelProvider.Factory {
   @Suppress("UNCHECKED_CAST")
   override fun <T : ViewModel> create(modelClass: Class<T>): T {
     if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
-      return MainViewModel(appViewModel) as T
+      return MainViewModel(appViewModel, vpnEntitlementController) as T
     }
     throw IllegalArgumentException("Unknown ViewModel class")
   }
 }
 
 @OptIn(FlowPreview::class)
-class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
+class MainViewModel(
+    private val appViewModel: AppViewModel,
+    private val vpnEntitlementController: VpnEntitlementController,
+) : IpnViewModel() {
   // The user readable state of the system
   val stateRes: StateFlow<Int> = MutableStateFlow(userStringRes(State.NoState, State.NoState, true))
   // The expected state of the VPN toggle
@@ -187,15 +195,23 @@ class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
   }
 
   fun showVPNPermissionLauncherIfUnauthorized() {
-    val vpnIntent = VpnService.prepare(App.get())
-    TSLog.d("VpnPermissions", "vpnIntent=$vpnIntent")
-    if (vpnIntent != null) {
-      vpnPermissionLauncher?.launch(vpnIntent)
-    } else {
-      appViewModel.setVpnPrepared(true)
-      startVPN()
+    viewModelScope.launch { requestVpnPermissionIfAuthorized() }
+  }
+
+  private suspend fun requestVpnPermissionIfAuthorized() {
+    try {
+      if (!vpnEntitlementController.authorizeStart(VpnStartOrigin.PermissionRequest)) return
+      val vpnIntent = VpnService.prepare(App.get())
+      TSLog.d("VpnPermissions", "vpnIntent=$vpnIntent")
+      if (vpnIntent != null) {
+        vpnPermissionLauncher?.launch(vpnIntent)
+      } else {
+        appViewModel.setVpnPrepared(true)
+        startVPN()
+      }
+    } finally {
+      _requestVpnPermission.value = false
     }
-    _requestVpnPermission.value = false // reset
   }
 
   fun toggleVpn(desiredState: Boolean) {
@@ -212,7 +228,7 @@ class MainViewModel(private val appViewModel: AppViewModel) : IpnViewModel() {
         if (desiredState) {
           // User wants to turn ON the VPN
           when {
-            currentState != Ipn.State.Running -> showVPNPermissionLauncherIfUnauthorized()
+            currentState != Ipn.State.Running -> requestVpnPermissionIfAuthorized()
           }
         } else {
           // User wants to turn OFF the VPN

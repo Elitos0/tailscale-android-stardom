@@ -60,6 +60,7 @@ import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -144,7 +145,13 @@ class MainActivity : ComponentActivity() {
     stardomSessionController = (application as App).stardomSessionController
     appViewModel = (application as App).getAppScopedViewModel()
     viewModel =
-        ViewModelProvider(this, MainViewModelFactory(appViewModel)).get(MainViewModel::class.java)
+        ViewModelProvider(
+                this,
+                MainViewModelFactory(
+                    appViewModel,
+                    (application as App).vpnEntitlementController,
+                ))
+            .get(MainViewModel::class.java)
     resumeFixedControlLoginIfPending()
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
@@ -162,9 +169,17 @@ class MainActivity : ComponentActivity() {
     vpnPermissionLauncher =
         registerForActivityResult(VpnPermissionContract()) { granted ->
           if (granted) {
-            TSLog.d("VpnPermission", "VPN permission granted")
-            appViewModel.setVpnPrepared(true)
-            App.get().startVPN()
+            lifecycleScope.launch {
+              val app = application as App
+              if (app.vpnEntitlementController.authorizeStart(VpnStartOrigin.PermissionResult)) {
+                TSLog.d("VpnPermission", "VPN permission granted after entitlement recheck")
+                appViewModel.setVpnPrepared(true)
+                app.startVPN()
+              } else {
+                TSLog.d("VpnPermission", "VPN permission result rejected by entitlement policy")
+                appViewModel.setVpnPrepared(false)
+              }
+            }
           } else {
             if (isAnotherVpnActive(this)) {
               TSLog.d("VpnPermission", "Another VPN is likely active")
@@ -557,7 +572,10 @@ class MainActivity : ComponentActivity() {
     super.onResume()
     val restrictionsManager =
         this.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
-    lifecycleScope.launch(Dispatchers.IO) { MDMSettings.update(App.get(), restrictionsManager) }
+    lifecycleScope.launch(Dispatchers.IO) {
+      MDMSettings.update(App.get(), restrictionsManager)
+      (application as App).vpnEntitlementController.refreshRuntimeEntitlement()
+    }
   }
 
   override fun onStop() {

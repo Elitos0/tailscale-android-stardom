@@ -30,6 +30,12 @@ import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.VpnEntitlementController
+import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
+import com.tailscale.ipn.product.policy.VpnEntitlementRuntime
+import com.tailscale.ipn.product.policy.VpnRuntimeState
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -53,8 +59,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -65,6 +75,46 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   val stardomSessionController: StardomSessionController by lazy {
     StardomSessionController(AuthSessionRepository(applicationContext), AccessRepository())
+  }
+  private val vpnRuntimeState: StateFlow<VpnRuntimeState> by lazy {
+    Notifier.state
+        .map { state ->
+          when (state) {
+            Ipn.State.Starting -> VpnRuntimeState.Starting
+            Ipn.State.Running -> VpnRuntimeState.Running
+            else -> VpnRuntimeState.Idle
+          }
+        }
+        .stateIn(
+            applicationScope,
+            SharingStarted.Eagerly,
+            when (Notifier.state.value) {
+              Ipn.State.Starting -> VpnRuntimeState.Starting
+              Ipn.State.Running -> VpnRuntimeState.Running
+              else -> VpnRuntimeState.Idle
+            })
+  }
+  val vpnEntitlementController: VpnEntitlementController by lazy {
+    val sessionController = stardomSessionController
+    VpnEntitlementController(
+        decisionSource =
+            object : VpnEntitlementDecisionSource {
+              override val authentikState = sessionController.authentikState
+              override val accessState = sessionController.accessState
+
+              override suspend fun refreshAccess(origin: VpnStartOrigin?): AccessState =
+                  sessionController.refreshAccess(applicationContext)
+            },
+        runtime =
+            object : VpnEntitlementRuntime {
+              override val state = vpnRuntimeState
+
+              override fun revoke() {
+                revokeVpnEntitlement()
+              }
+            },
+        scope = applicationScope,
+    )
   }
 
   companion object {
@@ -245,6 +295,11 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     }
     Client(applicationScope)
         .editPrefs(Ipn.MaskedPrefs().apply { WantRunning = wantRunning }, callback)
+  }
+
+  private fun revokeVpnEntitlement() {
+    setWantRunning(false)
+    stopService(Intent(this, IPNService::class.java))
   }
   // encryptToPref a byte array of data using the Jetpack Security
   // library and writes it to a global encrypted preference store.
@@ -584,28 +639,36 @@ open class UninitializedApp : Application() {
     }
   }
 
-  fun startVPN() {
-    val intent = Intent(this, IPNService::class.java).apply { action = IPNService.ACTION_START_VPN }
-    // FLAG_UPDATE_CURRENT ensures that if the intent is already pending, the existing intent will
-    // be updated rather than creating multiple redundant instances.
-    val pendingIntent =
-        PendingIntent.getForegroundService(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE // FLAG_IMMUTABLE for Android 12+
-            )
-    try {
-      pendingIntent.send()
-    } catch (foregroundServiceStartException: IllegalStateException) {
-      TSLog.e(
-          TAG,
-          "startVPN hit ForegroundServiceStartNotAllowedException: $foregroundServiceStartException")
-    } catch (securityException: SecurityException) {
-      TSLog.e(TAG, "startVPN hit SecurityException: $securityException")
-    } catch (e: Exception) {
-      TSLog.e(TAG, "startVPN hit exception: $e")
+  @JvmOverloads
+  fun startVPN(origin: VpnStartOrigin = VpnStartOrigin.AppStart) {
+    val initializedApp = this as? App ?: return
+    initializedApp.applicationScope.launch {
+      if (!initializedApp.vpnEntitlementController.authorizeStart(origin)) return@launch
+      val intent =
+          Intent(initializedApp, IPNService::class.java).apply {
+            action = IPNService.ACTION_START_VPN
+          }
+      // FLAG_UPDATE_CURRENT ensures that if the intent is already pending, the existing intent
+      // will be updated rather than creating multiple redundant instances.
+      val pendingIntent =
+          PendingIntent.getForegroundService(
+              initializedApp,
+              0,
+              intent,
+              PendingIntent.FLAG_UPDATE_CURRENT or
+                  PendingIntent.FLAG_IMMUTABLE // FLAG_IMMUTABLE for Android 12+
+              )
+      try {
+        pendingIntent.send()
+      } catch (foregroundServiceStartException: IllegalStateException) {
+        TSLog.e(
+            TAG,
+            "startVPN hit ForegroundServiceStartNotAllowedException: $foregroundServiceStartException")
+      } catch (securityException: SecurityException) {
+        TSLog.e(TAG, "startVPN hit SecurityException: $securityException")
+      } catch (e: Exception) {
+        TSLog.e(TAG, "startVPN hit exception: $e")
+      }
     }
   }
 
@@ -621,14 +684,23 @@ open class UninitializedApp : Application() {
   }
 
   fun restartVPN() {
-    val intent =
-        Intent(this, IPNService::class.java).apply { action = IPNService.ACTION_RESTART_VPN }
-    try {
-      startService(intent)
-    } catch (illegalStateException: IllegalStateException) {
-      TSLog.e(TAG, "restartVPN hit IllegalStateException in startService(): $illegalStateException")
-    } catch (e: Exception) {
-      TSLog.e(TAG, "restartVPN hit exception in startService(): $e")
+    val initializedApp = this as? App ?: return
+    initializedApp.applicationScope.launch {
+      if (!initializedApp.vpnEntitlementController.authorizeStart(VpnStartOrigin.AppRestart)) {
+        return@launch
+      }
+      val intent =
+          Intent(initializedApp, IPNService::class.java).apply {
+            action = IPNService.ACTION_RESTART_VPN
+          }
+      try {
+        initializedApp.startService(intent)
+      } catch (illegalStateException: IllegalStateException) {
+        TSLog.e(
+            TAG, "restartVPN hit IllegalStateException in startService(): $illegalStateException")
+      } catch (e: Exception) {
+        TSLog.e(TAG, "restartVPN hit exception in startService(): $e")
+      }
     }
   }
 
