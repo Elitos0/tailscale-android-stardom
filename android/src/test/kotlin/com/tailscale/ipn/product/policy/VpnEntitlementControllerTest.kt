@@ -72,6 +72,96 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun disallowedAutoExitNodeRevocationUsesTheRuntimeBoundary() = runTest {
+    val runtime = FakeRuntime(VpnRuntimeState.Running)
+    val controller = controller(FakeDecisionSource(defaultDecision = ACTIVE), runtime)
+
+    controller.revokeDisallowedAutoExitNode()
+
+    assertEquals(1, runtime.revocations)
+  }
+
+  @Test
+  fun synchronousAutoExitPolicyGateRejectsAStaleNodeBeforeFinalVpnRequest() = runTest {
+    val activeWithNodeA = AccessState.Active(setOf("node-a"))
+    val activeWithNodeB = AccessState.Active(setOf("node-b"))
+    val decisions = FakeDecisionSource(activeWithNodeA, activeWithNodeB)
+    val prefs = MutableStateFlow<Ipn.Prefs?>(Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "node-a"))
+    val candidatePolicy =
+        AllowedSuggestedExitNodePolicyController(
+            authentikState = decisions.authentikState,
+            accessState = decisions.accessState,
+            mdmAllowedSuggestedExitNodes =
+                MutableStateFlow(com.tailscale.ipn.mdm.SettingState<List<String>?>(null, false)),
+            prefs = prefs,
+            runtimeState = MutableStateFlow(VpnRuntimeState.Idle),
+            notifyPolicyChanged = {},
+            revokeDisallowedAutoExitNode = {},
+        )
+    val runtime = VpnRuntimeStateTracker {}
+    val entitlement =
+        controller(
+            decisions,
+            runtime,
+            startPolicyGuard = candidatePolicy::isVpnStartAllowed,
+        )
+    val writer = CapturingWantRunningWriter()
+    val coordinator = VpnServiceRunCoordinator(runtime, entitlement, writer, backgroundScope)
+    var requests = 0
+    var rejections = 0
+
+    assertTrue(entitlement.authorizeStart(VpnStartOrigin.ServiceStart))
+    coordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { requests++ },
+        rejectStart = { rejections++ },
+    )
+    writer.succeed()
+    runCurrent()
+
+    assertEquals(0, requests)
+    assertEquals(1, rejections)
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+  }
+
+  @Test
+  fun synchronousAutoExitPolicyGateMakesZeroRequestsForUnknownOrMissingEffectivePrefs() = runTest {
+    val unresolvedPrefs =
+        listOf<Ipn.Prefs?>(
+            null,
+            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = null),
+            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "  "),
+        )
+
+    unresolvedPrefs.forEach { currentPrefs ->
+      val active = AccessState.Active(setOf("node-a"))
+      val decisions = FakeDecisionSource(defaultDecision = active)
+      val candidatePolicy =
+          AllowedSuggestedExitNodePolicyController(
+              authentikState = decisions.authentikState,
+              accessState = decisions.accessState,
+              mdmAllowedSuggestedExitNodes =
+                  MutableStateFlow(com.tailscale.ipn.mdm.SettingState<List<String>?>(null, false)),
+              prefs = MutableStateFlow(currentPrefs),
+              runtimeState = MutableStateFlow(VpnRuntimeState.Idle),
+              notifyPolicyChanged = {},
+              revokeDisallowedAutoExitNode = {},
+          )
+      val controller =
+          controller(
+              decisions,
+              FakeRuntime(),
+              startPolicyGuard = candidatePolicy::isVpnStartAllowed,
+          )
+      val requestBoundary = VpnRequestBoundary(controller)
+      var requests = 0
+
+      assertFalse(requestBoundary.requestIfAuthorized(VpnStartOrigin.ServiceStart) { requests++ })
+      assertEquals(0, requests)
+    }
+  }
+
+  @Test
   fun failedStartDispatchDoesNotDisableMonitoringForAnExistingRun() = runTest {
     val runtime = VpnRuntimeStateTracker {}
     val lease = runtime.beginStarting()
@@ -1084,12 +1174,14 @@ class VpnEntitlementControllerTest {
   private fun kotlinx.coroutines.test.TestScope.controller(
       decisions: FakeDecisionSource,
       runtime: VpnEntitlementRuntime,
+      startPolicyGuard: VpnStartPolicyGuard = VpnStartPolicyGuard.AllowAll,
   ) =
       VpnEntitlementController(
           decisionSource = decisions,
           runtime = runtime,
           scope = backgroundScope,
           refreshInterval = REFRESH_INTERVAL,
+          startPolicyGuard = startPolicyGuard,
       )
 
   companion object {

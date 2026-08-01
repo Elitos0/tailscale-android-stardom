@@ -31,7 +31,9 @@ import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
 import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
+import com.tailscale.ipn.product.policy.SyspolicyStringArrayJSONBridge
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
 import com.tailscale.ipn.product.policy.VpnRuntimeStateTracker
@@ -95,6 +97,10 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             },
         runtime = vpnRuntimeTracker,
         scope = applicationScope,
+        startPolicyGuard = { activeAccess ->
+          ::allowedSuggestedExitNodePolicyController.isInitialized &&
+              allowedSuggestedExitNodePolicyController.isVpnStartAllowed(activeAccess)
+        },
     )
   }
   val vpnStartDispatchBoundary: VpnStartDispatchBoundary by lazy {
@@ -131,6 +137,8 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   private lateinit var connectivityManager: ConnectivityManager
   private lateinit var mdmChangeReceiver: MDMSettingsChangedReceiver
   private lateinit var app: libtailscale.Application
+  private lateinit var allowedSuggestedExitNodePolicyController:
+      AllowedSuggestedExitNodePolicyController
   override val viewModelStore: ViewModelStore
     get() = appViewModelStore
 
@@ -211,12 +219,18 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     // for Hostname and only corrects it after policyReloadMinDelay,
     // at which point the device may have already registered with the wrong hostname.
     MDMSettings.loadFrom(lazy { getEncryptedPrefs() }, rm)
+    initializeAllowedSuggestedExitNodePolicy()
 
     if (storedUri != null && storedUri.toString().startsWith("content://")) {
       startLibtailscale(storedUri.toString(), hardwareAttestation)
     } else {
       startLibtailscale(this.filesDir.absolutePath, hardwareAttestation)
     }
+    // Libtailscale performs an initial synchronous syspolicy read during start. Start the observer
+    // only after that call returns so policy reads cannot recursively initialize the app. The
+    // controller remembers the synchronously exposed value and detects any state change that raced
+    // with initialization.
+    allowedSuggestedExitNodePolicyController.start(applicationScope)
     healthNotifier = HealthNotifier(Notifier.health, Notifier.state, applicationScope)
     connectivityManager = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
@@ -270,6 +284,26 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     Request.setApp(app)
     Notifier.setApp(app)
     Notifier.start(applicationScope)
+  }
+
+  private fun initializeAllowedSuggestedExitNodePolicy() {
+    val sessionController = stardomSessionController
+    allowedSuggestedExitNodePolicyController =
+        AllowedSuggestedExitNodePolicyController(
+            authentikState = sessionController.authentikState,
+            accessState = sessionController.accessState,
+            mdmAllowedSuggestedExitNodes = MDMSettings.allowedSuggestedExitNodes.flow,
+            prefs = Notifier.prefs,
+            runtimeState = vpnRuntimeTracker.state,
+            notifyPolicyChanged = ::notifyPolicyChanged,
+            revokeDisallowedAutoExitNode = {
+              vpnEntitlementController.revokeDisallowedAutoExitNode()
+            },
+            onCallbackError = { operation, error ->
+              TSLog.e(
+                  "AutoExitPolicy", "$operation callback failed; enforcement remains armed", error)
+            },
+        )
   }
 
   private fun initViewModels() {
@@ -447,17 +481,29 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   @Throws(
       IOException::class, GeneralSecurityException::class, MDMSettings.NoSuchKeyException::class)
   override fun getSyspolicyStringArrayJSONValue(key: String): String {
-    val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
-    if (setting?.isSet != true) {
-      throw MDMSettings.NoSuchKeyException()
-    }
-    try {
-      val list = setting.value as? List<*>
-      return Json.encodeToString(list)
-    } catch (e: Exception) {
-      TSLog.d("MDM", "$key value cannot be serialized to JSON. Throwing NoSuchKeyException.")
-      throw MDMSettings.NoSuchKeyException()
-    }
+    return SyspolicyStringArrayJSONBridge.get(
+        key = key,
+        productCandidatesJSON = {
+          if (::allowedSuggestedExitNodePolicyController.isInitialized) {
+            allowedSuggestedExitNodePolicyController.currentCandidatesJSON()
+          } else {
+            "[]"
+          }
+        },
+        fallbackValue = {
+          val setting = MDMSettings.allSettingsByKey[key]?.flow?.value
+          if (setting?.isSet != true) {
+            throw MDMSettings.NoSuchKeyException()
+          }
+          try {
+            val list = setting.value as? List<*>
+            Json.encodeToString(list)
+          } catch (e: Exception) {
+            TSLog.d("MDM", "$key value cannot be serialized to JSON. Throwing NoSuchKeyException.")
+            throw MDMSettings.NoSuchKeyException()
+          }
+        },
+    )
   }
 
   fun notifyPolicyChanged() {

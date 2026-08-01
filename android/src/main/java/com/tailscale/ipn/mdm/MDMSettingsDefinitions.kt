@@ -16,8 +16,11 @@ abstract class MDMSetting<T>(defaultValue: T, val key: String, val localizedTitl
 
   fun setFrom(bundle: Bundle?, prefs: Lazy<SharedPreferences>) {
     val v: T? = getFrom(bundle, prefs)
-    flow.set(SettingState(v ?: defaultValue, v != null))
+    flow.set(SettingState(v ?: defaultValue, isSet(bundle, prefs, v)))
   }
+
+  protected open fun isSet(bundle: Bundle?, prefs: Lazy<SharedPreferences>, value: T?): Boolean =
+      value != null
 
   fun getFrom(bundle: Bundle?, prefs: Lazy<SharedPreferences>): T? {
     return when {
@@ -47,25 +50,40 @@ class StringMDMSetting(key: String, localizedTitle: String) :
 
 class StringArrayListMDMSetting(key: String, localizedTitle: String) :
     MDMSetting<List<String>?>(null, key, localizedTitle) {
+  override fun isSet(
+      bundle: Bundle?,
+      prefs: Lazy<SharedPreferences>,
+      value: List<String>?,
+  ): Boolean = bundle?.containsKey(key) ?: prefs.value.contains(key)
+
   override fun getFromBundle(bundle: Bundle): List<String>? {
-    // Try to retrieve the value as a String[] first
-    val stringArray = bundle.getStringArray(key)
-    if (stringArray != null) {
-      return stringArray.toList()
-    }
+    return try {
+      // Try to retrieve the value as a String[] first.
+      val stringArray = bundle.getStringArray(key)
+      if (stringArray != null) {
+        return stringArray.toList()
+      }
 
-    // Optionally, handle other types if necessary
-    val stringArrayList = bundle.getStringArrayList(key)
-    if (stringArrayList != null) {
-      return stringArrayList
-    }
+      val stringArrayList = bundle.getStringArrayList(key)
+      if (stringArrayList != null) {
+        return stringArrayList
+      }
 
-    // If neither String[] nor ArrayList<String> is found, return null
-    return null
+      null
+    } catch (_: RuntimeException) {
+      // The key is still configured. setFrom records isSet=true with a null value so the Stardom
+      // candidate intersection fails closed instead of treating a malformed value as unset.
+      null
+    }
   }
 
   override fun getFromPrefs(prefs: SharedPreferences): List<String>? {
-    return prefs.getStringSet(key, HashSet<String>())?.toList()
+    return try {
+      prefs.getStringSet(key, HashSet<String>())?.toList()
+    } catch (_: RuntimeException) {
+      // Preserve key presence through isSet while failing the parsed value closed.
+      null
+    }
   }
 }
 

@@ -146,6 +146,14 @@ interface VpnStartAuthorizer {
   suspend fun authorizeStart(origin: VpnStartOrigin): Boolean
 }
 
+fun interface VpnStartPolicyGuard {
+  fun isAllowed(activeAccess: AccessState.Active): Boolean
+
+  companion object {
+    val AllowAll = VpnStartPolicyGuard { true }
+  }
+}
+
 sealed interface VpnStartDispatchResult {
   data object Denied : VpnStartDispatchResult
 
@@ -399,6 +407,7 @@ class VpnEntitlementController(
     private val runtime: VpnEntitlementRuntime,
     scope: CoroutineScope,
     refreshInterval: Duration = Duration.ofSeconds(30),
+    private val startPolicyGuard: VpnStartPolicyGuard = VpnStartPolicyGuard.AllowAll,
 ) : VpnStartAuthorizer {
   private val decisionMutex = Mutex()
   private val revocationMutex = Mutex()
@@ -452,6 +461,10 @@ class VpnEntitlementController(
     runtime.revoke()
   }
 
+  fun revokeDisallowedAutoExitNode() {
+    runtime.revoke()
+  }
+
   private suspend fun refreshAndEnforce() {
     if (freshActiveAccess(origin = null) == null && runtime.state.value.isStartingOrRunning()) {
       revokeOnce()
@@ -463,7 +476,8 @@ class VpnEntitlementController(
         if (decisionSource.authentikState.value != AuthentikState.Authorized) return@withLock null
         val access = decisionSource.refreshAccess(origin)
         if (decisionSource.authentikState.value != AuthentikState.Authorized) return@withLock null
-        access as? AccessState.Active
+        val activeAccess = access as? AccessState.Active ?: return@withLock null
+        activeAccess.takeIf { runCatching { startPolicyGuard.isAllowed(it) }.getOrDefault(false) }
       }
 
   private suspend fun revokeOnce() {
