@@ -53,6 +53,7 @@ fun ExitNodePicker(
       val mullvadExitNodesByCountryCode by model.mullvadExitNodesByCountryCode.collectAsState()
       val mullvadExitNodeCount by model.mullvadExitNodeCount.collectAsState()
       val anyActive by model.anyActive.collectAsState()
+      val autoExitNode by model.autoExitNode.collectAsState()
       val shouldShowMullvadInfo by model.shouldShowMullvadInfo.collectAsState()
       val allowLANAccess = Notifier.prefs.collectAsState().value?.ExitNodeAllowLANAccess == true
       val showRunAsExitNode by MDMSettings.runExitNode.flow.collectAsState()
@@ -79,6 +80,7 @@ fun ExitNodePicker(
                     online = MutableStateFlow(true),
                     selected = !anyActive,
                 ))
+            AutoExitNodeItem(model, autoExitNode)
           }
           if (showRunAsExitNode.value == ShowHide.Show) {
             Lists.ItemDivider()
@@ -115,6 +117,42 @@ fun ExitNodePicker(
         }
       }
     }
+  }
+}
+
+@Composable
+fun AutoExitNodeItem(
+    viewModel: ExitNodePickerViewModel,
+    autoExitNode: ExitNodePickerViewModel.AutoExitNode,
+) {
+  val isRunningExitNode = viewModel.isRunningExitNode.collectAsState().value
+  val forcedExitNodeId = MDMSettings.exitNodeID.flow.collectAsState().value.value
+
+  Box {
+    var modifier: Modifier = Modifier
+    if (!isRunningExitNode && forcedExitNodeId == null) {
+      modifier = modifier.clickable { viewModel.setAutoExitNode() }
+    }
+    ListItem(
+        modifier = modifier,
+        colors =
+            if (!isRunningExitNode) MaterialTheme.colorScheme.listItem
+            else MaterialTheme.colorScheme.disabledListItem,
+        headlineContent = {
+          Text(stringResource(R.string.auto_exit_node), style = MaterialTheme.typography.bodyMedium)
+        },
+        supportingContent = {
+          autoExitNode.effectiveNodeLabel?.let { label ->
+            Text(
+                stringResource(R.string.auto_exit_node_effective, label),
+                style = MaterialTheme.typography.bodyMedium)
+          }
+        },
+        trailingContent = {
+          if (autoExitNode.selected) {
+            Icon(Icons.Outlined.Check, null)
+          }
+        })
   }
 }
 

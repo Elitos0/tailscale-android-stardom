@@ -304,7 +304,11 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
   // The activeExitNode is the source of truth.  The selectedExitNode is only relevant if we
   // don't have an active node.
   val chosenExitNodeId = prefs.activeExitNodeID ?: prefs.selectedExitNodeID
-  val exitNodePeer = chosenExitNodeId?.let { id -> netmap?.Peers?.find { it.StableID == id } }
+  val autoExitNodeEnabled = prefs.AutoExitNode == "any"
+  val effectiveExitNodeId =
+      if (autoExitNodeEnabled) chosenExitNodeId?.takeUnless { it == "auto:any" }
+      else chosenExitNodeId
+  val exitNodePeer = effectiveExitNodeId?.let { id -> netmap?.Peers?.find { it.StableID == id } }
   val name = exitNodePeer?.exitNodeName
   val managedByOrganization by viewModel.managedByOrganization.collectAsState()
   Box(
@@ -366,10 +370,20 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                       Text(
                           text =
                               when (nodeState) {
-                                NodeState.NONE -> stringResource(id = R.string.none)
+                                NodeState.NONE ->
+                                    if (autoExitNodeEnabled) {
+                                      stringResource(id = R.string.auto_exit_node)
+                                    } else {
+                                      stringResource(id = R.string.none)
+                                    }
                                 NodeState.RUNNING_AS_EXIT_NODE ->
                                     stringResource(id = R.string.running_exit_node)
-                                else -> name ?: ""
+                                else ->
+                                    if (autoExitNodeEnabled) {
+                                      stringResource(id = R.string.auto_exit_node)
+                                    } else {
+                                      name ?: ""
+                                    }
                               },
                           style = MaterialTheme.typography.bodyMedium,
                           maxLines = 1,
@@ -382,6 +396,15 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                                   MaterialTheme.colorScheme.onSurfaceVariant
                               else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
                       )
+                    }
+                  },
+                  supportingContent = {
+                    if (autoExitNodeEnabled && nodeState != NodeState.RUNNING_AS_EXIT_NODE) {
+                      (name ?: effectiveExitNodeId)?.let { effectiveNode ->
+                        Text(
+                            stringResource(R.string.auto_exit_node_effective, effectiveNode),
+                            style = MaterialTheme.typography.bodyMedium)
+                      }
                     }
                   },
                   trailingContent = {

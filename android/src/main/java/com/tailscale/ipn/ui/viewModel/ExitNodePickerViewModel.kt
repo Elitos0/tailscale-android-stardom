@@ -46,6 +46,7 @@ class ExitNodePickerViewModel(
     private val accessState: StateFlow<AccessState>,
     private val netmapFlow: StateFlow<Netmap.NetworkMap?> = Notifier.netmap,
     private val prefsFlow: StateFlow<Ipn.Prefs?> = Notifier.prefs,
+    private val editPrefsOverride: ((Ipn.MaskedPrefs, (Result<Ipn.Prefs>) -> Unit) -> Unit)? = null,
 ) : IpnViewModel(observeUserProfiles = false) {
   data class ExitNode(
       val id: StableNodeID? = null,
@@ -59,12 +60,19 @@ class ExitNodePickerViewModel(
       val city: String = ""
   )
 
+  data class AutoExitNode(
+      val selected: Boolean,
+      val effectiveExitNodeID: StableNodeID? = null,
+      val effectiveNodeLabel: String? = null,
+  )
+
   val tailnetExitNodes: StateFlow<List<ExitNode>> = MutableStateFlow(emptyList())
   val mullvadExitNodesByCountryCode: StateFlow<Map<String, List<ExitNode>>> =
       MutableStateFlow(TreeMap())
   val mullvadBestAvailableByCountry: StateFlow<Map<String, ExitNode>> = MutableStateFlow(TreeMap())
   val mullvadExitNodeCount: StateFlow<Int> = MutableStateFlow(0)
   val anyActive: StateFlow<Boolean> = MutableStateFlow(false)
+  val autoExitNode: StateFlow<AutoExitNode> = MutableStateFlow(AutoExitNode(selected = false))
   val shouldShowMullvadInfo: StateFlow<Boolean> = MutableStateFlow(false)
 
   init {
@@ -77,6 +85,15 @@ class ExitNodePickerViewModel(
           .stateIn(viewModelScope)
           .collect { (netmap, prefs, accessState) ->
             val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
+            val autoExitNodeEnabled = prefs?.AutoExitNode == "any"
+            val effectiveExitNodeId =
+                if (autoExitNodeEnabled) exitNodeId?.takeUnless { it == "auto:any" } else exitNodeId
+            autoExitNode.set(
+                AutoExitNode(
+                    selected = autoExitNodeEnabled,
+                    effectiveExitNodeID = effectiveExitNodeId,
+                ))
+            anyActive.set(autoExitNodeEnabled)
             netmap?.Peers?.let { peers ->
               val allNodes =
                   peers
@@ -86,7 +103,7 @@ class ExitNodePickerViewModel(
                             id = it.StableID,
                             label = it.displayName,
                             online = MutableStateFlow(it.Online ?: false),
-                            selected = it.StableID == exitNodeId,
+                            selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
                             mullvad = it.Name.endsWith(".mullvad.ts.net."),
                             priority = it.Hostinfo.Location?.Priority ?: 0,
                             countryCode = it.Hostinfo.Location?.CountryCode ?: "",
@@ -143,7 +160,14 @@ class ExitNodePickerViewModel(
                   }
               mullvadBestAvailableByCountry.set(bestAvailableByCountry)
 
-              anyActive.set(allNodes.any { it.selected })
+              val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
+              autoExitNode.set(
+                  AutoExitNode(
+                      selected = autoExitNodeEnabled,
+                      effectiveExitNodeID = effectiveExitNodeId,
+                      effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
+                  ))
+              anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
 
               prefs?.let { prefs ->
                 // Only show the Mullvad info view if the user is an admin and is using a Tailscale
@@ -157,11 +181,20 @@ class ExitNodePickerViewModel(
   }
 
   fun setExitNode(node: ExitNode) {
+    setExitNodePrefs(Ipn.MaskedPrefs().apply { ExitNodeID = node.id })
+  }
+
+  fun setAutoExitNode() {
+    setExitNodePrefs(Ipn.MaskedPrefs().apply { AutoExitNode = "any" })
+  }
+
+  private fun setExitNodePrefs(prefs: Ipn.MaskedPrefs) {
     LoadingIndicator.start()
-    Client(viewModelScope).editPrefs(Ipn.MaskedPrefs().apply { ExitNodeID = node.id }) {
+    val callback: (Result<Ipn.Prefs>) -> Unit = {
       nav.onNavigateBackHome()
       LoadingIndicator.stop()
     }
+    editPrefsOverride?.invoke(prefs, callback) ?: Client(viewModelScope).editPrefs(prefs, callback)
   }
 
   fun toggleAllowLANAccess(callback: (Result<Ipn.Prefs>) -> Unit) {

@@ -69,6 +69,7 @@ class Ipn {
       var AdvertiseRoutes: List<String>? = null,
       var AdvertiseTags: List<String>? = null,
       var ExitNodeID: StableNodeID? = null,
+      var AutoExitNode: String? = null,
       var ExitNodeAllowLANAccess: Boolean = false,
       var Config: Persist.Persist? = null,
       var ForceDaemon: Boolean = false,
@@ -97,6 +98,7 @@ class Ipn {
       var RouteAllSet: Boolean? = null,
       var CorpDNSSet: Boolean? = null,
       var ExitNodeIDSet: Boolean? = null,
+      var AutoExitNodeSet: Boolean? = null,
       var ExitNodeAllowLANAccessSet: Boolean? = null,
       var WantRunningSet: Boolean? = null,
       var LoggedOutSet: Boolean? = null,
@@ -128,6 +130,12 @@ class Ipn {
       set(value) {
         field = value
         ExitNodeIDSet = true
+      }
+
+    var AutoExitNode: String? = null
+      set(value) {
+        field = value
+        AutoExitNodeSet = true
       }
 
     var ExitNodeAllowLANAccess: Boolean? = null
@@ -249,6 +257,7 @@ fun Ipn.MaskedPrefs.deepCopy(): Ipn.MaskedPrefs {
     if (this.RouteAllSet == true) it.RouteAll = this.RouteAll
     if (this.CorpDNSSet == true) it.CorpDNS = this.CorpDNS
     if (this.ExitNodeIDSet == true) it.ExitNodeID = this.ExitNodeID
+    if (this.AutoExitNodeSet == true) it.AutoExitNode = this.AutoExitNode
     if (this.ExitNodeAllowLANAccessSet == true)
         it.ExitNodeAllowLANAccess = this.ExitNodeAllowLANAccess
     if (this.WantRunningSet == true) it.WantRunning = this.WantRunning
