@@ -33,8 +33,7 @@ import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnEntitlementDecisionSource
-import com.tailscale.ipn.product.policy.VpnEntitlementRuntime
-import com.tailscale.ipn.product.policy.VpnRuntimeState
+import com.tailscale.ipn.product.policy.VpnRuntimeStateTracker
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
@@ -59,12 +58,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -76,23 +71,8 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val stardomSessionController: StardomSessionController by lazy {
     StardomSessionController(AuthSessionRepository(applicationContext), AccessRepository())
   }
-  private val vpnRuntimeState: StateFlow<VpnRuntimeState> by lazy {
-    Notifier.state
-        .map { state ->
-          when (state) {
-            Ipn.State.Starting -> VpnRuntimeState.Starting
-            Ipn.State.Running -> VpnRuntimeState.Running
-            else -> VpnRuntimeState.Idle
-          }
-        }
-        .stateIn(
-            applicationScope,
-            SharingStarted.Eagerly,
-            when (Notifier.state.value) {
-              Ipn.State.Starting -> VpnRuntimeState.Starting
-              Ipn.State.Running -> VpnRuntimeState.Running
-              else -> VpnRuntimeState.Idle
-            })
+  val vpnRuntimeTracker: VpnRuntimeStateTracker by lazy {
+    VpnRuntimeStateTracker(::revokeVpnEntitlement)
   }
   val vpnEntitlementController: VpnEntitlementController by lazy {
     val sessionController = stardomSessionController
@@ -105,14 +85,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
               override suspend fun refreshAccess(origin: VpnStartOrigin?): AccessState =
                   sessionController.refreshAccess(applicationContext)
             },
-        runtime =
-            object : VpnEntitlementRuntime {
-              override val state = vpnRuntimeState
-
-              override fun revoke() {
-                revokeVpnEntitlement()
-              }
-            },
+        runtime = vpnRuntimeTracker,
         scope = applicationScope,
     )
   }
@@ -661,12 +634,15 @@ open class UninitializedApp : Application() {
       try {
         pendingIntent.send()
       } catch (foregroundServiceStartException: IllegalStateException) {
+        initializedApp.vpnRuntimeTracker.markIdle()
         TSLog.e(
             TAG,
             "startVPN hit ForegroundServiceStartNotAllowedException: $foregroundServiceStartException")
       } catch (securityException: SecurityException) {
+        initializedApp.vpnRuntimeTracker.markIdle()
         TSLog.e(TAG, "startVPN hit SecurityException: $securityException")
       } catch (e: Exception) {
+        initializedApp.vpnRuntimeTracker.markIdle()
         TSLog.e(TAG, "startVPN hit exception: $e")
       }
     }

@@ -4,6 +4,8 @@
 package com.tailscale.ipn.product.policy
 
 import com.tailscale.ipn.product.auth.AuthentikState
+import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.ui.notifier.Notifier
 import java.time.Duration
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,6 +30,41 @@ class VpnEntitlementControllerTest {
     VpnStartOrigin.entries.forEach { origin -> assertFalse(controller.authorizeStart(origin)) }
 
     assertEquals(VpnStartOrigin.entries, decisions.refreshOrigins)
+  }
+
+  @Test
+  fun backendLoginRunningDoesNotStartVpnEntitlementMonitoring() = runTest {
+    val originalBackendState = Notifier.state.value
+    var revocations = 0
+    val runtime = VpnRuntimeStateTracker { revocations++ }
+    val decisions = FakeDecisionSource(defaultDecision = AccessState.Unavailable)
+    controller(decisions, runtime)
+
+    try {
+      Notifier.setState(Ipn.State.Running)
+      runCurrent()
+      advanceTimeBy(REFRESH_INTERVAL.multipliedBy(2).toMillis())
+      runCurrent()
+
+      assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+      assertEquals(0, decisions.refreshCalls)
+      assertEquals(0, revocations)
+    } finally {
+      Notifier.setState(originalBackendState)
+    }
+  }
+
+  @Test
+  fun runtimeTrackerChangesOnlyOnExplicitTunnelLifecycleEvents() {
+    val runtime = VpnRuntimeStateTracker {}
+
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+    runtime.markStarting()
+    assertEquals(VpnRuntimeState.Starting, runtime.state.value)
+    runtime.markRunning()
+    assertEquals(VpnRuntimeState.Running, runtime.state.value)
+    runtime.markIdle()
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
   }
 
   @Test
@@ -315,7 +352,7 @@ class VpnEntitlementControllerTest {
 
   private fun kotlinx.coroutines.test.TestScope.controller(
       decisions: FakeDecisionSource,
-      runtime: FakeRuntime,
+      runtime: VpnEntitlementRuntime,
   ) =
       VpnEntitlementController(
           decisionSource = decisions,

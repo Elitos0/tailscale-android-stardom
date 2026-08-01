@@ -7,7 +7,9 @@ import com.tailscale.ipn.product.auth.AuthentikState
 import java.time.Duration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -42,6 +44,27 @@ interface VpnEntitlementRuntime {
   val state: StateFlow<VpnRuntimeState>
 
   fun revoke()
+}
+
+class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlementRuntime {
+  private val _state = MutableStateFlow(VpnRuntimeState.Idle)
+  override val state: StateFlow<VpnRuntimeState> = _state.asStateFlow()
+
+  fun markStarting() {
+    _state.value = VpnRuntimeState.Starting
+  }
+
+  fun markRunning() {
+    _state.value = VpnRuntimeState.Running
+  }
+
+  fun markIdle() {
+    _state.value = VpnRuntimeState.Idle
+  }
+
+  override fun revoke() {
+    revokeVpn()
+  }
 }
 
 interface VpnStartAuthorizer {

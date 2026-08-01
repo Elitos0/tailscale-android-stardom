@@ -35,6 +35,11 @@ open class IPNService : VpnService(), libtailscale.IPNService {
 
   override fun updateVpnStatus(status: Boolean) {
     app.getAppScopedViewModel().setVpnActive(status)
+    if (status && !closed) {
+      app.vpnRuntimeTracker.markRunning()
+    } else {
+      app.vpnRuntimeTracker.markIdle()
+    }
   }
 
   override fun onCreate() {
@@ -128,6 +133,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       beforeRequest: () -> Unit = {},
   ) {
     if (closed) return
+    app.vpnRuntimeTracker.markStarting()
     app.setWantRunning(true) {
       scope.launch {
         val requested =
@@ -150,6 +156,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   override fun close() {
     if (closed) return
     closed = true
+    app.vpnRuntimeTracker.markIdle()
     Notifier.setState(Ipn.State.Stopping)
     disconnectVPN()
     Libtailscale.serviceDisconnect(this)
