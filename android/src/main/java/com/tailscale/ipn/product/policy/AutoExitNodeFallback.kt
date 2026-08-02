@@ -51,7 +51,9 @@ object PolicyAwareAutoExitNodeFallbackSelector {
             .toList()
     val current = currentEffectiveNodeId?.trim().orEmpty()
     if (current in eligible) return AutoExitNodeFallbackDecision.Keep
-    if (nativeCandidateAvailable) return AutoExitNodeFallbackDecision.Keep
+    if (nativeCandidateAvailable && eligible.isNotEmpty()) {
+      return AutoExitNodeFallbackDecision.Keep
+    }
     return eligible.firstOrNull()?.let(AutoExitNodeFallbackDecision::Select)
         ?: AutoExitNodeFallbackDecision.StopAndClear
   }
