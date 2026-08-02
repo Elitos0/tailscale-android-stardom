@@ -34,6 +34,7 @@ import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.product.policy.ExitNodePreferenceWriter
+import com.tailscale.ipn.product.policy.PolicyAwareAutoExitNodeFallbackController
 import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
 import com.tailscale.ipn.product.policy.StardomSyspolicyBridge
 import com.tailscale.ipn.product.policy.SyspolicyStringArrayJSONBridge
@@ -151,6 +152,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   private lateinit var app: libtailscale.Application
   private lateinit var allowedSuggestedExitNodePolicyController:
       AllowedSuggestedExitNodePolicyController
+  private lateinit var autoExitNodeFallbackController: PolicyAwareAutoExitNodeFallbackController
   override val viewModelStore: ViewModelStore
     get() = appViewModelStore
 
@@ -243,6 +245,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     // controller remembers the synchronously exposed value and detects any state change that raced
     // with initialization.
     allowedSuggestedExitNodePolicyController.start(applicationScope)
+    autoExitNodeFallbackController.start(applicationScope)
     healthNotifier = HealthNotifier(Notifier.health, Notifier.state, applicationScope)
     connectivityManager = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
@@ -318,6 +321,22 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             onCallbackError = { operation, error ->
               TSLog.e(
                   "AutoExitPolicy", "$operation callback failed; enforcement remains armed", error)
+            },
+        )
+    autoExitNodeFallbackController =
+        PolicyAwareAutoExitNodeFallbackController(
+            authentikState = sessionController.authentikState,
+            accessState = sessionController.accessState,
+            mdmAllowedSuggestedExitNodes = MDMSettings.allowedSuggestedExitNodes.flow,
+            mdmForcedExitNodeId = MDMSettings.exitNodeID.flow,
+            prefs = Notifier.prefs,
+            netmap = Notifier.netmap,
+            runtimeSnapshot = vpnRuntimeTracker.snapshot,
+            runtime = vpnRuntimeTracker,
+            mutationBoundary = vpnEntitlementController,
+            onError = { operation, error ->
+              TSLog.e(
+                  "AutoExitFallback", "$operation callback failed; VPN remains fail-closed", error)
             },
         )
   }
