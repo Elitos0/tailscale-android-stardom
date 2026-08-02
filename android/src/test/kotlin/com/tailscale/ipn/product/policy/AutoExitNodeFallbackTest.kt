@@ -66,6 +66,20 @@ class AutoExitNodeFallbackSelectorTest {
   }
 
   @Test
+  fun nativeCandidateCapabilityDefersToNativeResolver() {
+    val decision =
+        PolicyAwareAutoExitNodeFallbackSelector.decide(
+            autoConfigured = true,
+            allowedNodeIds = setOf("node-a"),
+            currentEffectiveNodeId = "auto:any",
+            peers = listOf(exitPeer("node-a")),
+            nativeCandidateAvailable = true,
+        )
+
+    assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
+  }
+
+  @Test
   fun manualModeIsNeverTouched() {
     val decision =
         PolicyAwareAutoExitNodeFallbackSelector.decide(

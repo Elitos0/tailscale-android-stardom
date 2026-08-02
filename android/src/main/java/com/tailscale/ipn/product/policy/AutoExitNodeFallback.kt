@@ -35,6 +35,7 @@ object PolicyAwareAutoExitNodeFallbackSelector {
       allowedNodeIds: Collection<String>,
       currentEffectiveNodeId: String?,
       peers: Collection<Tailcfg.Node>,
+      nativeCandidateAvailable: Boolean = false,
   ): AutoExitNodeFallbackDecision {
     if (!autoConfigured) return AutoExitNodeFallbackDecision.Keep
 
@@ -50,6 +51,7 @@ object PolicyAwareAutoExitNodeFallbackSelector {
             .toList()
     val current = currentEffectiveNodeId?.trim().orEmpty()
     if (current in eligible) return AutoExitNodeFallbackDecision.Keep
+    if (nativeCandidateAvailable) return AutoExitNodeFallbackDecision.Keep
     return eligible.firstOrNull()?.let(AutoExitNodeFallbackDecision::Select)
         ?: AutoExitNodeFallbackDecision.StopAndClear
   }
@@ -180,6 +182,14 @@ class PolicyAwareAutoExitNodeFallbackController(
         allowedNodeIds = allowed,
         currentEffectiveNodeId = currentPrefs.activeExitNodeID,
         peers = peers,
+        nativeCandidateAvailable =
+            peers.any { peer ->
+              peer.Online == true &&
+                  peer.isExitNode &&
+                  !peer.isMullvadNode &&
+                  peer.StableID.trim() in allowed &&
+                  peer.hasNativeSuggestedExitCapability()
+            },
     )
   }
 
@@ -229,7 +239,12 @@ class PolicyAwareAutoExitNodeFallbackController(
       if (isSet) ManagedAllowedSuggestedExitNodes.Configured(value?.toList())
       else ManagedAllowedSuggestedExitNodes.Unset
 
+  private fun Tailcfg.Node.hasNativeSuggestedExitCapability(): Boolean =
+      Capabilities?.contains(SUGGEST_EXIT_NODE_CAPABILITY) == true ||
+          CapMap?.containsKey(SUGGEST_EXIT_NODE_CAPABILITY) == true
+
   companion object {
     private const val NATIVE_AUTO_EXIT_NODE_ANY = "any"
+    private const val SUGGEST_EXIT_NODE_CAPABILITY = "suggest-exit-node"
   }
 }
