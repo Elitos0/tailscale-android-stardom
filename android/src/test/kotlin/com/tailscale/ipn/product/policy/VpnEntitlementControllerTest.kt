@@ -90,6 +90,24 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun runtimeTrackerDispatchesRevocationOnlyOncePerRunGeneration() {
+    var revocations = 0
+    val runtime = VpnRuntimeStateTracker { revocations++ }
+
+    val firstLease = runtime.beginStarting()
+    assertTrue(runtime.markRunning(firstLease))
+    runtime.revoke()
+    runtime.revoke()
+    assertEquals(1, revocations)
+
+    assertTrue(runtime.finish(firstLease))
+    val secondLease = runtime.beginStarting()
+    runtime.revoke()
+    assertEquals(2, revocations)
+    assertTrue(runtime.finish(secondLease))
+  }
+
+  @Test
   fun disallowedAutoExitNodeRevocationUsesTheRuntimeBoundary() = runTest {
     val runtime = FakeRuntime(VpnRuntimeState.Running)
     val controller = controller(FakeDecisionSource(defaultDecision = ACTIVE), runtime)

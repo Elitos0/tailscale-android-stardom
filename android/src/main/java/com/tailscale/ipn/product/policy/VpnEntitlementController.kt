@@ -140,6 +140,7 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
   override val state: StateFlow<VpnRuntimeState> = VpnRuntimeStateFlow(snapshot)
   private var generation = 0L
   private var requestGeneration: Long? = null
+  private var revocationGeneration: Long? = null
 
   fun beginStarting(): VpnRuntimeLease =
       checkNotNull(tryBeginStarting()) { "a VPN run is already active" }
@@ -150,6 +151,7 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
           return@synchronized null
         }
         VpnRuntimeLease(++generation).also {
+          revocationGeneration = null
           _snapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Starting, generation)
         }
       }
@@ -186,7 +188,20 @@ class VpnRuntimeStateTracker(private val revokeVpn: () -> Unit) : VpnEntitlement
   }
 
   override fun revoke() {
-    revokeVpn()
+    val shouldRevoke =
+        synchronized(lock) {
+          if (_snapshot.value.state == VpnRuntimeState.Idle) {
+            // Idle revocation is still a valid cleanup signal for rejected starts. It is not
+            // generation-deduplicated because no active VPN run owns the stop fence yet.
+            true
+          } else if (revocationGeneration == generation) {
+            false
+          } else {
+            revocationGeneration = generation
+            true
+          }
+        }
+    if (shouldRevoke) revokeVpn()
   }
 }
 
