@@ -151,6 +151,21 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
   }
 
   @Test
+  fun idleNoCandidateClearsWithoutDispatchingAStop() = runTest {
+    val fixture =
+        fixture(
+            prefs = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
+            peers = emptyList(),
+            runtimeState = VpnRuntimeState.Idle,
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(0, fixture.runtime.revocations)
+    assertEquals(listOf(null), fixture.boundary.mutations)
+  }
+
+  @Test
   fun policyShrinkFromCurrentASelectsAllowedB() = runTest {
     val fixture =
         fixture(

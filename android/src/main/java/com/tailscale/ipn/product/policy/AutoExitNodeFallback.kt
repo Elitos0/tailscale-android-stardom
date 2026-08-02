@@ -147,7 +147,9 @@ class PolicyAwareAutoExitNodeFallbackController(
         }
       }
       AutoExitNodeFallbackDecision.StopAndClear -> {
-        revokeSafely("stop", null)
+        if (inputs.runtime.state.isStartingOrRunning()) {
+          revokeSafely("stop", null)
+        }
         runCatching { mutationBoundary.mutateExitNode(ExitNodeMutation.Clear()) }
             .onFailure { report("clear", it) }
             .onSuccess { result -> result.exceptionOrNull()?.let { report("clear", it) } }
@@ -235,6 +237,9 @@ class PolicyAwareAutoExitNodeFallbackController(
   private fun report(operation: String, error: Throwable) {
     runCatching { onError(operation, error) }
   }
+
+  private fun VpnRuntimeState.isStartingOrRunning(): Boolean =
+      this == VpnRuntimeState.Starting || this == VpnRuntimeState.Running
 
   private fun SettingState<List<String>?>.toManagedAllowedSuggestedExitNodes():
       ManagedAllowedSuggestedExitNodes =
