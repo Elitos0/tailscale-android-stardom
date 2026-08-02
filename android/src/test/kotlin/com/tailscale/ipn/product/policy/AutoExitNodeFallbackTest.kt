@@ -136,6 +136,21 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
   }
 
   @Test
+  fun concreteNetmapWithoutPeersIsKnownNoCandidate() = runTest {
+    val fixture =
+        fixture(
+            prefs = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
+            peers = null,
+            runtimeState = VpnRuntimeState.Running,
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(1, fixture.runtime.revocations)
+    assertEquals(listOf(null), fixture.boundary.mutations)
+  }
+
+  @Test
   fun policyShrinkFromCurrentASelectsAllowedB() = runTest {
     val fixture =
         fixture(
@@ -156,7 +171,7 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
   private fun kotlinx.coroutines.test.TestScope.fixture(
       allowed: Set<String> = setOf("node-a"),
       prefs: Ipn.Prefs? = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
-      peers: List<Tailcfg.Node> = listOf(exitPeer("node-a")),
+      peers: List<Tailcfg.Node>? = listOf(exitPeer("node-a")),
       runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
   ): Fixture {
     val authentik = MutableStateFlow(AuthentikState.Authorized)
@@ -234,7 +249,7 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     }
   }
 
-  private fun networkMap(peers: List<Tailcfg.Node>) =
+  private fun networkMap(peers: List<Tailcfg.Node>?) =
       Netmap.NetworkMap(
           SelfNode = Tailcfg.Node(StableID = "self"),
           Peers = peers,

@@ -167,10 +167,10 @@ class PolicyAwareAutoExitNodeFallbackController(
     if (inputs.managed.forced.isSet) return AutoExitNodeFallbackDecision.Keep
 
     // A null map means the backend has not supplied peer availability yet. Keep native Auto in
-    // its own fail-closed blackhole state until a concrete map arrives; an empty peer list is a
-    // known no-candidate state and is handled by StopAndClear.
+    // its own fail-closed blackhole state until a concrete map arrives; a concrete map with no
+    // peers is a known no-candidate state and is handled by StopAndClear.
     val currentNetmap = inputs.netmap ?: return AutoExitNodeFallbackDecision.Keep
-    val peers = currentNetmap.Peers ?: return AutoExitNodeFallbackDecision.Keep
+    val peers = currentNetmap.Peers.orEmpty()
     val allowed =
         AllowedSuggestedExitNodePolicyMapper.map(
             inputs.authentik,
