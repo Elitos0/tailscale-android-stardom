@@ -29,7 +29,6 @@ import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
 import com.tailscale.ipn.product.StardomAccessBootstrap
 import com.tailscale.ipn.product.StardomSessionController
-import com.tailscale.ipn.product.startStardomProductObservers
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
@@ -48,6 +47,7 @@ import com.tailscale.ipn.product.policy.VpnStartDispatchResult
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.product.policy.VpnStopCommandDispatcher
 import com.tailscale.ipn.product.policy.VpnWantRunningPersistence
+import com.tailscale.ipn.product.startStardomProductObservers
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -247,17 +247,13 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     // The access bootstrap is last: it refreshes Policy API state only for a persisted Authentik
     // session and has no VPN, notification, or UI side effects.
     startStardomProductObservers(
-        startPolicyObserver = {
-          allowedSuggestedExitNodePolicyController.start(applicationScope)
-        },
+        startPolicyObserver = { allowedSuggestedExitNodePolicyController.start(applicationScope) },
         startFallbackObserver = { autoExitNodeFallbackController.start(applicationScope) },
         startAccessBootstrap = {
           StardomAccessBootstrap(
                   authentikState = stardomSessionController.authentikState,
                   scope = applicationScope,
-                  refreshAccess = {
-                    stardomSessionController.refreshAccess(applicationContext)
-                  },
+                  refreshAccess = { stardomSessionController.refreshAccess(applicationContext) },
               )
               .start()
         },

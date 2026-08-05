@@ -14,9 +14,9 @@ import kotlinx.coroutines.launch
 /**
  * Performs the process-start Policy API refresh for an already-authorized Stardom session.
  *
- * This coordinator is deliberately independent from the VPN, notification, and UI lifecycles:
- * it only reads the persisted Authentik state and publishes the result through the supplied
- * refresh function. A process-start attempt is one-shot, including a non-authorized attempt.
+ * This coordinator is deliberately independent from the VPN, notification, and UI lifecycles: it
+ * only reads the persisted Authentik state and publishes the result through the supplied refresh
+ * function. A process-start attempt is one-shot, including a non-authorized attempt.
  */
 class StardomAccessBootstrap(
     private val authentikState: StateFlow<AuthentikState>,
@@ -33,9 +33,7 @@ class StardomAccessBootstrap(
   }
 }
 
-/**
- * Keeps product observer startup ordering explicit and testable: policy, fallback, then access.
- */
+/** Keeps product observer startup ordering explicit and testable: policy, fallback, then access. */
 fun startStardomProductObservers(
     startPolicyObserver: () -> Unit,
     startFallbackObserver: () -> Unit,
