@@ -27,7 +27,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
+import com.tailscale.ipn.product.StardomAccessBootstrap
 import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.startStardomProductObservers
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
@@ -240,12 +242,26 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     } else {
       startLibtailscale(this.filesDir.absolutePath, hardwareAttestation)
     }
-    // Libtailscale performs an initial synchronous syspolicy read during start. Start the observer
-    // only after that call returns so policy reads cannot recursively initialize the app. The
-    // controller remembers the synchronously exposed value and detects any state change that raced
-    // with initialization.
-    allowedSuggestedExitNodePolicyController.start(applicationScope)
-    autoExitNodeFallbackController.start(applicationScope)
+    // Libtailscale performs an initial synchronous syspolicy read during start. Start the product
+    // observers only after that call returns so policy reads cannot recursively initialize the app.
+    // The access bootstrap is last: it refreshes Policy API state only for a persisted Authentik
+    // session and has no VPN, notification, or UI side effects.
+    startStardomProductObservers(
+        startPolicyObserver = {
+          allowedSuggestedExitNodePolicyController.start(applicationScope)
+        },
+        startFallbackObserver = { autoExitNodeFallbackController.start(applicationScope) },
+        startAccessBootstrap = {
+          StardomAccessBootstrap(
+                  authentikState = stardomSessionController.authentikState,
+                  scope = applicationScope,
+                  refreshAccess = {
+                    stardomSessionController.refreshAccess(applicationContext)
+                  },
+              )
+              .start()
+        },
+    )
     healthNotifier = HealthNotifier(Notifier.health, Notifier.state, applicationScope)
     connectivityManager = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
