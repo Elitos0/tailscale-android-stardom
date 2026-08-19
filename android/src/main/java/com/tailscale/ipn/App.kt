@@ -31,6 +31,9 @@ import com.tailscale.ipn.product.StardomAccessBootstrap
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
+import com.tailscale.ipn.product.policy.EncryptedAccessPolicyCacheStore
+import com.tailscale.ipn.product.policy.SharedPreferencesDesiredExitModeStore
+import com.tailscale.ipn.product.policy.VpnStopReason
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
 import com.tailscale.ipn.product.policy.ExitNodeMutation
@@ -81,8 +84,13 @@ import libtailscale.Libtailscale
 
 class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  val desiredExitModeStore by lazy { SharedPreferencesDesiredExitModeStore(applicationContext) }
+
   val stardomSessionController: StardomSessionController by lazy {
-    StardomSessionController(AuthSessionRepository(applicationContext), AccessRepository())
+    StardomSessionController(
+        AuthSessionRepository(applicationContext),
+        AccessRepository(cacheStore = EncryptedAccessPolicyCacheStore(applicationContext)),
+    )
   }
   val vpnStopCommandDispatcher: VpnStopCommandDispatcher by lazy {
     VpnStopCommandDispatcher(::stopVPN)
@@ -328,7 +336,9 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
               vpnEntitlementController.revokeDisallowedAutoExitNode()
             },
             clearDisallowedExitNode = { complete ->
-              applicationScope.launch { complete(mutateExitNodePrefs(ExitNodeMutation.Clear())) }
+              applicationScope.launch {
+                complete(vpnEntitlementController.stopThenClearExitNode(VpnStopReason.ExitNodeDisallowed))
+              }
             },
             onCallbackError = { operation, error ->
               TSLog.e(
@@ -346,6 +356,8 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             runtimeSnapshot = vpnRuntimeTracker.snapshot,
             runtime = vpnRuntimeTracker,
             mutationBoundary = vpnEntitlementController,
+            desiredExitModeStore = desiredExitModeStore,
+            stopThenClear = { reason -> vpnEntitlementController.stopThenClearExitNode(reason) },
             onError = { operation, error ->
               TSLog.e(
                   "AutoExitFallback", "$operation callback failed; VPN remains fail-closed", error)

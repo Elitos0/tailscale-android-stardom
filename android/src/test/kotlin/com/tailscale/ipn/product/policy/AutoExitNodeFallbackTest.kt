@@ -8,6 +8,7 @@ import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.Tailcfg
+import java.time.Duration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,17 +67,31 @@ class AutoExitNodeFallbackSelectorTest {
   }
 
   @Test
-  fun nativeCandidateCapabilityDefersToNativeResolver() {
+  fun nativeGraceKeepsUnresolvedAuto() {
     val decision =
         PolicyAwareAutoExitNodeFallbackSelector.decide(
             autoConfigured = true,
             allowedNodeIds = setOf("node-a"),
             currentEffectiveNodeId = "auto:any",
             peers = listOf(exitPeer("node-a")),
-            nativeCandidateAvailable = true,
+            nativeGraceActive = true,
         )
 
     assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
+  }
+
+  @Test
+  fun afterGraceExpiresUnresolvedAutoSelectsFirstEligible() {
+    val decision =
+        PolicyAwareAutoExitNodeFallbackSelector.decide(
+            autoConfigured = true,
+            allowedNodeIds = setOf("node-a"),
+            currentEffectiveNodeId = "auto:any",
+            peers = listOf(exitPeer("node-a")),
+            nativeGraceActive = false,
+        )
+
+    assertEquals(AutoExitNodeFallbackDecision.Select("node-a"), decision)
   }
 
   @Test
@@ -209,6 +224,16 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
             runtimeSnapshot = runtime.snapshot,
             runtime = runtime,
             mutationBoundary = boundary,
+            // Unit tests assert post-grace behavior; grace itself is covered separately.
+            nativeGrace = Duration.ZERO,
+            stopThenClear = { _ ->
+              if (runtime.state.value == VpnRuntimeState.Starting ||
+                  runtime.state.value == VpnRuntimeState.Running) {
+                events += "revoke"
+                runtime.revoke()
+              }
+              boundary.mutateExitNode(ExitNodeMutation.Clear())
+            },
         )
     return Fixture(controller, access, netmap, runtime, boundary, events)
   }
@@ -237,6 +262,7 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
 
     override fun revoke() {
       revocations++
+      _snapshot.value = VpnRuntimeSnapshot(VpnRuntimeState.Idle, _snapshot.value.generation)
     }
   }
 

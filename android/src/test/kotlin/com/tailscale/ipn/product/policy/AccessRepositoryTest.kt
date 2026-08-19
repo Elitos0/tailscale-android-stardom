@@ -9,6 +9,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AccessRepositoryTest {
@@ -102,6 +103,61 @@ class AccessRepositoryTest {
                 """{"access":"active","allowedExitNodes":[{"stableNodeId":"node-b","label":"Beta"},{"stableNodeId":"node-a","label":"Alpha"}],"ignored":"value"}""")
 
     assertEquals(AccessState.Active(setOf("node-a", "node-b")), repository.load("token"))
+  }
+
+  @Test
+  fun unexpiredCacheSurvivesTransientFailure() {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { throw IOException("offline") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+    assertEquals(AccessState.Active(setOf("node-a")), repository.load("token"))
+  }
+
+  @Test
+  fun forbiddenClearsCache() {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { FakeHttpURLConnection(403, "") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+    assertEquals(AccessState.Disabled, repository.load("token"))
+    assertNull(cache.policy)
   }
 }
 

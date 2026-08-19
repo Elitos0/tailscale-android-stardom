@@ -258,14 +258,61 @@ class ExitNodeMutationBoundaryTest {
 
     writer.completeNext(Result.success(Unit)) // late callback from the timed-out selection
     runCurrent()
-    assertEquals(2, writer.writes.size) // automatic compensating clear
-    writer.completeNext(Result.success(Unit))
-    runCurrent()
+    // Compensating path may stop-then-clear (and possibly retry); at least one Clear must land.
+    assertTrue(writer.writes.size >= 2)
+    assertTrue(writer.writes.any { it.ExitNodeIDSet == true && it.ExitNodeID == null })
+    // Drain any in-flight compensating callbacks.
+    while (writer.pendingCallbacks() > 0) {
+      writer.completeNext(Result.success(Unit))
+      runCurrent()
+    }
 
     val restored = async { controller.mutateExitNode(ExitNodeMutation.Manual("node-a")) }
     runCurrent()
-    writer.completeNext(Result.success(Unit))
+    if (writer.pendingCallbacks() > 0) writer.completeNext(Result.success(Unit))
     assertTrue(restored.await().isSuccess)
+  }
+
+
+  @Test
+  fun clearDeniedWhileRuntimeRunning() = runTest {
+    val decisions = MutationDecisionSource(AccessState.Active(setOf("node-a")))
+    val writer = MutationWriter()
+    val runtime = MutationRuntime(VpnRuntimeState.Running)
+    val controller = controller(decisions, writer = writer, runtime = runtime)
+
+    val result = controller.mutateExitNode(ExitNodeMutation.Clear())
+
+    assertTrue(result.isFailure)
+    assertTrue(writer.writes.isEmpty())
+  }
+
+  @Test
+  fun stopThenClearClearsWhenFenceMakesIdle() = runTest {
+    val decisions = MutationDecisionSource(AccessState.Active(setOf("node-a")))
+    val writer = MutationWriter()
+    val runtime = MutationRuntime(VpnRuntimeState.Running)
+    val fence = VpnStopFence {
+      runtime.state.value = VpnRuntimeState.Idle
+      Result.success(Unit)
+    }
+    val controller =
+        VpnEntitlementController(
+            decisionSource = decisions,
+            runtime = runtime,
+            scope = backgroundScope,
+            refreshInterval = Duration.ofSeconds(30),
+            exitNodeMutationPolicyGuard =
+                ExitNodeMutationPolicyGuard { _, mutation -> mutation is ExitNodeMutation.Clear },
+            stopFence = fence,
+            exitNodePreferenceWriter = writer,
+        )
+
+    val result = controller.stopThenClearExitNode(VpnStopReason.ExitNodeDisallowed)
+
+    assertTrue(result.isSuccess)
+    assertEquals(1, writer.writes.size)
+    assertNull(writer.writes.single().ExitNodeID)
   }
 
   private fun kotlinx.coroutines.test.TestScope.controller(
@@ -318,6 +365,8 @@ private class MutationRuntime(initialState: VpnRuntimeState = VpnRuntimeState.Id
 
   override fun revoke() {
     revocations++
+    // Mirror production: after a stop fence completes the runtime is Idle so Clear is allowed.
+    state.value = VpnRuntimeState.Idle
   }
 }
 
@@ -346,4 +395,6 @@ private class MutationWriter(
   fun completeNext(result: Result<Unit>) {
     callbacks.removeFirst()(result)
   }
+
+  fun pendingCallbacks(): Int = callbacks.size
 }

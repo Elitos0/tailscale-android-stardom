@@ -8,8 +8,10 @@ import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.Tailcfg
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -17,6 +19,7 @@ import kotlinx.coroutines.launch
 sealed interface AutoExitNodeFallbackDecision {
   data object Keep : AutoExitNodeFallbackDecision
 
+  /** Temporary concrete exit while DesiredExitMode remains Auto. */
   data class Select(val nodeId: String) : AutoExitNodeFallbackDecision
 
   data object StopAndClear : AutoExitNodeFallbackDecision
@@ -25,9 +28,8 @@ sealed interface AutoExitNodeFallbackDecision {
 /**
  * Chooses one policy-approved, currently reachable owned exit node for the native-auto fallback.
  *
- * This is deliberately a control-plane decision only. It does not rank nodes, probe the public
- * internet, or retry on a timer. A stable ID is selected deterministically so that every input
- * snapshot has one result and no unowned route can enter the mutation boundary.
+ * Native auto gets a grace window once eligible peers exist. Capability presence alone never proves
+ * resolution. Selection is deterministic (lexicographically first stable ID).
  */
 object PolicyAwareAutoExitNodeFallbackSelector {
   fun decide(
@@ -35,7 +37,7 @@ object PolicyAwareAutoExitNodeFallbackSelector {
       allowedNodeIds: Collection<String>,
       currentEffectiveNodeId: String?,
       peers: Collection<Tailcfg.Node>,
-      nativeCandidateAvailable: Boolean = false,
+      nativeGraceActive: Boolean = false,
   ): AutoExitNodeFallbackDecision {
     if (!autoConfigured) return AutoExitNodeFallbackDecision.Keep
 
@@ -51,7 +53,8 @@ object PolicyAwareAutoExitNodeFallbackSelector {
             .toList()
     val current = currentEffectiveNodeId?.trim().orEmpty()
     if (current in eligible) return AutoExitNodeFallbackDecision.Keep
-    if (nativeCandidateAvailable && eligible.isNotEmpty()) {
+    // During grace, keep native auto blackhole even if still unresolved.
+    if (nativeGraceActive && eligible.isNotEmpty()) {
       return AutoExitNodeFallbackDecision.Keep
     }
     return eligible.firstOrNull()?.let(AutoExitNodeFallbackDecision::Select)
@@ -59,11 +62,6 @@ object PolicyAwareAutoExitNodeFallbackSelector {
   }
 }
 
-/**
- * App-scoped bridge used only when pinned native Auto cannot resolve an exit candidate. Inputs are
- * StateFlows from the existing policy/netmap/prefs surfaces; each mutation still passes through
- * [ExitNodeMutationBoundary], whose write mutex and fresh policy checks are authoritative.
- */
 class PolicyAwareAutoExitNodeFallbackController(
     private val authentikState: StateFlow<AuthentikState>,
     private val accessState: StateFlow<AccessState>,
@@ -74,6 +72,10 @@ class PolicyAwareAutoExitNodeFallbackController(
     private val runtimeSnapshot: StateFlow<VpnRuntimeSnapshot>,
     private val runtime: VpnEntitlementRuntime,
     private val mutationBoundary: ExitNodeMutationBoundary,
+    private val desiredExitModeStore: DesiredExitModeStore? = null,
+    private val stopThenClear: (suspend (VpnStopReason) -> Result<Unit>)? = null,
+    private val nativeGrace: Duration = Duration.ofSeconds(10),
+    private val nowMillis: () -> Long = System::currentTimeMillis,
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) {
   private data class ManagedSettings(
@@ -101,6 +103,8 @@ class PolicyAwareAutoExitNodeFallbackController(
   private val started = AtomicBoolean(false)
   private val lock = Any()
   private var lastActionKey: ActionKey? = null
+  private var graceDeadlineMillis: Long? = null
+  private var graceEligibleSignature: List<String>? = null
 
   fun start(scope: CoroutineScope) {
     if (!started.compareAndSet(false, true)) return
@@ -119,11 +123,11 @@ class PolicyAwareAutoExitNodeFallbackController(
               currentRuntime ->
             Inputs(auth, access, currentManaged, currentPrefs, currentNetmap, currentRuntime)
           }
-          .collect { process(it) }
+          .collect { process(scope, it) }
     }
   }
 
-  private suspend fun process(inputs: Inputs) {
+  private suspend fun process(scope: CoroutineScope, inputs: Inputs) {
     val decision = evaluate(inputs)
     if (decision is AutoExitNodeFallbackDecision.Keep) {
       synchronized(lock) { lastActionKey = null }
@@ -132,27 +136,56 @@ class PolicyAwareAutoExitNodeFallbackController(
     val actionKey = actionKey(inputs, decision)
     synchronized(lock) {
       if (lastActionKey == actionKey) return
+      // Only record after success — set tentatively; clear on failure below.
       lastActionKey = actionKey
     }
 
     when (decision) {
       is AutoExitNodeFallbackDecision.Select -> {
+        // Preserve DesiredExitMode.Auto — do not rewrite user intent to Manual.
         val result =
             runCatching {
                   mutationBoundary.mutateExitNode(ExitNodeMutation.Manual(decision.nodeId))
                 }
                 .getOrElse { Result.failure(it) }
         if (result.isFailure) {
+          synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
           revokeSafely("select", result.exceptionOrNull())
         }
       }
       AutoExitNodeFallbackDecision.StopAndClear -> {
-        if (inputs.runtime.state.isStartingOrRunning()) {
-          revokeSafely("stop", null)
+        val clearer = stopThenClear
+        if (clearer != null) {
+          clearer(VpnStopReason.EmptyCandidatePool)
+              .onFailure {
+                synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
+                report("stop-clear", it)
+                scope.launch {
+                  delay(250)
+                  process(scope, inputs)
+                }
+              }
+        } else {
+          if (inputs.runtime.state.isStartingOrRunning()) {
+            revokeSafely("stop", null)
+          }
+          // Only clear when idle; otherwise re-arm.
+          if (!inputs.runtime.state.isStartingOrRunning()) {
+            runCatching { mutationBoundary.mutateExitNode(ExitNodeMutation.Clear()) }
+                .onFailure {
+                  synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
+                  report("clear", it)
+                }
+                .onSuccess { result ->
+                  result.exceptionOrNull()?.let {
+                    synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
+                    report("clear", it)
+                  }
+                }
+          } else {
+            synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
+          }
         }
-        runCatching { mutationBoundary.mutateExitNode(ExitNodeMutation.Clear()) }
-            .onFailure { report("clear", it) }
-            .onSuccess { result -> result.exceptionOrNull()?.let { report("clear", it) } }
       }
       AutoExitNodeFallbackDecision.Keep -> error("Keep is handled before dispatch")
     }
@@ -160,19 +193,18 @@ class PolicyAwareAutoExitNodeFallbackController(
 
   private fun evaluate(inputs: Inputs): AutoExitNodeFallbackDecision {
     val currentPrefs = inputs.prefs ?: return AutoExitNodeFallbackDecision.Keep
-    if (currentPrefs.AutoExitNode != NATIVE_AUTO_EXIT_NODE_ANY) {
+    val desired = desiredExitModeStore?.mode?.value
+    val autoConfigured =
+        desired is DesiredExitMode.Auto ||
+            (desired == null && currentPrefs.AutoExitNode == NATIVE_AUTO_EXIT_NODE_ANY)
+    if (!autoConfigured) {
       return AutoExitNodeFallbackDecision.Keep
     }
     if (inputs.authentik != AuthentikState.Authorized || inputs.access !is AccessState.Active) {
-      // The entitlement controller owns non-Active stop decisions. Do not clear an Auto
-      // preference here, so a fresh authorized decision can still be made later.
       return AutoExitNodeFallbackDecision.Keep
     }
     if (inputs.managed.forced.isSet) return AutoExitNodeFallbackDecision.Keep
 
-    // A null map means the backend has not supplied peer availability yet. Keep native Auto in
-    // its own fail-closed blackhole state until a concrete map arrives; a concrete map with no
-    // peers is a known no-candidate state and is handled by StopAndClear.
     val currentNetmap = inputs.netmap ?: return AutoExitNodeFallbackDecision.Keep
     val peers = currentNetmap.Peers.orEmpty()
     val allowed =
@@ -181,20 +213,45 @@ class PolicyAwareAutoExitNodeFallbackController(
             inputs.access,
             inputs.managed.allowed.toManagedAllowedSuggestedExitNodes(),
         )
+    val eligible =
+        peers
+            .filter { it.Online == true && it.isExitNode && !it.isMullvadNode }
+            .map { it.StableID.trim() }
+            .filter { it.isNotEmpty() && it in allowed }
+            .distinct()
+            .sorted()
+
+    val graceActive = updateGraceWindow(eligible)
     return PolicyAwareAutoExitNodeFallbackSelector.decide(
         autoConfigured = true,
         allowedNodeIds = allowed,
         currentEffectiveNodeId = currentPrefs.activeExitNodeID,
         peers = peers,
-        nativeCandidateAvailable =
-            peers.any { peer ->
-              peer.Online == true &&
-                  peer.isExitNode &&
-                  !peer.isMullvadNode &&
-                  peer.StableID.trim() in allowed &&
-                  peer.hasNativeSuggestedExitCapability()
-            },
+        nativeGraceActive = graceActive,
     )
+  }
+
+  private fun updateGraceWindow(eligible: List<String>): Boolean {
+    synchronized(lock) {
+      if (eligible.isEmpty()) {
+        graceDeadlineMillis = null
+        graceEligibleSignature = null
+        return false
+      }
+      val graceMillis = nativeGrace.toMillis()
+      // Zero/negative grace means "no native window" (tests and fail-closed paths).
+      if (graceMillis <= 0L) {
+        graceDeadlineMillis = null
+        graceEligibleSignature = eligible
+        return false
+      }
+      if (graceEligibleSignature != eligible) {
+        graceEligibleSignature = eligible
+        graceDeadlineMillis = nowMillis() + graceMillis
+      }
+      val deadline = graceDeadlineMillis ?: return false
+      return nowMillis() < deadline
+    }
   }
 
   private fun actionKey(
@@ -246,12 +303,7 @@ class PolicyAwareAutoExitNodeFallbackController(
       if (isSet) ManagedAllowedSuggestedExitNodes.Configured(value?.toList())
       else ManagedAllowedSuggestedExitNodes.Unset
 
-  private fun Tailcfg.Node.hasNativeSuggestedExitCapability(): Boolean =
-      Capabilities?.contains(SUGGEST_EXIT_NODE_CAPABILITY) == true ||
-          CapMap?.containsKey(SUGGEST_EXIT_NODE_CAPABILITY) == true
-
   companion object {
     private const val NATIVE_AUTO_EXIT_NODE_ANY = "any"
-    private const val SUGGEST_EXIT_NODE_CAPABILITY = "suggest-exit-node"
   }
 }

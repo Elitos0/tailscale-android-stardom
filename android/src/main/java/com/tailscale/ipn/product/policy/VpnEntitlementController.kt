@@ -74,6 +74,25 @@ class ExitNodeMutationDeniedException : IllegalStateException("exit-node mutatio
 
 class ExitNodeMutationTimeoutException : IllegalStateException("exit-node mutation timed out")
 
+enum class VpnStopReason {
+  EntitlementRevoked,
+  ExitNodeDisallowed,
+  EmptyCandidatePool,
+  MutationStateUncertain,
+}
+
+fun interface VpnStopFence {
+  suspend fun stopAndAwaitIdle(reason: VpnStopReason): Result<Unit>
+}
+
+/** Default fence: fire-and-forget revoke; callers that need ordering should inject a real fence. */
+class ImmediateRevokeStopFence(private val runtime: VpnEntitlementRuntime) : VpnStopFence {
+  override suspend fun stopAndAwaitIdle(reason: VpnStopReason): Result<Unit> {
+    runtime.revoke()
+    return Result.success(Unit)
+  }
+}
+
 enum class VpnRuntimeState {
   Idle,
   Starting,
@@ -493,11 +512,14 @@ class VpnEntitlementController(
         ExitNodeMutationPolicyGuard.DenySelections,
     private val beforeExitNodeMutationWrite: suspend () -> Unit = {},
     private val exitNodeMutationTimeout: Duration = Duration.ofSeconds(35),
+    private val stopFence: VpnStopFence? = null,
     private val exitNodePreferenceWriter: ExitNodePreferenceWriter =
         ExitNodePreferenceWriter { _, complete ->
           complete(Result.failure(IllegalStateException("exit-node writer unavailable")))
         },
 ) : VpnStartAuthorizer, ExitNodeMutationBoundary {
+  private val effectiveStopFence: VpnStopFence =
+      stopFence ?: ImmediateRevokeStopFence(runtime)
   private val decisionMutex = Mutex()
   private val exitNodeMutationWriteMutex = Mutex()
   private val revocationMutex = Mutex()
@@ -587,7 +609,12 @@ class VpnEntitlementController(
         // callback arrives even if the caller is cancelled. A later mutation cannot overtake it.
         withContext(NonCancellable) {
           val normalizedMutation = mutation.normalized()
-          if (exitNodeMutationStateUncertain) {
+          if (exitNodeMutationStateUncertain && normalizedMutation !is ExitNodeMutation.Clear) {
+            return@withContext Result.failure(ExitNodeMutationDeniedException())
+          }
+          // Never clear exit prefs while the tunnel can still forward traffic.
+          if (normalizedMutation is ExitNodeMutation.Clear &&
+              runtime.state.value.isStartingOrRunning()) {
             return@withContext Result.failure(ExitNodeMutationDeniedException())
           }
           val authorizationFailure = authorizeMutationForDispatch(normalizedMutation)
@@ -608,16 +635,24 @@ class VpnEntitlementController(
 
           if (!isMutationStillAllowedFresh(normalizedMutation)) {
             if (normalizedMutation is ExitNodeMutation.Manual) {
-              val compensation = dispatchMutation(ExitNodeMutation.Clear())
-              if (compensation.result.isFailure) {
-                markMutationStateUncertain()
-                if (compensation.result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
-                  compensation.completion?.let {
-                    recoverAfterTimedOutMutation(ExitNodeMutation.Clear(), it)
+              if (runtime.state.value.isStartingOrRunning()) {
+                effectiveStopFence.stopAndAwaitIdle(VpnStopReason.ExitNodeDisallowed)
+              }
+              if (!runtime.state.value.isStartingOrRunning()) {
+                val compensation = dispatchMutation(ExitNodeMutation.Clear())
+                if (compensation.result.isFailure) {
+                  markMutationStateUncertain()
+                  if (compensation.result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
+                    compensation.completion?.let {
+                      recoverAfterTimedOutMutation(ExitNodeMutation.Clear(), it)
+                    }
+                  } else {
+                    scheduleCompensatingClearRetry()
                   }
-                } else {
-                  scheduleCompensatingClearRetry()
                 }
+              } else {
+                markMutationStateUncertain()
+                scheduleCompensatingClearRetry()
               }
             }
             if (runtime.state.value.isStartingOrRunning()) runtime.revoke()
@@ -713,7 +748,14 @@ class VpnEntitlementController(
   }
 
   private suspend fun retryCompensatingClearLocked() {
-    repeat(MAX_COMPENSATING_CLEAR_ATTEMPTS) {
+    for (attempt in 0 until MAX_COMPENSATING_CLEAR_ATTEMPTS) {
+      if (runtime.state.value.isStartingOrRunning()) {
+        effectiveStopFence.stopAndAwaitIdle(VpnStopReason.MutationStateUncertain)
+      }
+      if (runtime.state.value.isStartingOrRunning()) {
+        delay(COMPENSATING_CLEAR_RETRY_DELAY_MILLIS)
+        continue
+      }
       val dispatch = dispatchMutation(ExitNodeMutation.Clear())
       var result = dispatch.result
       if (result.exceptionOrNull() is ExitNodeMutationTimeoutException) {
@@ -811,6 +853,22 @@ class VpnEntitlementController(
 
   private fun VpnRuntimeState.isStartingOrRunning(): Boolean =
       this == VpnRuntimeState.Starting || this == VpnRuntimeState.Running
+
+  /**
+   * Stops the VPN (awaiting Idle when a real fence is wired), then clears exit preferences. Use
+   * this instead of Clear while Starting/Running.
+   */
+  suspend fun stopThenClearExitNode(reason: VpnStopReason = VpnStopReason.ExitNodeDisallowed): Result<Unit> {
+    if (runtime.state.value.isStartingOrRunning()) {
+      val stopped = effectiveStopFence.stopAndAwaitIdle(reason)
+      if (stopped.isFailure) return stopped
+    }
+    // Re-check: only clear when idle (or still uncertain after stop).
+    if (runtime.state.value.isStartingOrRunning()) {
+      return Result.failure(ExitNodeMutationDeniedException())
+    }
+    return mutateExitNode(ExitNodeMutation.Clear())
+  }
 
   companion object {
     private const val MAX_COMPENSATING_CLEAR_ATTEMPTS = 3

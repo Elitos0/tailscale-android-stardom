@@ -6,21 +6,35 @@ package com.tailscale.ipn.product.policy
 import com.tailscale.ipn.product.ProductConfig
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+sealed interface PolicyLoadResult {
+  data class Active(
+      val allowedExitNodeIds: Set<String>,
+      val policyVersion: String,
+      val validUntilEpochMillis: Long,
+  ) : PolicyLoadResult
+
+  data object Disabled : PolicyLoadResult
+
+  data object Unavailable : PolicyLoadResult
+}
 
 class PolicyApiClient(
     private val baseUrl: String = ProductConfig.policyApiBaseUrl,
     private val connectionFactory: (URL) -> HttpURLConnection = { url ->
       url.openConnection() as HttpURLConnection
-    }
+    },
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
-  fun load(token: String): AccessState {
+  fun load(token: String): PolicyLoadResult {
     var connection: HttpURLConnection? = null
     return try {
       val url = URL("${baseUrl.trimEnd('/')}/v1/me")
       if (url.protocol != "https" || url.host.isBlank()) {
-        return AccessState.Unavailable
+        return PolicyLoadResult.Unavailable
       }
       connection =
           connectionFactory(url).apply {
@@ -32,12 +46,12 @@ class PolicyApiClient(
           }
 
       when (connection.responseCode) {
-        HttpURLConnection.HTTP_FORBIDDEN -> AccessState.Disabled
+        HttpURLConnection.HTTP_FORBIDDEN -> PolicyLoadResult.Disabled
         HttpURLConnection.HTTP_OK -> parseActiveAccess(connection)
-        else -> AccessState.Unavailable
+        else -> PolicyLoadResult.Unavailable
       }
     } catch (_: Exception) {
-      AccessState.Unavailable
+      PolicyLoadResult.Unavailable
     } finally {
       connection?.let {
         runCatching { it.errorStream?.close() }
@@ -46,28 +60,41 @@ class PolicyApiClient(
     }
   }
 
-  private fun parseActiveAccess(connection: HttpURLConnection): AccessState {
+  private fun parseActiveAccess(connection: HttpURLConnection): PolicyLoadResult {
     val response =
         connection.inputStream.bufferedReader().use { reader ->
           JSON.decodeFromString<MeResponse>(reader.readText())
         }
     return when (response.access) {
-      "active" -> AccessState.Active(response.allowedExitNodes.map { it.stableNodeId }.toSet())
-      "disabled" -> AccessState.Disabled
-      else -> AccessState.Unavailable
+      "active" -> {
+        val validUntil =
+            response.validUntil?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+                ?: (nowMillis() + DEFAULT_VALID_TTL_MILLIS)
+        val version = response.policyVersion?.takeIf { it.isNotBlank() } ?: "unknown"
+        PolicyLoadResult.Active(
+            allowedExitNodeIds = response.allowedExitNodes.map { it.stableNodeId }.toSet(),
+            policyVersion = version,
+            validUntilEpochMillis = validUntil,
+        )
+      }
+      "disabled" -> PolicyLoadResult.Disabled
+      else -> PolicyLoadResult.Unavailable
     }
   }
 
   @Serializable
   private data class MeResponse(
       val access: String,
-      val allowedExitNodes: List<AllowedExitNode>,
+      val allowedExitNodes: List<AllowedExitNode> = emptyList(),
+      val policyVersion: String? = null,
+      val validUntil: String? = null,
   )
 
   @Serializable private data class AllowedExitNode(val stableNodeId: String)
 
   private companion object {
     const val REQUEST_TIMEOUT_MILLIS = 5_000
+    const val DEFAULT_VALID_TTL_MILLIS = 60_000L
     val JSON = Json { ignoreUnknownKeys = true }
   }
 }
