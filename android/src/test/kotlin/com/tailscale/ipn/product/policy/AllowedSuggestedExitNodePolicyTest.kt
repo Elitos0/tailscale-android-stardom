@@ -266,7 +266,7 @@ class AllowedSuggestedExitNodePolicyTest {
   }
 
   @Test
-  fun synchronousStartGateFailsClosedUntilPrefsAndExplicitAutoResolutionAreKnown() {
+  fun synchronousStartGateAllowsNativeAutoWhenAllowListNonEmptyEvenBeforeConcreteExit() {
     val fixture =
         fixture(
             authentik = AuthentikState.Authorized,
@@ -274,15 +274,24 @@ class AllowedSuggestedExitNodePolicyTest {
         )
     val active = AccessState.Active(setOf("node-a"))
 
+    // Prefs unknown / missing → fail closed
     assertEquals(false, fixture.controller.isVpnStartAllowed(active))
+
+    // Native Auto with empty/unresolved ExitNodeID is still a safe start when candidates exist.
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = null)
-    assertEquals(false, fixture.controller.isVpnStartAllowed(active))
+    assertEquals(true, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = " ")
-    assertEquals(false, fixture.controller.isVpnStartAllowed(active))
+    assertEquals(true, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any")
     assertEquals(true, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "node-a")
     assertEquals(true, fixture.controller.isVpnStartAllowed(active))
+
+    // Empty allow-list with Auto → blocked
+    val emptyAllow = AccessState.Active(emptySet())
+    assertEquals(false, fixture.controller.isVpnStartAllowed(emptyAllow))
+
+    // Manual foreign node → blocked; owned manual → allowed
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "foreign-node")
     assertEquals(false, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a")

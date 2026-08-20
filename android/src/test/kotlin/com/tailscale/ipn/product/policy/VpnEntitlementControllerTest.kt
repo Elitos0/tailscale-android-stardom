@@ -162,15 +162,17 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
-  fun synchronousAutoExitPolicyGateMakesZeroRequestsForUnknownOrMissingEffectivePrefs() = runTest {
-    val unresolvedPrefs =
-        listOf<Ipn.Prefs?>(
-            null,
-            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = null),
-            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "  "),
+  fun synchronousAutoExitPolicyGateAllowsUnresolvedNativeAutoWhenAllowListNonEmpty() = runTest {
+    // null prefs still fail closed; empty/blackhole Auto with candidates is a safe start.
+    val cases =
+        listOf(
+            null to false,
+            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = null) to true,
+            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "  ") to true,
+            Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any") to true,
         )
 
-    unresolvedPrefs.forEach { currentPrefs ->
+    cases.forEach { (currentPrefs, expectedAllowed) ->
       val active = AccessState.Active(setOf("node-a"))
       val decisions = FakeDecisionSource(defaultDecision = active)
       val candidatePolicy =
@@ -194,8 +196,10 @@ class VpnEntitlementControllerTest {
       val requestBoundary = VpnRequestBoundary(controller)
       var requests = 0
 
-      assertFalse(requestBoundary.requestIfAuthorized(VpnStartOrigin.ServiceStart) { requests++ })
-      assertEquals(0, requests)
+      val authorized =
+          requestBoundary.requestIfAuthorized(VpnStartOrigin.ServiceStart) { requests++ }
+      assertEquals(expectedAllowed, authorized)
+      assertEquals(if (expectedAllowed) 1 else 0, requests)
     }
   }
 

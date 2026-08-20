@@ -114,15 +114,29 @@ class StardomAccessBootstrapTest {
   }
 
   @Test
-  fun productStartupStartsBothPolicyObserversBeforeAccessRefresh() = runTest {
+  fun productStartupClearsStickyWantRunningBeforeAccessRefresh() = runTest {
     val events = mutableListOf<String>()
 
     startStardomProductObservers(
         startPolicyObserver = { events += "policy" },
         startFallbackObserver = { events += "fallback" },
+        clearStickyWantRunning = { events += "fence" },
         startAccessBootstrap = { events += "access" },
     )
 
-    assertEquals(listOf("policy", "fallback", "access"), events)
+    assertEquals(listOf("policy", "fallback", "fence", "access"), events)
+  }
+
+  @Test
+  fun processStartVpnFenceClearsWantRunningOnce() {
+    var clears = 0
+    val fence = StardomProcessStartVpnFence { complete ->
+      clears++
+      complete(Result.success(Unit))
+    }
+
+    assertEquals(true, fence.apply())
+    assertEquals(false, fence.apply())
+    assertEquals(1, clears)
   }
 }

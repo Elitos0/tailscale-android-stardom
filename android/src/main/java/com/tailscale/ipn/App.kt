@@ -28,6 +28,7 @@ import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
 import com.tailscale.ipn.product.StardomAccessBootstrap
+import com.tailscale.ipn.product.StardomProcessStartVpnFence
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
@@ -252,11 +253,22 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     }
     // Libtailscale performs an initial synchronous syspolicy read during start. Start the product
     // observers only after that call returns so policy reads cannot recursively initialize the app.
-    // The access bootstrap is last: it refreshes Policy API state only for a persisted Authentik
-    // session and has no VPN, notification, or UI side effects.
+    // Clear sticky WantRunning before access bootstrap so process death / force-stop never resumes
+    // the tunnel just because prefs still say WantRunning=true. Always-On and explicit Connect are
+    // the only post-restart start paths. Access bootstrap is last and has no VPN side effects.
     startStardomProductObservers(
         startPolicyObserver = { allowedSuggestedExitNodePolicyController.start(applicationScope) },
         startFallbackObserver = { autoExitNodeFallbackController.start(applicationScope) },
+        clearStickyWantRunning = {
+          StardomProcessStartVpnFence { complete ->
+                setWantRunning(
+                    false,
+                    onSuccess = { complete(Result.success(Unit)) },
+                    onFailure = { error -> complete(Result.failure(error)) },
+                )
+              }
+              .apply()
+        },
         startAccessBootstrap = {
           StardomAccessBootstrap(
                   authentikState = stardomSessionController.authentikState,

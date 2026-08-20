@@ -33,13 +33,38 @@ class StardomAccessBootstrap(
   }
 }
 
-/** Keeps product observer startup ordering explicit and testable: policy, fallback, then access. */
+/**
+ * Clears sticky WantRunning left over from a previous process death.
+ *
+ * Opening the app (or process restart after force-stop) must never resume the Android VPN tunnel
+ * just because LocalBackend prefs still say WantRunning=true. Always-On / explicit Connect remain
+ * the only ways to start the tunnel after a fresh process.
+ */
+class StardomProcessStartVpnFence(
+    private val clearWantRunning: (onComplete: (Result<Unit>) -> Unit) -> Unit,
+) {
+  private val applied = AtomicBoolean(false)
+
+  /** Queues WantRunning=false once. Returns true if this call dispatched the clear. */
+  fun apply(): Boolean {
+    if (!applied.compareAndSet(false, true)) return false
+    clearWantRunning { /* fire-and-forget; fence is one-shot regardless of callback */ }
+    return true
+  }
+}
+
+/**
+ * Keeps product observer startup ordering explicit and testable: policy, fallback, process-start
+ * VPN fence, then access refresh.
+ */
 fun startStardomProductObservers(
     startPolicyObserver: () -> Unit,
     startFallbackObserver: () -> Unit,
+    clearStickyWantRunning: () -> Unit,
     startAccessBootstrap: () -> Unit,
 ) {
   startPolicyObserver()
   startFallbackObserver()
+  clearStickyWantRunning()
   startAccessBootstrap()
 }

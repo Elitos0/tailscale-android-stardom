@@ -116,6 +116,17 @@ class AllowedSuggestedExitNodePolicyController(
   fun isVpnStartAllowed(activeAccess: AccessState.Active): Boolean {
     val evaluation = evaluateStable(activeAccess)
     val currentPrefs = evaluation.prefs ?: return false
+    // Native Auto may still have an empty ExitNodeID (or unresolved blackhole) while the
+    // allow-list is non-empty. That is a safe start: fallback/native resolution fill the
+    // concrete exit after the tunnel is authorized. Blocking empty Auto here leaves
+    // WantRunning=true after process death with a dead toggle the user cannot flip on.
+    // A concrete ExitNodeID under Auto must still belong to the allow-list (stale node).
+    if (currentPrefs.autoExitNode == NATIVE_AUTO_EXIT_NODE_ANY) {
+      if (evaluation.candidates.isEmpty()) return false
+      val effective = currentPrefs.effectiveExitNodeID?.trim().orEmpty()
+      if (effective.isEmpty() || effective == NATIVE_AUTO_EXIT_NODE_BLACKHOLE) return true
+      return effective in evaluation.candidates
+    }
     return !currentPrefs.hasDisallowedEffectiveExitNode(evaluation.candidates)
   }
 
