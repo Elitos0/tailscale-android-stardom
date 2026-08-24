@@ -8,9 +8,17 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import org.junit.Assert.assertEquals
+import com.tailscale.ipn.product.auth.AuthSessionRepository
+import com.tailscale.ipn.product.auth.FakeAppAuthGateway
+import com.tailscale.ipn.product.auth.FakeSessionState
+import com.tailscale.ipn.product.auth.InMemoryAuthStateStorage
+import kotlinx.coroutines.runBlocking
+import net.openid.appauth.AuthorizationException
+import org.mockito.kotlin.mock
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.Assert.assertTrue
 
 class AccessRepositoryTest {
   @Test
@@ -158,6 +166,141 @@ class AccessRepositoryTest {
         )
     assertEquals(AccessState.Disabled, repository.load("token"))
     assertNull(cache.policy)
+  }
+
+  @Test
+  fun refreshWithRevokedTokenClearsCacheAndReturnsUnavailable() = runBlocking {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(
+                freshException = AuthorizationException.TokenRequestErrors.INVALID_GRANT))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { throw IOException("offline") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+    val state = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Unavailable, state)
+    assertNull(cache.policy)
+  }
+
+  @Test
+  fun refreshWithSignedOutClearsCacheAndReturnsUnavailable() = runBlocking {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(null),
+            FakeSessionState(isAuthorized = false),
+            FakeAppAuthGateway())
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { throw IOException("offline") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+    val state = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Unavailable, state)
+    assertNull(cache.policy)
+  }
+
+  @Test
+  fun refreshWithNetworkErrorPreservesValidCache() = runBlocking {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(
+                freshException = AuthorizationException.GeneralErrors.NETWORK_ERROR))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { throw IOException("offline") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+    val state = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(setOf("node-a")), state)
+    assertEquals(setOf("node-a"), cache.policy?.allowedExitNodeIds)
+  }
+  @Test
+  fun fetchNodeAuthKeyReturnsAuthKeyOn200() {
+    val client =
+        PolicyApiClient(
+            connectionFactory = {
+              FakeHttpURLConnection(200, "{\"authKey\":\"hskey-auth-sample-123\"}")
+            })
+    val result = client.fetchNodeAuthKey("valid-token")
+    assertTrue(result.isSuccess)
+    assertEquals("hskey-auth-sample-123", result.getOrNull())
+  }
+
+  @Test
+  fun fetchNodeAuthKeyReturnsFailureOnNon200() {
+    val client =
+        PolicyApiClient(
+            connectionFactory = {
+              FakeHttpURLConnection(403, "Forbidden")
+            })
+    val result = client.fetchNodeAuthKey("invalid-token")
+    assertTrue(result.isFailure)
+  }
+
+  @Test
+  fun fetchNodeAuthKeyReturnsFailureOnNetworkException() {
+    val client =
+        PolicyApiClient(
+            connectionFactory = { throw IOException("connection reset") })
+    val result = client.fetchNodeAuthKey("token")
+    assertTrue(result.isFailure)
   }
 }
 

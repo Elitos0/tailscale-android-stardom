@@ -63,6 +63,8 @@ import com.tailscale.ipn.product.StardomProductionRoutes
 import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.policy.VpnStartOrigin
+import com.tailscale.ipn.product.policy.PolicyApiClient
+import kotlinx.coroutines.withContext
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -171,7 +173,7 @@ class MainActivity : ComponentActivity() {
               if (app.vpnEntitlementController.authorizeStart(VpnStartOrigin.PermissionResult)) {
                 TSLog.d("VpnPermission", "VPN permission granted after entitlement recheck")
                 appViewModel.setVpnPrepared(true)
-                app.startVPN()
+                app.startVPN(VpnStartOrigin.PermissionResult)
               } else {
                 TSLog.d("VpnPermission", "VPN permission result rejected by entitlement policy")
                 appViewModel.setVpnPrepared(false)
@@ -555,10 +557,22 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun resumeFixedControlLogin() {
-    viewModel.loginWithCustomControlURL(ProductConfig.headscaleControlUrl) { result ->
-      result.onSuccess {
-        if (this::navController.isInitialized) {
-          navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
+    val authSession = stardomSessionController.authSessionRepository
+    authSession.withFreshBearerToken(this) { tokenResult ->
+      tokenResult.onSuccess { token ->
+        lifecycleScope.launch(Dispatchers.IO) {
+          val keyResult = PolicyApiClient().fetchNodeAuthKey(token)
+          withContext(Dispatchers.Main) {
+            keyResult.onSuccess { authKey ->
+              viewModel.loginWithAuthKey(authKey) { result ->
+                result.onSuccess {
+                  if (this@MainActivity::navController.isInitialized) {
+                    navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

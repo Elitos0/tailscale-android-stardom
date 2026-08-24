@@ -6,6 +6,10 @@ package com.tailscale.ipn.ui.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tailscale.ipn.UninitializedApp
+import com.tailscale.ipn.App
+import com.tailscale.ipn.product.policy.ExitNodeMutation
+import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
@@ -216,9 +220,16 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
     }
   }
 
-  fun loginWithAuthKey(authKey: String, completionHandler: (Result<Unit>) -> Unit = {}) {
+  fun loginWithAuthKey(
+      authKey: String,
+      controlURL: String? = ProductConfig.headscaleControlUrl,
+      completionHandler: (Result<Unit>) -> Unit = {}
+  ) {
     val prefs = Ipn.MaskedPrefs()
     prefs.WantRunning = true
+    if (!controlURL.isNullOrBlank()) {
+      prefs.ControlURL = controlURL
+    }
     login(prefs, authKey = authKey, completionHandler)
   }
 
@@ -293,15 +304,36 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
     val prefs = prefs.value ?: return
 
     LoadingIndicator.start()
-    if (prefs.activeExitNodeID != null) {
-      // We have an active exit node so we should keep it, but disable it
-      Client(viewModelScope).setUseExitNode(false) { LoadingIndicator.stop() }
-    } else if (prefs.selectedExitNodeID != null) {
-      // We have a prior exit node to enable
-      Client(viewModelScope).setUseExitNode(true) { LoadingIndicator.stop() }
-    } else {
-      // This should not be possible.  In this state the button is hidden
-      TSLog.e(TAG, "No exit node to disable and no prior exit node to enable")
+    viewModelScope.launch {
+      val mutation =
+          if (prefs.activeExitNodeID != null) {
+            // We have an active exit node so we should keep it, but disable it
+            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
+          } else if (prefs.AutoExitNode == "any") {
+            ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
+          } else if (prefs.selectedExitNodeID != null) {
+            // We have a prior exit node to enable
+            ExitNodeMutation.Manual(prefs.selectedExitNodeID!!, prefs.ExitNodeAllowLANAccess)
+          } else {
+            TSLog.e(TAG, "No exit node to disable and no prior exit node to enable")
+            null
+          }
+
+      if (mutation != null) {
+        App.get().mutateExitNodePrefs(mutation)
+            .onSuccess {
+              runCatching {
+                when (mutation) {
+                  is ExitNodeMutation.Auto -> App.get().desiredExitModeStore.set(DesiredExitMode.Auto)
+                  is ExitNodeMutation.Manual ->
+                      App.get().desiredExitModeStore.set(DesiredExitMode.Manual(mutation.nodeId))
+                  is ExitNodeMutation.Clear -> App.get().desiredExitModeStore.clear()
+                }
+              }
+            }
+            .onFailure { TSLog.e(TAG, "toggleExitNode failed: ${it.message}") }
+      }
+      LoadingIndicator.stop()
     }
   }
 

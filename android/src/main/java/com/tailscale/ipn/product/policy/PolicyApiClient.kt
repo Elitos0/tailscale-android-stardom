@@ -59,6 +59,42 @@ class PolicyApiClient(
       }
     }
   }
+  fun fetchNodeAuthKey(token: String): Result<String> {
+    var connection: HttpURLConnection? = null
+    return try {
+      val url = URL("${baseUrl.trimEnd('/')}/v1/node-auth-key")
+      if (url.protocol != "https" || url.host.isBlank()) {
+        return Result.failure(IllegalStateException("Invalid Policy API URL"))
+      }
+      connection =
+          connectionFactory(url).apply {
+            requestMethod = "POST"
+            connectTimeout = REQUEST_TIMEOUT_MILLIS
+            readTimeout = REQUEST_TIMEOUT_MILLIS
+            instanceFollowRedirects = false
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+          }
+
+      if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+        val authKey =
+            connection.inputStream.bufferedReader().use { reader ->
+              JSON.decodeFromString<NodeAuthKeyResponse>(reader.readText()).authKey
+            }
+        Result.success(authKey)
+      } else {
+        Result.failure(IllegalStateException("Policy API returned ${connection.responseCode}"))
+      }
+    } catch (e: Exception) {
+      Result.failure(e)
+    } finally {
+      connection?.let {
+        runCatching { it.errorStream?.close() }
+        it.disconnect()
+      }
+    }
+  }
+
 
   private fun parseActiveAccess(connection: HttpURLConnection): PolicyLoadResult {
     val response =
@@ -92,6 +128,7 @@ class PolicyApiClient(
 
   @Serializable private data class AllowedExitNode(val stableNodeId: String)
 
+  @Serializable private data class NodeAuthKeyResponse(val authKey: String)
   private companion object {
     const val REQUEST_TIMEOUT_MILLIS = 5_000
     const val DEFAULT_VALID_TTL_MILLIS = 60_000L
