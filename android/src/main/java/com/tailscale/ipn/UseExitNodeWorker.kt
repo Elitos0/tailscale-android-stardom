@@ -11,6 +11,7 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.tailscale.ipn.UninitializedApp.Companion.STATUS_CHANNEL_ID
 import com.tailscale.ipn.product.policy.ExitNodeMutation
+import com.tailscale.ipn.product.policy.VpnStopReason
 import com.tailscale.ipn.ui.notifier.Notifier
 
 class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
@@ -52,13 +53,15 @@ class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
           }
 
       val allowLanAccess = inputData.getBoolean(ALLOW_LAN_ACCESS, false)
-      val mutation =
-          exitNodeId?.let { ExitNodeMutation.Manual(it, allowLanAccess) }
-              ?: ExitNodeMutation.Clear(allowLanAccess)
+      val mutationResult =
+          if (exitNodeId != null) {
+            app.mutateExitNodePrefs(ExitNodeMutation.Manual(exitNodeId, allowLanAccess))
+          } else {
+            app.stopThenClearExitNode(VpnStopReason.ExitNodeDisallowed)
+          }
 
-      return app.mutateExitNodePrefs(mutation).exceptionOrNull()?.message
+      return mutationResult.exceptionOrNull()?.message
     }
-
     val result = runAndGetResult()
 
     return if (result != null) {

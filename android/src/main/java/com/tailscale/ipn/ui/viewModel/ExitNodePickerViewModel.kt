@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tailscale.ipn.App
 import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.policy.DesiredExitModeStore
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.product.policy.ExitNodeMutationBoundary
 import com.tailscale.ipn.ui.model.Ipn
@@ -49,6 +51,7 @@ class ExitNodePickerViewModel(
     private val netmapFlow: StateFlow<Netmap.NetworkMap?> = Notifier.netmap,
     private val prefsFlow: StateFlow<Ipn.Prefs?> = Notifier.prefs,
     private val mutationBoundaryOverride: ExitNodeMutationBoundary? = null,
+    private val desiredExitModeStoreOverride: DesiredExitModeStore? = null,
 ) : IpnViewModel(observeUserProfiles = false) {
   data class ExitNode(
       val id: StableNodeID? = null,
@@ -79,56 +82,53 @@ class ExitNodePickerViewModel(
 
   init {
     viewModelScope.launch {
-      netmapFlow
-          .combine(prefsFlow) { netmap, prefs -> Pair(netmap, prefs) }
-          .combine(accessState) { (netmap, prefs), accessState ->
-            Triple(netmap, prefs, accessState)
-          }
-          .stateIn(viewModelScope)
-          .collect { (netmap, prefs, accessState) ->
-            val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
-            val autoExitNodeEnabled = prefs?.AutoExitNode == "any"
-            val effectiveExitNodeId =
-                if (autoExitNodeEnabled) exitNodeId?.takeUnless { it == "auto:any" } else exitNodeId
-            autoExitNode.set(
-                AutoExitNode(
-                    selected = autoExitNodeEnabled,
-                    effectiveExitNodeID = effectiveExitNodeId,
-                ))
-            anyActive.set(autoExitNodeEnabled)
-            netmap?.Peers?.let { peers ->
-              val allNodes =
-                  peers
-                      .filter { it.isExitNode }
-                      .map {
-                        ExitNode(
-                            id = it.StableID,
-                            label = it.displayName,
-                            online = MutableStateFlow(it.Online ?: false),
-                            selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
-                            mullvad = it.isMullvadNode,
-                            priority = it.Hostinfo.Location?.Priority ?: 0,
-                            countryCode = it.Hostinfo.Location?.CountryCode ?: "",
-                            country = it.Hostinfo.Location?.Country ?: "",
-                            city = it.Hostinfo.Location?.City ?: "",
-                        )
-                      }
+      val desiredStore = desiredExitModeStore()
+      val desiredModeFlow = desiredStore?.mode ?: MutableStateFlow(DesiredExitMode.Auto)
+      combine(netmapFlow, prefsFlow, accessState, desiredModeFlow) { netmap, prefs, accessState, desiredMode ->
+        val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
+        val isDesiredAuto = desiredMode is DesiredExitMode.Auto
+        val autoExitNodeEnabled = prefs?.AutoExitNode == "any" || isDesiredAuto
+        val effectiveExitNodeId =
+            if (autoExitNodeEnabled) exitNodeId?.takeUnless { it == "auto:any" } else exitNodeId
+        autoExitNode.set(
+            AutoExitNode(
+                selected = autoExitNodeEnabled,
+                effectiveExitNodeID = effectiveExitNodeId,
+            ))
+        anyActive.set(autoExitNodeEnabled)
+        netmap?.Peers?.let { peers ->
+          val allNodes =
+              peers
+                  .filter { it.isExitNode }
+                  .map {
+                    ExitNode(
+                        id = it.StableID,
+                        label = it.displayName,
+                        online = MutableStateFlow(it.Online ?: false),
+                        selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
+                        mullvad = it.isMullvadNode,
+                        priority = it.Hostinfo.Location?.Priority ?: 0,
+                        countryCode = it.Hostinfo.Location?.CountryCode ?: "",
+                        country = it.Hostinfo.Location?.Country ?: "",
+                        city = it.Hostinfo.Location?.City ?: "",
+                    )
+                  }
 
-              val allowedExitNodeIds =
-                  (accessState as? AccessState.Active)?.allowedExitNodeIds.orEmpty()
-              val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
-              tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
+          val allowedExitNodeIds =
+              (accessState as? AccessState.Active)?.allowedExitNodeIds.orEmpty()
+          val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
+          tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
 
-              val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
-              autoExitNode.set(
-                  AutoExitNode(
-                      selected = autoExitNodeEnabled,
-                      effectiveExitNodeID = effectiveExitNodeId,
-                      effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
-                  ))
-              anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
-            }
-          }
+          val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
+          autoExitNode.set(
+              AutoExitNode(
+                  selected = autoExitNodeEnabled,
+                  effectiveExitNodeID = effectiveExitNodeId,
+                  effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
+              ))
+          anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
+        }
+      }.collect {}
     }
   }
 
@@ -148,7 +148,14 @@ class ExitNodePickerViewModel(
     LoadingIndicator.start()
     viewModelScope.launch {
       val result = mutationBoundary().mutateExitNode(mutation)
-      if (result.isSuccess) nav.onNavigateBackHome()
+      if (result.isSuccess) {
+        when (mutation) {
+          is ExitNodeMutation.Auto -> desiredExitModeStore()?.set(DesiredExitMode.Auto)
+          is ExitNodeMutation.Manual -> desiredExitModeStore()?.set(DesiredExitMode.Manual(mutation.nodeId))
+          is ExitNodeMutation.Clear -> desiredExitModeStore()?.clear()
+        }
+        nav.onNavigateBackHome()
+      }
       LoadingIndicator.stop()
     }
   }
@@ -182,6 +189,9 @@ class ExitNodePickerViewModel(
 
   private fun mutationBoundary(): ExitNodeMutationBoundary =
       mutationBoundaryOverride ?: App.get().vpnEntitlementController
+
+  private fun desiredExitModeStore(): DesiredExitModeStore? =
+      desiredExitModeStoreOverride ?: runCatching { App.get().desiredExitModeStore }.getOrNull()
 }
 
 val List<ExitNodePickerViewModel.ExitNode>.selected

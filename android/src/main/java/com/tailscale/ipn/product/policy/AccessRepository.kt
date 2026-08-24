@@ -8,6 +8,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.auth.AuthSessionRepository
+import net.openid.appauth.AuthorizationException
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,7 +77,12 @@ class AccessRepository(
                   onSuccess = { token -> withContext(Dispatchers.IO) { load(token) } },
                   onFailure = {
                     // Invalid credentials must drop cache; transport errors keep last-valid.
-                    if (it.message == "Signed out") {
+                    val isAuthRevoked =
+                        it.message == "Signed out" ||
+                            (it is AuthorizationException &&
+                                (it.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR ||
+                                    it.error in setOf("invalid_grant", "invalid_token")))
+                    if (isAuthRevoked) {
                       cacheStore?.clear()
                       AccessState.Unavailable
                     } else {

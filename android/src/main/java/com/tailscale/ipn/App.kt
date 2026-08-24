@@ -401,6 +401,10 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
 
   suspend fun mutateExitNodePrefs(mutation: ExitNodeMutation): Result<Unit> =
       vpnEntitlementController.mutateExitNode(mutation)
+
+  suspend fun stopThenClearExitNode(
+      reason: VpnStopReason = VpnStopReason.ExitNodeDisallowed
+  ): Result<Unit> = vpnEntitlementController.stopThenClearExitNode(reason)
   // encryptToPref a byte array of data using the Jetpack Security
   // library and writes it to a global encrypted preference store.
   @Throws(IOException::class, GeneralSecurityException::class)

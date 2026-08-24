@@ -225,7 +225,7 @@ class MainViewModel(
           }
         } else {
           // User wants to turn OFF the VPN
-          if (currentState == Ipn.State.Running) {
+          if (currentState != Ipn.State.Stopped && currentState != Ipn.State.NoState) {
             stopVPN()
           }
         }

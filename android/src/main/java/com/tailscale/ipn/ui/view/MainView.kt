@@ -80,6 +80,7 @@ import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.policy.DesiredExitMode
 import com.tailscale.ipn.product.ui.AccessStatusView
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.product.ui.resolveConnectionStage
@@ -304,7 +305,9 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
   // The activeExitNode is the source of truth.  The selectedExitNode is only relevant if we
   // don't have an active node.
   val chosenExitNodeId = prefs.activeExitNodeID ?: prefs.selectedExitNodeID
-  val autoExitNodeEnabled = prefs.AutoExitNode == "any"
+  val desiredMode by App.get().desiredExitModeStore.mode.collectAsState()
+  val isDesiredAuto = desiredMode is DesiredExitMode.Auto
+  val autoExitNodeEnabled = prefs.AutoExitNode == "any" || isDesiredAuto
   val effectiveExitNodeId =
       if (autoExitNodeEnabled) chosenExitNodeId?.takeUnless { it == "auto:any" }
       else chosenExitNodeId

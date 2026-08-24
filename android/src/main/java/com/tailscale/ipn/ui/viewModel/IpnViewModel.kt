@@ -227,9 +227,11 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   ) {
     val prefs = Ipn.MaskedPrefs()
     prefs.WantRunning = true
+    prefs.AutoExitNode = "any"
     if (!controlURL.isNullOrBlank()) {
       prefs.ControlURL = controlURL
     }
+    runCatching { App.get().desiredExitModeStore.set(DesiredExitMode.Auto) }
     login(prefs, authKey = authKey, completionHandler)
   }
 
@@ -305,20 +307,21 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
     LoadingIndicator.start()
     viewModelScope.launch {
+      val desiredMode = runCatching { App.get().desiredExitModeStore.mode.value }.getOrNull()
       val mutation =
           if (prefs.activeExitNodeID != null) {
             // We have an active exit node so we should keep it, but disable it
             ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
-          } else if (prefs.AutoExitNode == "any") {
+          } else if (prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto) {
             ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
           } else if (prefs.selectedExitNodeID != null) {
             // We have a prior exit node to enable
             ExitNodeMutation.Manual(prefs.selectedExitNodeID!!, prefs.ExitNodeAllowLANAccess)
+          } else if (desiredMode is DesiredExitMode.Manual) {
+            ExitNodeMutation.Manual(desiredMode.nodeId, prefs.ExitNodeAllowLANAccess)
           } else {
-            TSLog.e(TAG, "No exit node to disable and no prior exit node to enable")
-            null
+            ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
           }
-
       if (mutation != null) {
         App.get().mutateExitNodePrefs(mutation)
             .onSuccess {

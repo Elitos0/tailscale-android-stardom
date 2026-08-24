@@ -41,7 +41,7 @@ class SharedPreferencesDesiredExitModeStore(context: Context) : DesiredExitModeS
   }
 
   override fun clear() {
-    prefs.edit().remove(KEY_KIND).remove(KEY_NODE).apply()
+    prefs.edit().putString(KEY_KIND, "none").remove(KEY_NODE).apply()
     _mode.value = null
   }
 
@@ -52,7 +52,8 @@ class SharedPreferencesDesiredExitModeStore(context: Context) : DesiredExitModeS
             prefs.getString(KEY_NODE, null)?.trim()?.takeIf { it.isNotEmpty() }?.let {
               DesiredExitMode.Manual(it)
             }
-        else -> null
+        "none" -> null
+        else -> DesiredExitMode.Auto
       }
 
   private companion object {

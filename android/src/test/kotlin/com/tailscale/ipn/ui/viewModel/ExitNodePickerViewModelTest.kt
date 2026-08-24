@@ -4,6 +4,8 @@
 package com.tailscale.ipn.ui.viewModel
 
 import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.policy.DesiredExitModeStore
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.product.policy.ExitNodeMutationBoundary
 import com.tailscale.ipn.ui.model.Ipn
@@ -14,6 +16,8 @@ import com.tailscale.ipn.util.TSLog.LibtailscaleWrapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -256,6 +260,74 @@ class ExitNodePickerViewModelTest {
     assertEquals(0, viewModel.mullvadExitNodeCount.value)
     assertFalse(viewModel.shouldShowMullvadInfo.value)
   }
+
+  @Test
+  fun selectingAutoWritesToDesiredExitModeStore() = runTest {
+    val boundary = CapturingMutationBoundary()
+    val store = FakeDesiredExitModeStore()
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(emptySet())),
+            mutationBoundaryOverride = boundary,
+            desiredExitModeStoreOverride = store,
+        )
+
+    viewModel.setAutoExitNode()
+    advanceUntilIdle()
+
+    assertEquals(listOf(DesiredExitMode.Auto), store.sets)
+    assertEquals(DesiredExitMode.Auto, store.mode.value)
+  }
+
+  @Test
+  fun selectingManualWritesToDesiredExitModeStore() = runTest {
+    val boundary = CapturingMutationBoundary()
+    val store = FakeDesiredExitModeStore()
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(emptySet())),
+            mutationBoundaryOverride = boundary,
+            desiredExitModeStoreOverride = store,
+        )
+
+    viewModel.setExitNode(
+        ExitNodePickerViewModel.ExitNode(
+            id = "node-a",
+            label = "Alpha",
+            online = MutableStateFlow(true),
+            selected = false,
+        ))
+    advanceUntilIdle()
+
+    assertEquals(listOf(DesiredExitMode.Manual("node-a")), store.sets)
+    assertEquals(DesiredExitMode.Manual("node-a"), store.mode.value)
+  }
+
+  @Test
+  fun clearingExitNodeClearsDesiredExitModeStore() = runTest {
+    val boundary = CapturingMutationBoundary()
+    val store = FakeDesiredExitModeStore(initial = DesiredExitMode.Auto)
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(emptySet())),
+            mutationBoundaryOverride = boundary,
+            desiredExitModeStoreOverride = store,
+        )
+
+    viewModel.setExitNode(
+        ExitNodePickerViewModel.ExitNode(
+            label = "None",
+            online = MutableStateFlow(true),
+            selected = false,
+        ))
+    advanceUntilIdle()
+
+    assertEquals(1, store.clears)
+    assertNull(store.mode.value)
+  }
 }
 
 private fun pickerViewModelCapturing(boundary: ExitNodeMutationBoundary) =
@@ -311,3 +383,20 @@ private fun exitNode(id: String, label: String) =
         AllowedIPs = listOf("0.0.0.0/0", "::/0"),
         Online = true,
     )
+
+private class FakeDesiredExitModeStore(initial: DesiredExitMode? = null) : DesiredExitModeStore {
+  private val _mode = MutableStateFlow(initial)
+  override val mode: StateFlow<DesiredExitMode?> = _mode.asStateFlow()
+  val sets = mutableListOf<DesiredExitMode>()
+  var clears = 0
+
+  override fun set(mode: DesiredExitMode) {
+    sets += mode
+    _mode.value = mode
+  }
+
+  override fun clear() {
+    clears++
+    _mode.value = null
+  }
+}

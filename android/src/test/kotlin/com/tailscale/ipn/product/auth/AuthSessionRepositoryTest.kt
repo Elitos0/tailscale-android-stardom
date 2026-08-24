@@ -357,7 +357,7 @@ class AuthSessionRepositoryTest {
 private fun callbackIntent(action: String): Intent =
     mock<Intent>().also { whenever(it.action).thenReturn(action) }
 
-private class FakeAppAuthGateway(
+internal class FakeAppAuthGateway(
     private val discoveryException: AuthorizationException? = null,
     var authorizationResult: AuthorizationResult? = null,
     private val tokenResponse: TokenResponse? = null,
@@ -418,7 +418,7 @@ private class FakeAppAuthGateway(
   override fun dispose() {}
 }
 
-private class FakeSessionState(override val isAuthorized: Boolean = false) : AuthSessionState {
+internal class FakeSessionState(override val isAuthorized: Boolean = false) : AuthSessionState {
   override val appAuthState: AuthState = mock()
   var authorizationUpdates = 0
   var tokenUpdates = 0
@@ -437,7 +437,7 @@ private class FakeSessionState(override val isAuthorized: Boolean = false) : Aut
   override fun serialize(): String = "state"
 }
 
-private class InMemoryAuthStateStorage(private var value: String? = null) : AuthStateStorage {
+internal class InMemoryAuthStateStorage(private var value: String? = null) : AuthStateStorage {
   val writes = mutableListOf<String>()
   var clearCalls = 0
 
