@@ -47,10 +47,11 @@ var (
 )
 
 const (
-	androidPackage    = "com.tailscale.ipn"
+	androidPackage    = "com.stardom.vpn"
 	probePackage      = "com.tailscale.ipn.integrationprobe"
 	probeReceiver     = probePackage + "/.NetprobeReceiver"
 	loginAction       = "com.tailscale.ipn.integration.LOGIN"
+	loginComponent    = androidPackage + "/com.tailscale.ipn.IntegrationLoginReceiver"
 	authKey           = "tskey-integration-android"
 	debugKeystorePass = "android"
 )
@@ -133,7 +134,7 @@ func TestAndroidAuthKeyLogin(t *testing.T) {
 	adb.run(t,
 		"shell", "am", "broadcast",
 		"-a", loginAction,
-		"-n", androidPackage+"/.IPNReceiver",
+		"-n", loginComponent,
 		"--include-stopped-packages",
 		"--es", "control_url", controlURL,
 		"--es", "auth_key", authKey,

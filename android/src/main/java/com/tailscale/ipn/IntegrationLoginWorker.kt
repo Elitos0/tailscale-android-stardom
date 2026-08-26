@@ -16,8 +16,8 @@ import kotlinx.coroutines.CompletableDeferred
  * Test-only worker used by emulator integration tests to log a debug APK into a local testcontrol
  * server with an auth key.
  *
- * IPNReceiver only enqueues this worker when BuildConfig.DEBUG is true. Release builds do not
- * expose the broadcast entry point, and minified final APKs strip this unreachable debug-only path.
+ * IntegrationLoginReceiver enqueues this worker only in debug builds. Release builds omit that
+ * component entirely.
  */
 class IntegrationLoginWorker(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {

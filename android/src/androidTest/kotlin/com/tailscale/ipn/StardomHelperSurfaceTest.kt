@@ -12,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tailscale.ipn.ui.view.stardomMainFlowIntent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +36,22 @@ class StardomHelperSurfaceTest {
         }
 
     assertFalse(info.exported)
+  }
+
+  @Test
+  fun integrationLoginReceiverIsAbsentFromApplicationTest() {
+    assertThrows(PackageManager.NameNotFoundException::class.java) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager.getReceiverInfo(
+            ComponentName(context.packageName, "com.tailscale.ipn.IntegrationLoginReceiver"),
+            PackageManager.ComponentInfoFlags.of(0),
+        )
+      } else {
+        @Suppress("DEPRECATION")
+        packageManager.getReceiverInfo(
+            ComponentName(context.packageName, "com.tailscale.ipn.IntegrationLoginReceiver"), 0)
+      }
+    }
   }
 
   @Test

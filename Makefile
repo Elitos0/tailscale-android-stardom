@@ -392,7 +392,7 @@ install: $(DEBUG_APK) ## Install the debug APK on a connected device
 
 .PHONY: run
 run: install ## Run the debug APK on a connected device
-	adb shell am start -n com.tailscale.ipn/com.tailscale.ipn.MainActivity
+	adb shell am start -n com.stardom.vpn/com.tailscale.ipn.MainActivity
 
 .PHONY: docker-build-image
 docker-build-image: ## Builds the docker image for the android build environment if it does not exist
