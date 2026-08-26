@@ -55,6 +55,8 @@ interface AuthorizationTransactionStorage {
   fun markFixedHeadscaleContinuation()
 
   fun consumeFixedHeadscaleContinuation(): Boolean
+
+  fun clear()
 }
 
 data class PendingAuthorizationTransaction(
@@ -131,21 +133,44 @@ class AuthSessionRepository(
       RealAppAuthGateway(),
       EncryptedAuthorizationTransactionStorage(context))
 
-  private var completion: ((Result<Unit>) -> Unit)? = null
+  private data class PendingCompletion(
+      val generation: Long,
+      val callback: (Result<Unit>) -> Unit,
+  )
+
+  private val sessionLock = Any()
+  private var sessionGeneration = 0L
+  private var completion: PendingCompletion? = null
   private val _authentikState = MutableStateFlow(authentikStateFor(authState))
   val authentikState: StateFlow<AuthentikState> = _authentikState.asStateFlow()
 
   val isSignedOut: Boolean
-    get() = !authState.isAuthorized
+    get() = synchronized(sessionLock) { !authState.isAuthorized }
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
-    completion = onComplete
-    _authentikState.value = AuthentikState.Authorizing
+    val (generation, previous) =
+        synchronized(sessionLock) {
+          sessionGeneration += 1
+          appAuth.dispose()
+          val previous = completion
+          completion = PendingCompletion(sessionGeneration, onComplete)
+          transactionStorage.clear()
+          _authentikState.value = AuthentikState.Authorizing
+          sessionGeneration to previous
+        }
+    previous?.callback?.invoke(Result.failure(authSessionChanged()))
+
     appAuth.discover { configuration, exception ->
       if (configuration == null) {
-        _authentikState.value = AuthentikState.SignedOut
-        finish(Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")))
-      } else {
+        completeAuthorization(
+            generation,
+            Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")),
+            authorized = false)
+        return@discover
+      }
+
+      synchronized(sessionLock) {
+        if (generation != sessionGeneration) return@synchronized
         val request = appAuth.createAuthorizationRequest(configuration)
         transactionStorage.write(PendingAuthorizationTransaction(request, nowMillis()))
         appAuth.startAuthorization(context, request)
@@ -159,6 +184,7 @@ class AuthSessionRepository(
       onRecoveredAuthorization: () -> Unit = {},
       onFinished: () -> Unit = {},
   ) {
+    val generation = synchronized(sessionLock) { sessionGeneration }
     val result =
         appAuth.authorizationResult(intent)
             ?: run {
@@ -174,52 +200,89 @@ class AuthSessionRepository(
       onFinished()
       return
     }
-    authState.updateAuthorization(result.response, result.exception)
-    persist()
+
+    val current =
+        synchronized(sessionLock) {
+          if (generation != sessionGeneration) return@synchronized false
+          authState.updateAuthorization(result.response, result.exception)
+          persistLocked()
+          true
+        }
+    if (!current) {
+      onFinished()
+      return
+    }
+
     val response = result.response
     if (response == null) {
-      _authentikState.value = AuthentikState.SignedOut
-      finish(
-          Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")))
+      completeAuthorization(
+          generation,
+          Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")),
+          authorized = false)
       onFinished()
       return
     }
 
     appAuth.exchangeCode(context, response) { tokenResponse, tokenException ->
-      authState.updateToken(tokenResponse, tokenException)
-      persist()
-      if (tokenResponse == null) {
-        _authentikState.value = AuthentikState.SignedOut
-        finish(
-            Result.failure(tokenException ?: IllegalStateException("Unable to exchange OIDC code")))
-      } else if (!finish(Result.success(Unit))) {
-        _authentikState.value = AuthentikState.Authorized
-        transactionStorage.markFixedHeadscaleContinuation()
-        onRecoveredAuthorization()
-      } else {
-        _authentikState.value = AuthentikState.Authorized
+      val callbackIsCurrent =
+          synchronized(sessionLock) {
+            if (generation != sessionGeneration) return@synchronized false
+            authState.updateToken(tokenResponse, tokenException)
+            persistLocked()
+            true
+          }
+      if (callbackIsCurrent) {
+        if (tokenResponse == null) {
+          completeAuthorization(
+              generation,
+              Result.failure(
+                  tokenException ?: IllegalStateException("Unable to exchange OIDC code")),
+              authorized = false)
+        } else {
+          completeAuthorization(
+              generation,
+              Result.success(Unit),
+              authorized = true,
+              onRecoveredAuthorization = onRecoveredAuthorization)
+        }
       }
       onFinished()
     }
   }
 
   fun withFreshBearerToken(context: Context, onResult: (Result<String>) -> Unit) {
-    if (isSignedOut) {
+    val captured =
+        synchronized(sessionLock) {
+          if (!authState.isAuthorized) null else sessionGeneration to authState
+        }
+    if (captured == null) {
       onResult(Result.failure(IllegalStateException("Signed out")))
       return
     }
+    val (generation, state) = captured
 
-    appAuth.freshToken(context, authState) { accessToken, exception ->
-      persist()
-      if (exception != null || accessToken.isNullOrBlank()) {
-        if (isInvalidOrRevokedCredential(exception)) {
-          clearSession(AuthentikState.ReauthenticationRequired)
-        }
-        onResult(Result.failure(exception ?: IllegalStateException("Unable to refresh token")))
-      } else {
-        _authentikState.value = AuthentikState.Authorized
-        onResult(Result.success(accessToken))
-      }
+    appAuth.freshToken(context, state) { accessToken, exception ->
+      var pendingCompletion: PendingCompletion? = null
+      val result =
+          synchronized(sessionLock) {
+            if (generation != sessionGeneration) {
+              Result.failure(authSessionChanged())
+            } else if (exception != null || accessToken.isNullOrBlank()) {
+              if (isInvalidOrRevokedCredential(exception)) {
+                pendingCompletion = clearSessionLocked(AuthentikState.ReauthenticationRequired)
+                appAuth.dispose()
+              } else {
+                persistLocked()
+              }
+              Result.failure(exception ?: IllegalStateException("Unable to refresh token"))
+            } else {
+              persistLocked()
+              _authentikState.value = AuthentikState.Authorized
+              Result.success(accessToken)
+            }
+          }
+      pendingCompletion?.callback?.invoke(Result.failure(authSessionChanged()))
+      onResult(result)
     }
   }
 
@@ -227,26 +290,62 @@ class AuthSessionRepository(
     clearSession(AuthentikState.SignedOut)
   }
 
+  fun requireReauthentication() {
+    clearSession(AuthentikState.ReauthenticationRequired)
+  }
+
   fun consumeFixedHeadscaleContinuation(): Boolean =
-      transactionStorage.consumeFixedHeadscaleContinuation()
+      synchronized(sessionLock) { transactionStorage.consumeFixedHeadscaleContinuation() }
 
   private fun clearSession(state: AuthentikState) {
+    val pendingCompletion =
+        synchronized(sessionLock) { clearSessionLocked(state).also { appAuth.dispose() } }
+    pendingCompletion?.callback?.invoke(Result.failure(authSessionChanged()))
+  }
+
+  private fun clearSessionLocked(state: AuthentikState): PendingCompletion? {
+    sessionGeneration += 1
     authState = PersistedAuthSessionState(AuthState())
     storage.clear()
+    transactionStorage.clear()
     _authentikState.value = state
+    return completion.also { completion = null }
   }
 
-  private fun finish(result: Result<Unit>): Boolean {
-    val hasCompletion = completion != null
-    completion?.invoke(result)
-    completion = null
-    appAuth.dispose()
-    return hasCompletion
+  private fun completeAuthorization(
+      generation: Long,
+      result: Result<Unit>,
+      authorized: Boolean,
+      onRecoveredAuthorization: () -> Unit = {},
+  ): Boolean {
+    var callback: ((Result<Unit>) -> Unit)? = null
+    var recovered = false
+    val current =
+        synchronized(sessionLock) {
+          if (generation != sessionGeneration) return@synchronized false
+          callback = completion?.takeIf { it.generation == generation }?.callback
+          if (callback != null) completion = null
+          _authentikState.value =
+              if (authorized) AuthentikState.Authorized else AuthentikState.SignedOut
+          if (authorized && callback == null) {
+            transactionStorage.markFixedHeadscaleContinuation()
+            recovered = true
+          }
+          appAuth.dispose()
+          true
+        }
+    if (!current) return false
+    callback?.invoke(result)
+    if (recovered) onRecoveredAuthorization()
+    return true
   }
 
-  private fun persist() {
+  private fun persistLocked() {
     storage.write(authState.serialize())
   }
+
+  private fun authSessionChanged(): IllegalStateException =
+      IllegalStateException("Auth session changed")
 
   private fun isInvalidOrRevokedCredential(exception: AuthorizationException?): Boolean {
     return exception?.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR &&
@@ -396,10 +495,9 @@ private class RealAppAuthGateway : AppAuthGateway {
       response: AuthorizationResponse,
       callback: (TokenResponse?, AuthorizationException?) -> Unit
   ) {
-    val service = authorizationService ?: AuthorizationService(context)
+    val service = AuthorizationService(context)
     service.performTokenRequest(response.createTokenExchangeRequest()) { tokenResponse, exception ->
       service.dispose()
-      authorizationService = null
       callback(tokenResponse, exception)
     }
   }
@@ -470,15 +568,17 @@ private class EncryptedAuthorizationTransactionStorage(
           EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
 
   override fun write(transaction: PendingAuthorizationTransaction) {
-    preferences
-        .edit()
-        .putString(
-            AUTH_PENDING_TRANSACTION_KEY,
-            JSONObject()
-                .put("request", transaction.request.jsonSerializeString())
-                .put("createdAtMillis", transaction.createdAtMillis)
-                .toString())
-        .commit()
+    synchronized(this) {
+      preferences
+          .edit()
+          .putString(
+              AUTH_PENDING_TRANSACTION_KEY,
+              JSONObject()
+                  .put("request", transaction.request.jsonSerializeString())
+                  .put("createdAtMillis", transaction.createdAtMillis)
+                  .toString())
+          .commit()
+    }
   }
 
   override fun consumeIf(predicate: (PendingAuthorizationTransaction) -> Boolean): Boolean =
@@ -498,7 +598,9 @@ private class EncryptedAuthorizationTransactionStorage(
       }
 
   override fun markFixedHeadscaleContinuation() {
-    preferences.edit().putBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, true).commit()
+    synchronized(this) {
+      preferences.edit().putBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, true).commit()
+    }
   }
 
   override fun consumeFixedHeadscaleContinuation(): Boolean =
@@ -507,6 +609,16 @@ private class EncryptedAuthorizationTransactionStorage(
             return@synchronized false
         preferences.edit().remove(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY).commit()
       }
+
+  override fun clear() {
+    synchronized(this) {
+      preferences
+          .edit()
+          .remove(AUTH_PENDING_TRANSACTION_KEY)
+          .remove(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY)
+          .commit()
+    }
+  }
 }
 
 private class InMemoryAuthorizationTransactionStorage : AuthorizationTransactionStorage {
@@ -528,4 +640,9 @@ private class InMemoryAuthorizationTransactionStorage : AuthorizationTransaction
 
   override fun consumeFixedHeadscaleContinuation(): Boolean =
       fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
+
+  override fun clear() {
+    transaction = null
+    fixedHeadscaleContinuation = false
+  }
 }

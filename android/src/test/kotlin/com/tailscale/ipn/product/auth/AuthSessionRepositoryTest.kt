@@ -14,6 +14,7 @@ import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenResponse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -352,6 +353,161 @@ class AuthSessionRepositoryTest {
     assertTrue(flags and PendingIntent.FLAG_ONE_SHOT != 0)
     assertEquals(0, flags and PendingIntent.FLAG_MUTABLE)
   }
+
+  @Test
+  fun clearDuringDiscoveryDoesNotOpenAuthorization() {
+    val gateway = FakeAppAuthGateway(deferDiscovery = true)
+    val completion = mutableListOf<Result<Unit>>()
+    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+
+    repository.startAuthorization(context, completion::add)
+    repository.clearSession()
+    gateway.completeDiscovery()
+
+    assertEquals(0, gateway.authorizationStarts)
+    assertEquals(1, completion.size)
+    assertTrue(completion.single().isFailure)
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+  }
+
+  @Test
+  fun clearDuringCodeExchangeDoesNotRestoreAuthorizedSession() {
+    val storage = InMemoryAuthStateStorage()
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>(),
+            deferCodeExchange = true)
+    val completion = mutableListOf<Result<Unit>>()
+    var finished = 0
+    val repository = AuthSessionRepository(storage, state, gateway)
+
+    repository.startAuthorization(context, completion::add)
+    repository.handleAuthorizationIntent(context, intent, onFinished = { finished++ })
+    repository.clearSession()
+    gateway.completeCodeExchange()
+
+    assertEquals(1, state.authorizationUpdates)
+    assertEquals(0, state.tokenUpdates)
+    assertEquals(listOf("state"), storage.writes)
+    assertNull(storage.read())
+    assertEquals(1, completion.size)
+    assertTrue(completion.single().isFailure)
+    assertEquals(1, finished)
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+  }
+
+  @Test
+  fun clearDuringFreshTokenDoesNotRestoreAuthorizedSession() {
+    val storage = InMemoryAuthStateStorage("state")
+    val gateway = FakeAppAuthGateway(freshToken = "token", deferFreshToken = true)
+    val completion = mutableListOf<Result<String>>()
+    val repository = AuthSessionRepository(storage, FakeSessionState(isAuthorized = true), gateway)
+
+    repository.withFreshBearerToken(context, completion::add)
+    repository.clearSession()
+    gateway.completeFreshToken()
+
+    assertEquals(1, completion.size)
+    assertTrue(completion.single().isFailure)
+    assertEquals("Auth session changed", completion.single().exceptionOrNull()?.message)
+    assertTrue(storage.writes.isEmpty())
+    assertNull(storage.read())
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+  }
+
+  @Test
+  fun replacementAuthorizationSurvivesOldDeferredCodeExchange() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>(),
+            deferCodeExchange = true)
+    val firstCompletion = mutableListOf<Result<Unit>>()
+    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+
+    repository.startAuthorization(context, firstCompletion::add)
+    repository.handleAuthorizationIntent(context, intent)
+    repository.startAuthorization(context) {}
+    gateway.completeCodeExchange()
+
+    assertEquals(1, firstCompletion.size)
+    assertEquals("Auth session changed", firstCompletion.single().exceptionOrNull()?.message)
+    assertEquals(2, gateway.authorizationStarts)
+    assertTrue(gateway.isAuthorizationActive)
+    assertEquals(2, gateway.disposeCalls)
+  }
+
+  @Test
+  fun replacementStartFailsPriorCompletionAndClearsPendingState() {
+    val gateway = FakeAppAuthGateway(deferDiscovery = true)
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    val firstCompletion = mutableListOf<Result<Unit>>()
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              1
+            }
+
+    repository.startAuthorization(context, firstCompletion::add)
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    transactions.markFixedHeadscaleContinuation()
+    repository.startAuthorization(context) {}
+
+    assertEquals(1, firstCompletion.size)
+    assertEquals("Auth session changed", firstCompletion.single().exceptionOrNull()?.message)
+    assertFalse(transactions.consumeIf { true })
+    assertFalse(repository.consumeFixedHeadscaleContinuation())
+
+    gateway.completeDiscovery()
+    assertEquals(0, gateway.authorizationStarts)
+    gateway.completeDiscovery()
+    assertEquals(1, gateway.authorizationStarts)
+  }
+
+  @Test
+  fun requireReauthenticationInvalidatesDeferredCodeExchange() {
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>(),
+            deferCodeExchange = true)
+    val completion = mutableListOf<Result<Unit>>()
+    var finished = 0
+    val repository = AuthSessionRepository(InMemoryAuthStateStorage(), state, gateway)
+
+    repository.startAuthorization(context, completion::add)
+    repository.handleAuthorizationIntent(context, intent, onFinished = { finished++ })
+    repository.requireReauthentication()
+    gateway.completeCodeExchange()
+
+    assertEquals(1, completion.size)
+    assertEquals("Auth session changed", completion.single().exceptionOrNull()?.message)
+    assertEquals(0, state.tokenUpdates)
+    assertEquals(1, finished)
+    assertFalse(gateway.isAuthorizationActive)
+    assertEquals(AuthentikState.ReauthenticationRequired, repository.authentikState.value)
+  }
+
+  @Test
+  fun clearRemovesPendingTransactionAndContinuation() {
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    val gateway = FakeAppAuthGateway()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 1))
+    transactions.markFixedHeadscaleContinuation()
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(), FakeSessionState(), gateway, transactions) {
+              1
+            }
+
+    repository.clearSession()
+
+    assertFalse(transactions.consumeIf { true })
+    assertFalse(repository.consumeFixedHeadscaleContinuation())
+  }
 }
 
 private fun callbackIntent(action: String): Intent =
@@ -364,19 +520,34 @@ internal class FakeAppAuthGateway(
     private val freshToken: String? = null,
     private val freshException: AuthorizationException? = null,
     private val deferDiscovery: Boolean = false,
+    private val deferCodeExchange: Boolean = false,
+    private val deferFreshToken: Boolean = false,
     var matchesPendingAuthorization: Boolean = true,
 ) : AppAuthGateway {
   var authorizationStarts = 0
   var codeExchanges = 0
+  var disposeCalls = 0
+  var isAuthorizationActive = false
   val authorizationRequest = mock<AuthorizationRequest>()
   private val validAuthorizationResponse = mock<AuthorizationResponse>()
+  private val deferredDiscoveries =
+      mutableListOf<(AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit>()
+  private var deferredCodeExchange: ((TokenResponse?, AuthorizationException?) -> Unit)? = null
+  private var deferredFreshToken: ((String?, AuthorizationException?) -> Unit)? = null
 
   override fun discover(
       callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit
   ) {
-    if (!deferDiscovery) {
+    if (deferDiscovery) {
+      deferredDiscoveries += callback
+    } else {
       callback(if (discoveryException == null) mock() else null, discoveryException)
     }
+  }
+
+  fun completeDiscovery() {
+    val callback = deferredDiscoveries.removeAt(0)
+    callback(if (discoveryException == null) mock() else null, discoveryException)
   }
 
   override fun createAuthorizationRequest(
@@ -385,6 +556,7 @@ internal class FakeAppAuthGateway(
 
   override fun startAuthorization(context: Context, request: AuthorizationRequest) {
     authorizationStarts++
+    isAuthorizationActive = true
   }
 
   override fun authorizationResult(intent: Intent): AuthorizationResult? =
@@ -404,6 +576,16 @@ internal class FakeAppAuthGateway(
       callback: (TokenResponse?, AuthorizationException?) -> Unit
   ) {
     codeExchanges++
+    if (deferCodeExchange) {
+      deferredCodeExchange = callback
+    } else {
+      callback(tokenResponse, null)
+    }
+  }
+
+  fun completeCodeExchange() {
+    val callback = checkNotNull(deferredCodeExchange)
+    deferredCodeExchange = null
     callback(tokenResponse, null)
   }
 
@@ -412,10 +594,23 @@ internal class FakeAppAuthGateway(
       state: AuthSessionState,
       callback: (String?, AuthorizationException?) -> Unit
   ) {
+    if (deferFreshToken) {
+      deferredFreshToken = callback
+    } else {
+      callback(freshToken, freshException)
+    }
+  }
+
+  fun completeFreshToken() {
+    val callback = checkNotNull(deferredFreshToken)
+    deferredFreshToken = null
     callback(freshToken, freshException)
   }
 
-  override fun dispose() {}
+  override fun dispose() {
+    disposeCalls++
+    isAuthorizationActive = false
+  }
 }
 
 internal class FakeSessionState(override val isAuthorized: Boolean = false) : AuthSessionState {
@@ -473,4 +668,9 @@ private class InMemoryAuthorizationTransactionStorage : AuthorizationTransaction
 
   override fun consumeFixedHeadscaleContinuation(): Boolean =
       fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
+
+  override fun clear() {
+    transaction = null
+    fixedHeadscaleContinuation = false
+  }
 }
