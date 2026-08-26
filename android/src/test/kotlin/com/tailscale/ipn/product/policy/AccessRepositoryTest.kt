@@ -3,22 +3,23 @@
 
 package com.tailscale.ipn.product.policy
 
-import java.io.ByteArrayInputStream
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import org.junit.Assert.assertEquals
+import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.auth.FakeAppAuthGateway
 import com.tailscale.ipn.product.auth.FakeSessionState
 import com.tailscale.ipn.product.auth.InMemoryAuthStateStorage
+import java.io.ByteArrayInputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlinx.coroutines.runBlocking
 import net.openid.appauth.AuthorizationException
-import org.mockito.kotlin.mock
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Test
 import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.mockito.kotlin.mock
 
 class AccessRepositoryTest {
   @Test
@@ -82,10 +83,32 @@ class AccessRepositoryTest {
   }
 
   @Test
-  fun unauthorizedResponseMakesAccessUnavailable() {
-    val repository = repository(status = 401)
+  fun unauthorizedResponseClearsUnexpiredCache() {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { FakeHttpURLConnection(401, "") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
 
     assertEquals(AccessState.Unavailable, repository.load("token"))
+    assertNull(cache.policy)
   }
 
   @Test
@@ -271,6 +294,47 @@ class AccessRepositoryTest {
     assertEquals(AccessState.Active(setOf("node-a")), state)
     assertEquals(setOf("node-a"), cache.policy?.allowedExitNodeIds)
   }
+
+  @Test
+  fun refreshUnauthorizedRequiresReauthentication() = runBlocking {
+    val now = 1_000_000L
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authStorage = InMemoryAuthStateStorage("state")
+    val authSessionRepository =
+        AuthSessionRepository(
+            authStorage,
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(connectionFactory = { FakeHttpURLConnection(401, "") }),
+            cacheStore = cache,
+            nowMillis = { now },
+        )
+
+    val state = repository.refresh(mock(), authSessionRepository)
+
+    assertEquals(AccessState.Unavailable, state)
+    assertNull(cache.policy)
+    assertNull(authStorage.read())
+    assertEquals(
+        AuthentikState.ReauthenticationRequired, authSessionRepository.authentikState.value)
+  }
+
   @Test
   fun fetchNodeAuthKeyReturnsAuthKeyOn200() {
     val client =

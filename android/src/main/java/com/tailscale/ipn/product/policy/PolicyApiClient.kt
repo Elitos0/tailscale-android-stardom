@@ -19,6 +19,8 @@ sealed interface PolicyLoadResult {
 
   data object Disabled : PolicyLoadResult
 
+  data object Unauthorized : PolicyLoadResult
+
   data object Unavailable : PolicyLoadResult
 }
 
@@ -46,6 +48,7 @@ class PolicyApiClient(
           }
 
       when (connection.responseCode) {
+        HttpURLConnection.HTTP_UNAUTHORIZED -> PolicyLoadResult.Unauthorized
         HttpURLConnection.HTTP_FORBIDDEN -> PolicyLoadResult.Disabled
         HttpURLConnection.HTTP_OK -> parseActiveAccess(connection)
         else -> PolicyLoadResult.Unavailable
@@ -59,6 +62,7 @@ class PolicyApiClient(
       }
     }
   }
+
   fun fetchNodeAuthKey(token: String): Result<String> {
     var connection: HttpURLConnection? = null
     return try {
@@ -94,7 +98,6 @@ class PolicyApiClient(
       }
     }
   }
-
 
   private fun parseActiveAccess(connection: HttpURLConnection): PolicyLoadResult {
     val response =

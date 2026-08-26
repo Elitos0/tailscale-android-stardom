@@ -43,23 +43,7 @@ class AccessRepository(
   }
 
   fun load(token: String): AccessState {
-    val next =
-        when (val result = policyApiClient.load(token)) {
-          is PolicyLoadResult.Active -> {
-            cacheStore?.write(
-                CachedAccessPolicy(
-                    policyVersion = result.policyVersion,
-                    validUntilEpochMillis = result.validUntilEpochMillis,
-                    allowedExitNodeIds = result.allowedExitNodeIds,
-                ))
-            AccessState.Active(result.allowedExitNodeIds)
-          }
-          PolicyLoadResult.Disabled -> {
-            cacheStore?.clear()
-            AccessState.Disabled
-          }
-          PolicyLoadResult.Unavailable -> cachedActiveOrUnavailable()
-        }
+    val next = resolve(policyApiClient.load(token))
     _state.value = next
     return next
   }
@@ -74,7 +58,13 @@ class AccessRepository(
       val state =
           freshToken(context, authSessionRepository)
               .fold(
-                  onSuccess = { token -> withContext(Dispatchers.IO) { load(token) } },
+                  onSuccess = { token ->
+                    val result = withContext(Dispatchers.IO) { policyApiClient.load(token) }
+                    if (result == PolicyLoadResult.Unauthorized) {
+                      authSessionRepository.requireReauthentication()
+                    }
+                    resolve(result)
+                  },
                   onFailure = {
                     // Invalid credentials must drop cache; transport errors keep last-valid.
                     val isAuthRevoked =
@@ -93,6 +83,28 @@ class AccessRepository(
       state
     }
   }
+
+  private fun resolve(result: PolicyLoadResult): AccessState =
+      when (result) {
+        is PolicyLoadResult.Active -> {
+          cacheStore?.write(
+              CachedAccessPolicy(
+                  policyVersion = result.policyVersion,
+                  validUntilEpochMillis = result.validUntilEpochMillis,
+                  allowedExitNodeIds = result.allowedExitNodeIds,
+              ))
+          AccessState.Active(result.allowedExitNodeIds)
+        }
+        PolicyLoadResult.Disabled -> {
+          cacheStore?.clear()
+          AccessState.Disabled
+        }
+        PolicyLoadResult.Unauthorized -> {
+          cacheStore?.clear()
+          AccessState.Unavailable
+        }
+        PolicyLoadResult.Unavailable -> cachedActiveOrUnavailable()
+      }
 
   private fun cachedActiveOrUnavailable(): AccessState {
     val cached = cacheStore?.read() ?: return AccessState.Unavailable
