@@ -53,7 +53,7 @@ class SharedPreferencesDesiredExitModeStore(context: Context) : DesiredExitModeS
               DesiredExitMode.Manual(it)
             }
         "none" -> null
-        else -> DesiredExitMode.Auto
+        else -> null
       }
 
   private companion object {

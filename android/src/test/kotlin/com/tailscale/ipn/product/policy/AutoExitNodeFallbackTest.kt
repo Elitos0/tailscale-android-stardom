@@ -12,6 +12,7 @@ import java.time.Duration
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -198,11 +199,27 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     assertEquals(listOf("node-b"), fixture.boundary.mutations)
   }
 
+  @Test
+  fun missingDesiredModeDoesNotFallbackManualExit() = runTest {
+    val fixture =
+        fixture(
+            allowed = setOf("node-a", "node-b"),
+            prefs = Ipn.Prefs(ExitNodeID = "node-b"),
+            peers = listOf(exitPeer("node-a"), exitPeer("node-b")),
+            desiredExitModeStore = FakeDesiredExitModeStore(initial = null),
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(emptyList<String>(), fixture.boundary.mutations)
+  }
+
   private fun kotlinx.coroutines.test.TestScope.fixture(
       allowed: Set<String> = setOf("node-a"),
       prefs: Ipn.Prefs? = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
       peers: List<Tailcfg.Node>? = listOf(exitPeer("node-a")),
       runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
+      desiredExitModeStore: DesiredExitModeStore? = FakeDesiredExitModeStore(initial = null),
   ): Fixture {
     val authentik = MutableStateFlow(AuthentikState.Authorized)
     val access = MutableStateFlow<AccessState>(AccessState.Active(allowed))
@@ -224,6 +241,7 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
             runtimeSnapshot = runtime.snapshot,
             runtime = runtime,
             mutationBoundary = boundary,
+            desiredExitModeStore = desiredExitModeStore,
             // Unit tests assert post-grace behavior; grace itself is covered separately.
             nativeGrace = Duration.ZERO,
             stopThenClear = { _ ->
@@ -306,4 +324,17 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
           AllowedIPs = listOf("0.0.0.0/0", "::/0"),
           Online = online,
       )
+}
+
+private class FakeDesiredExitModeStore(initial: DesiredExitMode? = null) : DesiredExitModeStore {
+  private val _mode = MutableStateFlow(initial)
+  override val mode: StateFlow<DesiredExitMode?> = _mode.asStateFlow()
+
+  override fun set(mode: DesiredExitMode) {
+    _mode.value = mode
+  }
+
+  override fun clear() {
+    _mode.value = null
+  }
 }

@@ -83,7 +83,7 @@ class ExitNodePickerViewModel(
   init {
     viewModelScope.launch {
       val desiredStore = desiredExitModeStore()
-      val desiredModeFlow = desiredStore?.mode ?: MutableStateFlow(DesiredExitMode.Auto)
+      val desiredModeFlow = desiredStore?.mode ?: MutableStateFlow<DesiredExitMode?>(null)
       combine(netmapFlow, prefsFlow, accessState, desiredModeFlow) { netmap, prefs, accessState, desiredMode ->
         val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
         val isDesiredAuto = desiredMode is DesiredExitMode.Auto

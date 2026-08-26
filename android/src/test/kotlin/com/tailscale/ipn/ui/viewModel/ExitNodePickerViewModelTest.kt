@@ -328,6 +328,29 @@ class ExitNodePickerViewModelTest {
     assertEquals(1, store.clears)
     assertNull(store.mode.value)
   }
+
+  @Test
+  fun nullDesiredModePreservesNativeManualSelection() = runTest {
+    val netmap = MutableStateFlow(networkMap(exitNode("node-a", "Alpha")))
+    val prefs = MutableStateFlow<Ipn.Prefs?>(Ipn.Prefs(ExitNodeID = "node-a"))
+    val access = MutableStateFlow<AccessState>(AccessState.Active(setOf("node-a")))
+    val store = FakeDesiredExitModeStore(initial = null)
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = access,
+            netmapFlow = netmap,
+            prefsFlow = prefs,
+            desiredExitModeStoreOverride = store,
+        )
+
+    advanceUntilIdle()
+
+    assertFalse(viewModel.autoExitNode.value.selected)
+    assertTrue(viewModel.tailnetExitNodes.value.single().selected)
+    assertEquals("node-a", viewModel.tailnetExitNodes.value.single().id)
+    assertTrue(viewModel.anyActive.value)
+  }
 }
 
 private fun pickerViewModelCapturing(boundary: ExitNodeMutationBoundary) =
