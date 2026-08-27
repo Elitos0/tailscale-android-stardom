@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -213,6 +212,36 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     runCurrent()
 
     assertEquals(emptyList<String>(), fixture.boundary.mutations)
+  }
+
+  @Test
+  fun defaultNativeGraceSelectsCandidateImmediatelyWithoutWaiting() = runTest {
+    val authentik = MutableStateFlow(AuthentikState.Authorized)
+    val access = MutableStateFlow<AccessState>(AccessState.Active(setOf("node-a")))
+    val mdm = MutableStateFlow(SettingState<List<String>?>(null, false))
+    val forced = MutableStateFlow(SettingState<String?>(null, false))
+    val prefsFlow =
+        MutableStateFlow<Ipn.Prefs?>(Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"))
+    val netmap = MutableStateFlow<Netmap.NetworkMap?>(networkMap(listOf(exitPeer("node-a"))))
+    val runtime = FakeRuntime(VpnRuntimeState.Idle)
+    val events = mutableListOf<String>()
+    val boundary = CapturingBoundary(events, prefsFlow)
+    val controller =
+        PolicyAwareAutoExitNodeFallbackController(
+            authentikState = authentik,
+            accessState = access,
+            mdmAllowedSuggestedExitNodes = mdm,
+            mdmForcedExitNodeId = forced,
+            prefs = prefsFlow,
+            netmap = netmap,
+            runtimeSnapshot = runtime.snapshot,
+            runtime = runtime,
+            mutationBoundary = boundary,
+        )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(listOf("node-a"), boundary.mutations)
   }
 
   private fun kotlinx.coroutines.test.TestScope.fixture(

@@ -273,7 +273,6 @@ class ExitNodeMutationBoundaryTest {
     assertTrue(restored.await().isSuccess)
   }
 
-
   @Test
   fun clearDeniedWhileRuntimeRunning() = runTest {
     val decisions = MutationDecisionSource(AccessState.Active(setOf("node-a")))

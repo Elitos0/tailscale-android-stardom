@@ -8,9 +8,9 @@ import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.Tailcfg
+import com.tailscale.ipn.util.TSLog
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
-import com.tailscale.ipn.util.TSLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +40,10 @@ object PolicyAwareAutoExitNodeFallbackSelector {
       peers: Collection<Tailcfg.Node>,
       nativeGraceActive: Boolean = false,
   ): AutoExitNodeFallbackDecision {
-    if (!autoConfigured) return AutoExitNodeFallbackDecision.Keep
+    if (!autoConfigured) {
+      TSLog.d("AutoExitFallback", "decide: autoConfigured=false -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
 
     val allowed = allowedNodeIds.map(String::trim).filter(String::isNotEmpty).toSet()
     val eligible =
@@ -53,13 +56,25 @@ object PolicyAwareAutoExitNodeFallbackSelector {
             .sorted()
             .toList()
     val current = currentEffectiveNodeId?.trim().orEmpty()
-    if (current in eligible) return AutoExitNodeFallbackDecision.Keep
-    // During grace, keep native auto blackhole even if still unresolved.
-    if (nativeGraceActive && eligible.isNotEmpty()) {
+    TSLog.d(
+        "AutoExitFallback",
+        "decide evaluation: totalPeers=${peers.size} allowedCount=${allowed.size} eligible=$eligible currentEffective=$current nativeGraceActive=$nativeGraceActive")
+    if (current in eligible) {
+      TSLog.d(
+          "AutoExitFallback",
+          "decide: current effective node ($current) is in eligible set -> Keep")
       return AutoExitNodeFallbackDecision.Keep
     }
-    return eligible.firstOrNull()?.let(AutoExitNodeFallbackDecision::Select)
-        ?: AutoExitNodeFallbackDecision.StopAndClear
+    // During grace, keep native auto blackhole even if still unresolved.
+    if (nativeGraceActive && eligible.isNotEmpty()) {
+      TSLog.d("AutoExitFallback", "decide: native grace active and eligible peers present -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
+    val decision =
+        eligible.firstOrNull()?.let(AutoExitNodeFallbackDecision::Select)
+            ?: AutoExitNodeFallbackDecision.StopAndClear
+    TSLog.d("AutoExitFallback", "decide: calculated decision=$decision")
+    return decision
   }
 }
 
@@ -75,7 +90,7 @@ class PolicyAwareAutoExitNodeFallbackController(
     private val mutationBoundary: ExitNodeMutationBoundary,
     private val desiredExitModeStore: DesiredExitModeStore? = null,
     private val stopThenClear: (suspend (VpnStopReason) -> Result<Unit>)? = null,
-    private val nativeGrace: Duration = Duration.ofSeconds(10),
+    private val nativeGrace: Duration = Duration.ZERO,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) {
@@ -119,22 +134,21 @@ class PolicyAwareAutoExitNodeFallbackController(
                   prefs,
                   netmap,
                   runtimeSnapshot,
-              )
-          ) { values ->
-            @Suppress("UNCHECKED_CAST")
-            Inputs(
-                authentik = values[0] as AuthentikState,
-                access = values[1] as AccessState,
-                managed =
-                    ManagedSettings(
-                        allowed = values[2] as SettingState<List<String>?>,
-                        forced = values[3] as SettingState<String?>,
-                    ),
-                prefs = values[4] as Ipn.Prefs?,
-                netmap = values[5] as Netmap.NetworkMap?,
-                runtime = values[6] as VpnRuntimeSnapshot,
-            )
-          }
+              )) { values ->
+                @Suppress("UNCHECKED_CAST")
+                Inputs(
+                    authentik = values[0] as AuthentikState,
+                    access = values[1] as AccessState,
+                    managed =
+                        ManagedSettings(
+                            allowed = values[2] as SettingState<List<String>?>,
+                            forced = values[3] as SettingState<String?>,
+                        ),
+                    prefs = values[4] as Ipn.Prefs?,
+                    netmap = values[5] as Netmap.NetworkMap?,
+                    runtime = values[6] as VpnRuntimeSnapshot,
+                )
+              }
           .collect { process(scope, it) }
     }
   }
@@ -157,6 +171,7 @@ class PolicyAwareAutoExitNodeFallbackController(
 
     when (decision) {
       is AutoExitNodeFallbackDecision.Select -> {
+        TSLog.d("AutoExitFallback", "applying fallback mutation: Select(${decision.nodeId})")
         // Preserve DesiredExitMode.Auto — do not rewrite user intent to Manual.
         val result =
             runCatching {
@@ -164,15 +179,23 @@ class PolicyAwareAutoExitNodeFallbackController(
                 }
                 .getOrElse { Result.failure(it) }
         if (result.isFailure) {
+          TSLog.e(
+              "AutoExitFallback",
+              "fallback mutation Select(${decision.nodeId}) failed: ${result.exceptionOrNull()?.message}",
+              result.exceptionOrNull())
           synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
           revokeSafely("select", result.exceptionOrNull())
+        } else {
+          TSLog.d("AutoExitFallback", "fallback mutation Select(${decision.nodeId}) succeeded")
         }
       }
       AutoExitNodeFallbackDecision.StopAndClear -> {
+        TSLog.d("AutoExitFallback", "applying fallback action: StopAndClear")
         val clearer = stopThenClear
         if (clearer != null) {
           clearer(VpnStopReason.EmptyCandidatePool)
               .onFailure {
+                TSLog.e("AutoExitFallback", "StopAndClear stopThenClear failed: ${it.message}", it)
                 synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
                 report("stop-clear", it)
                 scope.launch {
@@ -180,22 +203,31 @@ class PolicyAwareAutoExitNodeFallbackController(
                   process(scope, inputs)
                 }
               }
+              .onSuccess { TSLog.d("AutoExitFallback", "StopAndClear stopThenClear succeeded") }
         } else {
           if (inputs.runtime.state.isStartingOrRunning()) {
+            TSLog.d("AutoExitFallback", "StopAndClear revoking runtime state")
             revokeSafely("stop", null)
           }
           // Only clear when idle; otherwise re-arm.
           if (!inputs.runtime.state.isStartingOrRunning()) {
+            TSLog.d("AutoExitFallback", "StopAndClear mutating exit node to Clear")
             runCatching { mutationBoundary.mutateExitNode(ExitNodeMutation.Clear()) }
                 .onFailure {
+                  TSLog.e(
+                      "AutoExitFallback", "StopAndClear mutation Clear failed: ${it.message}", it)
                   synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
                   report("clear", it)
                 }
                 .onSuccess { result ->
                   result.exceptionOrNull()?.let {
+                    TSLog.e(
+                        "AutoExitFallback",
+                        "StopAndClear mutation Clear result error: ${it.message}",
+                        it)
                     synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
                     report("clear", it)
-                  }
+                  } ?: TSLog.d("AutoExitFallback", "StopAndClear mutation Clear succeeded")
                 }
           } else {
             synchronized(lock) { if (lastActionKey == actionKey) lastActionKey = null }
@@ -207,20 +239,37 @@ class PolicyAwareAutoExitNodeFallbackController(
   }
 
   private fun evaluate(inputs: Inputs): AutoExitNodeFallbackDecision {
-    val currentPrefs = inputs.prefs ?: return AutoExitNodeFallbackDecision.Keep
+    val currentPrefs = inputs.prefs
+    if (currentPrefs == null) {
+      TSLog.d("AutoExitFallback", "evaluate: prefs is null -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
     val desired = desiredExitModeStore?.mode?.value
     val autoConfigured =
         desired is DesiredExitMode.Auto ||
             (desired == null && currentPrefs.AutoExitNode == NATIVE_AUTO_EXIT_NODE_ANY)
     if (!autoConfigured) {
+      TSLog.d(
+          "AutoExitFallback",
+          "evaluate: autoConfigured=false (desired=$desired, AutoExitNode=${currentPrefs.AutoExitNode}) -> Keep")
       return AutoExitNodeFallbackDecision.Keep
     }
     if (inputs.authentik != AuthentikState.Authorized || inputs.access !is AccessState.Active) {
+      TSLog.d(
+          "AutoExitFallback",
+          "evaluate: unauthenticated/inactive (authentik=${inputs.authentik}, access=${inputs.access}) -> Keep")
       return AutoExitNodeFallbackDecision.Keep
     }
-    if (inputs.managed.forced.isSet) return AutoExitNodeFallbackDecision.Keep
+    if (inputs.managed.forced.isSet) {
+      TSLog.d("AutoExitFallback", "evaluate: mdm forced exit node is set -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
 
-    val currentNetmap = inputs.netmap ?: return AutoExitNodeFallbackDecision.Keep
+    val currentNetmap = inputs.netmap
+    if (currentNetmap == null) {
+      TSLog.d("AutoExitFallback", "evaluate: netmap is null -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
     val peers = currentNetmap.Peers.orEmpty()
     val allowed =
         AllowedSuggestedExitNodePolicyMapper.map(
@@ -237,6 +286,9 @@ class PolicyAwareAutoExitNodeFallbackController(
             .sorted()
 
     val graceActive = updateGraceWindow(eligible)
+    TSLog.d(
+        "AutoExitFallback",
+        "evaluate inputs: peersCount=${peers.size} allowedCount=${allowed.size} eligibleCount=${eligible.size} eligible=$eligible graceActive=$graceActive")
     return PolicyAwareAutoExitNodeFallbackSelector.decide(
         autoConfigured = true,
         allowedNodeIds = allowed,

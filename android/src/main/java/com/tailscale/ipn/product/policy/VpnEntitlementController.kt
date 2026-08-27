@@ -3,9 +3,9 @@
 
 package com.tailscale.ipn.product.policy
 
-import com.tailscale.ipn.util.TSLog
 import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.util.TSLog
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -519,8 +519,7 @@ class VpnEntitlementController(
           complete(Result.failure(IllegalStateException("exit-node writer unavailable")))
         },
 ) : VpnStartAuthorizer, ExitNodeMutationBoundary {
-  private val effectiveStopFence: VpnStopFence =
-      stopFence ?: ImmediateRevokeStopFence(runtime)
+  private val effectiveStopFence: VpnStopFence = stopFence ?: ImmediateRevokeStopFence(runtime)
   private val decisionMutex = Mutex()
   private val exitNodeMutationWriteMutex = Mutex()
   private val revocationMutex = Mutex()
@@ -568,10 +567,12 @@ class VpnEntitlementController(
     if (active && runtime.state.value == VpnRuntimeState.Idle) {
       resetRevocationGuard()
     } else if (!active && runtime.state.value.isStartingOrRunning()) {
-      TSLog.e("VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}; revoking")
+      TSLog.e(
+          "VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}; revoking")
       revokeOnce()
     }
-    if (!active) TSLog.e("VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}")
+    if (!active)
+        TSLog.e("VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}")
     return active
   }
 
@@ -861,7 +862,9 @@ class VpnEntitlementController(
    * Stops the VPN (awaiting Idle when a real fence is wired), then clears exit preferences. Use
    * this instead of Clear while Starting/Running.
    */
-  suspend fun stopThenClearExitNode(reason: VpnStopReason = VpnStopReason.ExitNodeDisallowed): Result<Unit> {
+  suspend fun stopThenClearExitNode(
+      reason: VpnStopReason = VpnStopReason.ExitNodeDisallowed
+  ): Result<Unit> {
     if (runtime.state.value.isStartingOrRunning()) {
       val stopped = effectiveStopFence.stopAndAwaitIdle(reason)
       if (stopped.isFailure) return stopped

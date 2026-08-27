@@ -7,54 +7,94 @@ import android.util.Log
 import libtailscale.Libtailscale
 
 object TSLog {
-  private lateinit var appContext: Context
+  const val TAG = "STARDOM"
+
+  private var appContext: Context? = null
   var libtailscaleWrapper = LibtailscaleWrapper()
 
   fun init(context: Context) {
     appContext = context.applicationContext
   }
 
-  fun d(tag: String?, message: String) {
-    Log.d(tag, message)
-    libtailscaleWrapper.sendLog(tag, message)
+  @JvmStatic
+  @JvmOverloads
+  fun d(tag: String? = TAG, message: String) {
+    val resolvedTag = tag ?: TAG
+    Log.i(resolvedTag, message)
+    libtailscaleWrapper.sendLog(resolvedTag, message)
   }
 
-  fun w(tag: String, message: String) {
-    Log.w(tag, message)
-    libtailscaleWrapper.sendLog(tag, message)
-  }
-
-  fun v(tag: String?, message: String) {
-    if (isUnstableRelease()) {
-      Log.v(tag, message)
-      libtailscaleWrapper.sendLog(tag, message)
+  @JvmStatic
+  @JvmOverloads
+  fun i(tag: String? = TAG, message: String, throwable: Throwable? = null) {
+    val resolvedTag = tag ?: TAG
+    if (throwable == null) {
+      Log.i(resolvedTag, message)
+      libtailscaleWrapper.sendLog(resolvedTag, message)
+    } else {
+      Log.i(resolvedTag, "$message: ${throwable.localizedMessage ?: throwable.message}", throwable)
+      libtailscaleWrapper.sendLog(
+          resolvedTag, "$message ${throwable.localizedMessage ?: throwable.message}")
     }
+  }
+
+  @JvmStatic
+  @JvmOverloads
+  fun w(tag: String? = TAG, message: String, throwable: Throwable? = null) {
+    val resolvedTag = tag ?: TAG
+    if (throwable == null) {
+      Log.w(resolvedTag, message)
+      Log.i(resolvedTag, message)
+      libtailscaleWrapper.sendLog(resolvedTag, message)
+    } else {
+      Log.w(resolvedTag, message, throwable)
+      Log.i(resolvedTag, "$message: ${throwable.localizedMessage ?: throwable.message}", throwable)
+      libtailscaleWrapper.sendLog(
+          resolvedTag, "$message ${throwable.localizedMessage ?: throwable.message}")
+    }
+  }
+
+  @JvmStatic
+  @JvmOverloads
+  fun v(tag: String? = TAG, message: String) {
+    val resolvedTag = tag ?: TAG
+    Log.i(resolvedTag, message)
+    libtailscaleWrapper.sendLog(resolvedTag, message)
   }
 
   // Overloaded function without Throwable because Java does not support default parameters
   @JvmStatic
   fun e(tag: String?, message: String) {
-    Log.e(tag, message)
-    libtailscaleWrapper.sendLog(tag, message)
+    val resolvedTag = tag ?: TAG
+    Log.e(resolvedTag, message)
+    Log.i(resolvedTag, message)
+    libtailscaleWrapper.sendLog(resolvedTag, message)
   }
 
+  @JvmStatic
   fun e(tag: String?, message: String, throwable: Throwable? = null) {
+    val resolvedTag = tag ?: TAG
     if (throwable == null) {
-      Log.e(tag, message)
-      libtailscaleWrapper.sendLog(tag, message)
+      Log.e(resolvedTag, message)
+      Log.i(resolvedTag, message)
+      libtailscaleWrapper.sendLog(resolvedTag, message)
     } else {
-      Log.e(tag, message, throwable)
-      libtailscaleWrapper.sendLog(tag, "$message ${throwable.localizedMessage}")
+      Log.e(resolvedTag, message, throwable)
+      Log.i(resolvedTag, "$message: ${throwable.localizedMessage ?: throwable.message}", throwable)
+      libtailscaleWrapper.sendLog(
+          resolvedTag, "$message ${throwable.localizedMessage ?: throwable.message}")
     }
   }
 
   private fun isUnstableRelease(): Boolean {
-    val versionName =
-        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
-
-    // Extract the middle number and check if it's odd
-    val middleNumber = versionName?.split(".")?.getOrNull(1)?.toIntOrNull()
-    return middleNumber?.let { it % 2 == 1 } ?: false
+    val ctx = appContext ?: return false
+    return try {
+      val versionName = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+      val middleNumber = versionName?.split(".")?.getOrNull(1)?.toIntOrNull()
+      middleNumber?.let { it % 2 == 1 } ?: false
+    } catch (_: Exception) {
+      false
+    }
   }
 
   class LibtailscaleWrapper {

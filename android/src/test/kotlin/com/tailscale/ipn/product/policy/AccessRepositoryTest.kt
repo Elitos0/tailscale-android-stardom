@@ -3,8 +3,8 @@
 
 package com.tailscale.ipn.product.policy
 
-import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.auth.AuthSessionRepository
+import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.auth.FakeAppAuthGateway
 import com.tailscale.ipn.product.auth.FakeSessionState
 import com.tailscale.ipn.product.auth.InMemoryAuthStateStorage
@@ -87,8 +87,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -141,8 +140,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -168,8 +166,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -196,8 +193,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -231,8 +227,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -265,8 +260,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -282,8 +276,7 @@ class AccessRepositoryTest {
         AuthSessionRepository(
             InMemoryAuthStateStorage("state"),
             FakeSessionState(isAuthorized = true),
-            FakeAppAuthGateway(
-                freshException = AuthorizationException.GeneralErrors.NETWORK_ERROR))
+            FakeAppAuthGateway(freshException = AuthorizationException.GeneralErrors.NETWORK_ERROR))
     val repository =
         AccessRepository(
             PolicyApiClient(connectionFactory = { throw IOException("offline") }),
@@ -300,8 +293,7 @@ class AccessRepositoryTest {
     val now = 1_000_000L
     val cache =
         object : AccessPolicyCacheStore {
-          var policy: CachedAccessPolicy? =
-              CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
+          var policy: CachedAccessPolicy? = CachedAccessPolicy("v1", now + 60_000, setOf("node-a"))
 
           override fun read() = policy
 
@@ -349,20 +341,14 @@ class AccessRepositoryTest {
 
   @Test
   fun fetchNodeAuthKeyReturnsFailureOnNon200() {
-    val client =
-        PolicyApiClient(
-            connectionFactory = {
-              FakeHttpURLConnection(403, "Forbidden")
-            })
+    val client = PolicyApiClient(connectionFactory = { FakeHttpURLConnection(403, "Forbidden") })
     val result = client.fetchNodeAuthKey("invalid-token")
     assertTrue(result.isFailure)
   }
 
   @Test
   fun fetchNodeAuthKeyReturnsFailureOnNetworkException() {
-    val client =
-        PolicyApiClient(
-            connectionFactory = { throw IOException("connection reset") })
+    val client = PolicyApiClient(connectionFactory = { throw IOException("connection reset") })
     val result = client.fetchNodeAuthKey("token")
     assertTrue(result.isFailure)
   }

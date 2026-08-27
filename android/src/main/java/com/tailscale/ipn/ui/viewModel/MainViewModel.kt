@@ -137,6 +137,9 @@ class MainViewModel(
                   previousState == State.NoState && currentState == State.Starting -> true
                   else -> false
                 }
+            TSLog.d(
+                "MainViewModel",
+                "State changed: ipnState=$currentState previousState=$previousState vpnActive=$active toggleIsOn=$isOn")
             // Update the VPN toggle state
             _vpnToggleState.value = isOn
             // Update the previous state
@@ -184,21 +187,30 @@ class MainViewModel(
   }
 
   fun maybeRequestVpnPermission() {
+    TSLog.d("MainViewModel", "maybeRequestVpnPermission called")
     _requestVpnPermission.value = true
   }
 
   fun showVPNPermissionLauncherIfUnauthorized() {
+    TSLog.d("MainViewModel", "showVPNPermissionLauncherIfUnauthorized called")
     viewModelScope.launch { requestVpnPermissionIfAuthorized() }
   }
 
   private suspend fun requestVpnPermissionIfAuthorized() {
     try {
-      if (!vpnEntitlementController.authorizeStart(VpnStartOrigin.PermissionRequest)) return
+      val authorized = vpnEntitlementController.authorizeStart(VpnStartOrigin.PermissionRequest)
+      TSLog.d(
+          "MainViewModel", "requestVpnPermissionIfAuthorized: entitlement authorized=$authorized")
+      if (!authorized) return
       val vpnIntent = VpnService.prepare(App.get())
-      TSLog.d("VpnPermissions", "vpnIntent=$vpnIntent")
+      TSLog.d(
+          "MainViewModel",
+          "requestVpnPermissionIfAuthorized: VpnService.prepare vpnIntent=$vpnIntent (needsPermissionLauncher=${vpnIntent != null})")
       if (vpnIntent != null) {
+        TSLog.d("MainViewModel", "launching vpnPermissionLauncher")
         vpnPermissionLauncher?.launch(vpnIntent)
       } else {
+        TSLog.d("MainViewModel", "VPN already prepared, calling startVPN()")
         appViewModel.setVpnPrepared(true)
         startVPN()
       }
@@ -208,6 +220,9 @@ class MainViewModel(
   }
 
   fun toggleVpn(desiredState: Boolean) {
+    TSLog.d(
+        "MainViewModel",
+        "toggleVpn called: desiredState=$desiredState isToggleInProgress=${isToggleInProgress.value}")
     if (isToggleInProgress.value) {
       // Prevent toggling while a previous toggle is in progress
       return
@@ -224,11 +239,20 @@ class MainViewModel(
         if (desiredState) {
           // A stale backend Running state can survive service teardown/re-authentication. The
           // interface state is the source of truth for whether a new start is needed.
-          if (currentState != Ipn.State.Running || !isVpnActive.value) requestVpnPermissionIfAuthorized()
+          if (currentState != Ipn.State.Running || !isVpnActive.value) {
+            TSLog.d("MainViewModel", "toggleVpn initiating start sequence")
+            requestVpnPermissionIfAuthorized()
+          } else {
+            TSLog.d("MainViewModel", "toggleVpn already running and active, no start needed")
+          }
         } else {
           if (currentState != Ipn.State.Stopped && currentState != Ipn.State.NoState) {
-            TSLog.d("VpnLifecycle", "toggle stop requested state=$currentState active=${isVpnActive.value}")
+            TSLog.d(
+                "VpnLifecycle",
+                "toggle stop requested state=$currentState active=${isVpnActive.value}")
             stopVPN()
+          } else {
+            TSLog.d("MainViewModel", "toggleVpn already stopped, no stop needed")
           }
         }
       } finally {

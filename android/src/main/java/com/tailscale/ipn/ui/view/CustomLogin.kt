@@ -4,7 +4,6 @@
 package com.tailscale.ipn.ui.view
 
 import android.content.Context
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tailscale.ipn.R
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.ui.theme.listItem
@@ -54,8 +54,7 @@ fun LoginWithCustomControlURLView(
     onNavigateHome: BackNavigation,
     backToSettings: BackNavigation,
     viewModel: LoginWithCustomControlURLViewModel =
-        viewModel(
-            factory = LoginWithCustomControlURLViewModelFactory(authSessionRepository))
+        viewModel(factory = LoginWithCustomControlURLViewModelFactory(authSessionRepository))
 ) {
 
   Scaffold(

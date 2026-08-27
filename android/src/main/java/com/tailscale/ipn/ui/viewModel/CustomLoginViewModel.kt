@@ -3,11 +3,10 @@
 
 package com.tailscale.ipn.ui.viewModel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import android.content.Context
-import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.PolicyApiClient
 import com.tailscale.ipn.ui.util.set
@@ -17,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 const val AUTH_KEY_LENGTH = 16
 
 open class CustomLoginViewModel : IpnViewModel() {
@@ -69,7 +69,9 @@ class LoginWithCustomControlURLViewModel(
                             .onSuccess { authKey ->
                               loginWithAuthKey(authKey) { loginResult ->
                                 loginResult
-                                    .onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
+                                    .onFailure {
+                                      errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
+                                    }
                                     .onSuccess { onSuccess() }
                               }
                             }

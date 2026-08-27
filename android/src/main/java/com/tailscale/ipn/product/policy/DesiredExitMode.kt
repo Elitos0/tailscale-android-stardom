@@ -29,8 +29,7 @@ class SharedPreferencesDesiredExitModeStore(context: Context) : DesiredExitModeS
 
   override fun set(mode: DesiredExitMode) {
     when (mode) {
-      DesiredExitMode.Auto ->
-          prefs.edit().putString(KEY_KIND, "auto").remove(KEY_NODE).apply()
+      DesiredExitMode.Auto -> prefs.edit().putString(KEY_KIND, "auto").remove(KEY_NODE).apply()
       is DesiredExitMode.Manual -> {
         val id = mode.nodeId.trim()
         if (id.isEmpty()) return
@@ -49,9 +48,11 @@ class SharedPreferencesDesiredExitModeStore(context: Context) : DesiredExitModeS
       when (prefs.getString(KEY_KIND, null)) {
         "auto" -> DesiredExitMode.Auto
         "manual" ->
-            prefs.getString(KEY_NODE, null)?.trim()?.takeIf { it.isNotEmpty() }?.let {
-              DesiredExitMode.Manual(it)
-            }
+            prefs
+                .getString(KEY_NODE, null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { DesiredExitMode.Manual(it) }
         "none" -> null
         else -> null
       }

@@ -48,7 +48,7 @@ class StardomProcessStartVpnFence(
   /** Queues WantRunning=false once. Returns true if this call dispatched the clear. */
   fun apply(): Boolean {
     if (!applied.compareAndSet(false, true)) return false
-    clearWantRunning { /* fire-and-forget; fence is one-shot regardless of callback */ }
+    clearWantRunning { /* fire-and-forget; fence is one-shot regardless of callback */}
     return true
   }
 }

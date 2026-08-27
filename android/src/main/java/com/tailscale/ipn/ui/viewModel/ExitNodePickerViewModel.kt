@@ -23,7 +23,6 @@ import java.util.TreeMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class ExitNodePickerNav(
@@ -85,51 +84,56 @@ class ExitNodePickerViewModel(
     viewModelScope.launch {
       val desiredStore = desiredExitModeStore()
       val desiredModeFlow = desiredStore?.mode ?: MutableStateFlow<DesiredExitMode?>(null)
-      combine(netmapFlow, prefsFlow, accessState, desiredModeFlow) { netmap, prefs, accessState, desiredMode ->
-        val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
-        val isDesiredAuto = desiredMode is DesiredExitMode.Auto
-        val autoExitNodeEnabled = prefs?.AutoExitNode == "any" || isDesiredAuto
-        val effectiveExitNodeId =
-            if (autoExitNodeEnabled) exitNodeId?.takeUnless { it == "auto:any" } else exitNodeId
-        autoExitNode.set(
-            AutoExitNode(
-                selected = autoExitNodeEnabled,
-                effectiveExitNodeID = effectiveExitNodeId,
-            ))
-        anyActive.set(autoExitNodeEnabled)
-        netmap?.Peers?.let { peers ->
-          val allNodes =
-              peers
-                  .filter { it.isExitNode }
-                  .map {
-                    ExitNode(
-                        id = it.StableID,
-                        label = it.displayName,
-                        online = MutableStateFlow(it.Online ?: false),
-                        selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
-                        mullvad = it.isMullvadNode,
-                        priority = it.Hostinfo.Location?.Priority ?: 0,
-                        countryCode = it.Hostinfo.Location?.CountryCode ?: "",
-                        country = it.Hostinfo.Location?.Country ?: "",
-                        city = it.Hostinfo.Location?.City ?: "",
-                    )
-                  }
+      combine(netmapFlow, prefsFlow, accessState, desiredModeFlow) {
+              netmap,
+              prefs,
+              accessState,
+              desiredMode ->
+            val exitNodeId = prefs?.activeExitNodeID ?: prefs?.selectedExitNodeID
+            val isDesiredAuto = desiredMode is DesiredExitMode.Auto
+            val autoExitNodeEnabled = prefs?.AutoExitNode == "any" || isDesiredAuto
+            val effectiveExitNodeId =
+                if (autoExitNodeEnabled) exitNodeId?.takeUnless { it == "auto:any" } else exitNodeId
+            autoExitNode.set(
+                AutoExitNode(
+                    selected = autoExitNodeEnabled,
+                    effectiveExitNodeID = effectiveExitNodeId,
+                ))
+            anyActive.set(autoExitNodeEnabled)
+            netmap?.Peers?.let { peers ->
+              val allNodes =
+                  peers
+                      .filter { it.isExitNode }
+                      .map {
+                        ExitNode(
+                            id = it.StableID,
+                            label = it.displayName,
+                            online = MutableStateFlow(it.Online ?: false),
+                            selected = !autoExitNodeEnabled && it.StableID == exitNodeId,
+                            mullvad = it.isMullvadNode,
+                            priority = it.Hostinfo.Location?.Priority ?: 0,
+                            countryCode = it.Hostinfo.Location?.CountryCode ?: "",
+                            country = it.Hostinfo.Location?.Country ?: "",
+                            city = it.Hostinfo.Location?.City ?: "",
+                        )
+                      }
 
-          val allowedExitNodeIds =
-              (accessState as? AccessState.Active)?.allowedExitNodeIds.orEmpty()
-          val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
-          tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
+              val allowedExitNodeIds =
+                  (accessState as? AccessState.Active)?.allowedExitNodeIds.orEmpty()
+              val tailnetNodes = allNodes.filter { !it.mullvad && it.id in allowedExitNodeIds }
+              tailnetExitNodes.set(tailnetNodes.sortedWith { a, b -> a.label.compareTo(b.label) })
 
-          val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
-          autoExitNode.set(
-              AutoExitNode(
-                  selected = autoExitNodeEnabled,
-                  effectiveExitNodeID = effectiveExitNodeId,
-                  effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
-              ))
-          anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
-        }
-      }.collect {}
+              val effectiveNode = allNodes.find { it.id == effectiveExitNodeId }
+              autoExitNode.set(
+                  AutoExitNode(
+                      selected = autoExitNodeEnabled,
+                      effectiveExitNodeID = effectiveExitNodeId,
+                      effectiveNodeLabel = effectiveNode?.city?.ifEmpty { effectiveNode.label },
+                  ))
+              anyActive.set(autoExitNodeEnabled || allNodes.any { it.selected })
+            }
+          }
+          .collect {}
     }
   }
 
@@ -155,7 +159,8 @@ class ExitNodePickerViewModel(
       if (result.isSuccess) {
         when (mutation) {
           is ExitNodeMutation.Auto -> desiredExitModeStore()?.set(DesiredExitMode.Auto)
-          is ExitNodeMutation.Manual -> desiredExitModeStore()?.set(DesiredExitMode.Manual(mutation.nodeId))
+          is ExitNodeMutation.Manual ->
+              desiredExitModeStore()?.set(DesiredExitMode.Manual(mutation.nodeId))
           is ExitNodeMutation.Clear -> desiredExitModeStore()?.clear()
         }
         nav.onNavigateBackHome()

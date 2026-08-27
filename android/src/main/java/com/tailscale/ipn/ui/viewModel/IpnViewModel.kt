@@ -5,12 +5,12 @@ package com.tailscale.ipn.ui.viewModel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.App
-import com.tailscale.ipn.product.policy.ExitNodeMutation
-import com.tailscale.ipn.product.policy.DesiredExitMode
-import com.tailscale.ipn.product.ProductConfig
+import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.mdm.MDMSettings
+import com.tailscale.ipn.product.ProductConfig
+import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
@@ -112,7 +112,9 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
             val autoExitNodeEnabled =
                 validPrefs.AutoExitNode == "any" ||
-                    runCatching { App.get().desiredExitModeStore.mode.value is DesiredExitMode.Auto }
+                    runCatching {
+                          App.get().desiredExitModeStore.mode.value is DesiredExitMode.Auto
+                        }
                         .getOrDefault(false)
             val chosenExitNodeId =
                 (validPrefs.activeExitNodeID?.takeUnless { it == "auto:any" })
@@ -120,39 +122,47 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
             val exitNodePeer =
                 chosenExitNodeId?.let { id -> validNetmap.Peers?.find { it.StableID == id } }
 
-            when {
-              exitNodePeer?.Online == false -> {
-                if (MDMSettings.exitNodeID.flow.value.value != null) {
-                  NodeState.OFFLINE_MDM
-                } else if (validPrefs.activeExitNodeID != null) {
-                  NodeState.OFFLINE_ENABLED
-                } else {
-                  NodeState.OFFLINE_DISABLED
+            val computedState =
+                when {
+                  exitNodePeer?.Online == false -> {
+                    if (MDMSettings.exitNodeID.flow.value.value != null) {
+                      NodeState.OFFLINE_MDM
+                    } else if (validPrefs.activeExitNodeID != null) {
+                      NodeState.OFFLINE_ENABLED
+                    } else {
+                      NodeState.OFFLINE_DISABLED
+                    }
+                  }
+                  exitNodePeer != null -> {
+                    if (!validPrefs.activeExitNodeID.isNullOrEmpty() &&
+                        validPrefs.activeExitNodeID != "auto:any") {
+                      NodeState.ACTIVE_AND_RUNNING
+                    } else {
+                      NodeState.ACTIVE_NOT_RUNNING
+                    }
+                  }
+                  autoExitNodeEnabled -> NodeState.AUTO_PENDING
+                  isRunningExitNode == true -> NodeState.RUNNING_AS_EXIT_NODE
+                  else -> NodeState.NONE
                 }
-              }
-              exitNodePeer != null -> {
-                if (!validPrefs.activeExitNodeID.isNullOrEmpty() &&
-                    validPrefs.activeExitNodeID != "auto:any") {
-                  NodeState.ACTIVE_AND_RUNNING
-                } else {
-                  NodeState.ACTIVE_NOT_RUNNING
-                }
-              }
-              autoExitNodeEnabled -> NodeState.AUTO_PENDING
-              isRunningExitNode == true -> NodeState.RUNNING_AS_EXIT_NODE
-              else -> NodeState.NONE
-            }
-          }.collect { nodeState -> _nodeState.value = nodeState }
+            TSLog.d(
+                TAG,
+                "nodeState computed: $computedState (active=${validPrefs.activeExitNodeID}, selected=${validPrefs.selectedExitNodeID}, auto=${validPrefs.AutoExitNode}, isRunningExitNode=$isRunningExitNode)")
+            computedState
+          }
+          .collect { nodeState -> _nodeState.value = nodeState }
     }
     TSLog.d(TAG, "Created")
   }
 
   // VPN Control
   fun startVPN() {
+    TSLog.d(TAG, "startVPN() invoked")
     UninitializedApp.get().startVPN()
   }
 
   fun stopVPN() {
+    TSLog.d(TAG, "stopVPN() invoked")
     UninitializedApp.get().stopVPN()
   }
 
@@ -176,6 +186,9 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       authKey: String? = null,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
+    val authKeyRedacted =
+        if (authKey != null) "${authKey.take(4)}...${authKey.takeLast(4)}" else "null"
+    TSLog.d(TAG, "login() starting: authKey=$authKeyRedacted maskedPrefs=$maskedPrefs")
     // Start the IPNService foreground notification so that Android
     // does not freeze the process or cut network access while the user is in the browser
     // completing auth. The foreground service transitions to a full VPN service later when
@@ -191,33 +204,45 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
     // in flight when it is canceled. Instead, set WantRunning=true on the Prefs returned by
     // editPrefs() and pass
     // it via start()'s UpdatePrefs, which resets the control client first.
+    finalMaskedPrefs.WantRunning = false
     if (authKey != null) {
       finalMaskedPrefs.LoggedOut = false
     }
-
     client.editPrefs(finalMaskedPrefs) { editResult ->
       editResult
           .onFailure {
-            TSLog.e(TAG, "editPrefs() failed: ${it.message}")
+            TSLog.e(TAG, "login: editPrefs() failed: ${it.message}", it)
             completionHandler(Result.failure(it))
           }
           .onSuccess {
+            TSLog.d(TAG, "login: editPrefs() succeeded")
             it.WantRunning = true
             val opts = Ipn.Options(UpdatePrefs = it, AuthKey = authKey)
             client.start(opts) { startResult ->
               startResult
                   .onFailure {
-                    TSLog.e(TAG, "start() failed: ${it.message}")
+                    TSLog.e(TAG, "login: start() failed: ${it.message}", it)
                     completionHandler(Result.failure(it))
                   }
                   .onSuccess {
-                    client.startLoginInteractive { loginResult ->
-                      loginResult
-                          .onFailure {
-                            TSLog.e(TAG, "startLoginInteractive() failed: ${it.message}")
-                            completionHandler(Result.failure(it))
-                          }
-                          .onSuccess { completionHandler(Result.success(Unit)) }
+                    if (authKey == null) {
+                      TSLog.d(TAG, "login: start() succeeded, starting login interactive")
+                      client.startLoginInteractive { loginResult ->
+                        loginResult
+                            .onFailure {
+                              TSLog.e(
+                                  TAG, "login: startLoginInteractive() failed: ${it.message}", it)
+                              completionHandler(Result.failure(it))
+                            }
+                            .onSuccess {
+                              TSLog.d(TAG, "login: startLoginInteractive() succeeded")
+                              completionHandler(Result.success(Unit))
+                            }
+                      }
+                    } else {
+                      TSLog.d(
+                          TAG, "login: start() succeeded with authKey; skipping interactive login")
+                      completionHandler(Result.success(Unit))
                     }
                   }
             }
@@ -230,13 +255,16 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       controlURL: String? = ProductConfig.headscaleControlUrl,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
+    val authKeyRedacted =
+        if (authKey.isNotBlank()) "${authKey.take(4)}...${authKey.takeLast(4)}" else "empty"
+    TSLog.d(TAG, "loginWithAuthKey() called: controlURL=$controlURL authKey=$authKeyRedacted")
     val prefs = Ipn.MaskedPrefs()
-    prefs.WantRunning = true
+    prefs.WantRunning = false
     prefs.AutoExitNode = "any"
+    prefs.LoggedOut = false
     if (!controlURL.isNullOrBlank()) {
       prefs.ControlURL = controlURL
     }
-    runCatching { App.get().desiredExitModeStore.set(DesiredExitMode.Auto) }
     login(prefs, authKey = authKey, completionHandler)
   }
 
@@ -244,6 +272,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       controlURL: String,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
+    TSLog.d(TAG, "loginWithCustomControlURL() called: controlURL=$controlURL")
     val prefs = Ipn.MaskedPrefs()
     prefs.ControlURL = controlURL
     login(prefs, completionHandler = completionHandler)
@@ -276,6 +305,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   }
 
   fun switchProfile(profile: IpnLocal.LoginProfile, completionHandler: (Result<String>) -> Unit) {
+    TSLog.d(TAG, "switchProfile() called for profile=${profile.LocalUserID}")
     val switchProfile = {
       Client(viewModelScope).switchProfile(profile) {
         startVPN()
@@ -290,6 +320,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   }
 
   fun addProfile(completionHandler: (Result<String>) -> Unit) {
+    TSLog.d(TAG, "addProfile() called")
     Client(viewModelScope).addProfile {
       if (it.isSuccess) {
         login()
@@ -300,6 +331,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   }
 
   fun deleteProfile(profile: IpnLocal.LoginProfile, completionHandler: (Result<String>) -> Unit) {
+    TSLog.d(TAG, "deleteProfile() called for profile=${profile.LocalUserID}")
     Client(viewModelScope).deleteProfile(profile) {
       viewModelScope.launch { loadUserProfiles() }
       completionHandler(it)
@@ -314,8 +346,9 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       val desiredMode = runCatching { App.get().desiredExitModeStore.mode.value }.getOrNull()
       val autoEnabled = prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto
       val mutation =
-          if (autoEnabled && (prefs.activeExitNodeID == "auto:any" || prefs.activeExitNodeID == null)) {
-            ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
+          if (autoEnabled) {
+            // Auto exit node is currently active or pending — toggle turns it off.
+            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
           } else if (prefs.activeExitNodeID != null) {
             // We have an active concrete exit node so we should keep it, but disable it.
             ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
@@ -326,20 +359,23 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
           } else {
             ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
           }
-      if (mutation != null) {
-        App.get().mutateExitNodePrefs(mutation)
-            .onSuccess {
-              runCatching {
-                when (mutation) {
-                  is ExitNodeMutation.Auto -> App.get().desiredExitModeStore.set(DesiredExitMode.Auto)
-                  is ExitNodeMutation.Manual ->
-                      App.get().desiredExitModeStore.set(DesiredExitMode.Manual(mutation.nodeId))
-                  is ExitNodeMutation.Clear -> App.get().desiredExitModeStore.clear()
-                }
+      TSLog.d(
+          TAG,
+          "toggleExitNode() invoked: desiredMode=$desiredMode autoEnabled=$autoEnabled active=${prefs.activeExitNodeID} selected=${prefs.selectedExitNodeID} mutation=$mutation")
+      App.get()
+          .mutateExitNodePrefs(mutation)
+          .onSuccess {
+            TSLog.d(TAG, "toggleExitNode: mutation applied successfully ($mutation)")
+            runCatching {
+              when (mutation) {
+                is ExitNodeMutation.Auto -> App.get().desiredExitModeStore.set(DesiredExitMode.Auto)
+                is ExitNodeMutation.Manual ->
+                    App.get().desiredExitModeStore.set(DesiredExitMode.Manual(mutation.nodeId))
+                is ExitNodeMutation.Clear -> App.get().desiredExitModeStore.clear()
               }
             }
-            .onFailure { TSLog.e(TAG, "toggleExitNode failed: ${it.message}") }
-      }
+          }
+          .onFailure { TSLog.e(TAG, "toggleExitNode failed: ${it.message}", it) }
       LoadingIndicator.stop()
     }
   }

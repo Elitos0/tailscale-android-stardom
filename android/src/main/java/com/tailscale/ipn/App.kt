@@ -32,15 +32,14 @@ import com.tailscale.ipn.product.StardomProcessStartVpnFence
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.product.policy.AccessRepository
-import com.tailscale.ipn.product.policy.EncryptedAccessPolicyCacheStore
-import com.tailscale.ipn.product.policy.SharedPreferencesDesiredExitModeStore
-import com.tailscale.ipn.product.policy.VpnStopReason
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.AllowedSuggestedExitNodePolicyController
+import com.tailscale.ipn.product.policy.EncryptedAccessPolicyCacheStore
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.product.policy.ExitNodePreferenceWriter
 import com.tailscale.ipn.product.policy.PolicyAwareAutoExitNodeFallbackController
 import com.tailscale.ipn.product.policy.SerializedVpnWantRunningWriter
+import com.tailscale.ipn.product.policy.SharedPreferencesDesiredExitModeStore
 import com.tailscale.ipn.product.policy.StardomSyspolicyBridge
 import com.tailscale.ipn.product.policy.SyspolicyStringArrayJSONBridge
 import com.tailscale.ipn.product.policy.VpnEntitlementController
@@ -50,6 +49,7 @@ import com.tailscale.ipn.product.policy.VpnStartDispatchBoundary
 import com.tailscale.ipn.product.policy.VpnStartDispatchResult
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.product.policy.VpnStopCommandDispatcher
+import com.tailscale.ipn.product.policy.VpnStopReason
 import com.tailscale.ipn.product.policy.VpnWantRunningPersistence
 import com.tailscale.ipn.product.startStardomProductObservers
 import com.tailscale.ipn.ui.localapi.Client
@@ -349,7 +349,9 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             },
             clearDisallowedExitNode = { complete ->
               applicationScope.launch {
-                complete(vpnEntitlementController.stopThenClearExitNode(VpnStopReason.ExitNodeDisallowed))
+                complete(
+                    vpnEntitlementController.stopThenClearExitNode(
+                        VpnStopReason.ExitNodeDisallowed))
               }
             },
             onCallbackError = { operation, error ->

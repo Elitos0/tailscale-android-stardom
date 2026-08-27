@@ -9,7 +9,6 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.util.TSLog
-import net.openid.appauth.AuthorizationException
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +18,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.openid.appauth.AuthorizationException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -38,9 +38,10 @@ class AccessRepository(
   val state: StateFlow<AccessState> = _state.asStateFlow()
 
   init {
-    cacheStore?.read()?.takeIf { it.validUntilEpochMillis > nowMillis() }?.let { cached ->
-      _state.value = AccessState.Active(cached.allowedExitNodeIds)
-    }
+    cacheStore
+        ?.read()
+        ?.takeIf { it.validUntilEpochMillis > nowMillis() }
+        ?.let { cached -> _state.value = AccessState.Active(cached.allowedExitNodeIds) }
   }
 
   fun load(token: String): AccessState {
@@ -62,7 +63,8 @@ class AccessRepository(
                   onSuccess = { token ->
                     val result = withContext(Dispatchers.IO) { policyApiClient.load(token) }
                     if (result == PolicyLoadResult.Unauthorized) {
-                      TSLog.e("AuthLifecycle", "policy refresh unauthorized; reauthentication required")
+                      TSLog.e(
+                          "AuthLifecycle", "policy refresh unauthorized; reauthentication required")
                       authSessionRepository.requireReauthentication()
                     }
                     resolve(result)

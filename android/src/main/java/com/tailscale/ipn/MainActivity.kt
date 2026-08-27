@@ -58,13 +58,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
-import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.StardomProductionRoutes
 import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
-import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.product.policy.PolicyApiClient
-import kotlinx.coroutines.withContext
+import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -111,6 +109,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
   private lateinit var navController: NavHostController

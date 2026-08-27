@@ -372,22 +372,22 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                   headlineContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                       Text(
-                              when (nodeState) {
-                                NodeState.NONE ->
-                                    if (autoExitNodeEnabled) {
-                                      stringResource(id = R.string.auto_exit_node)
-                                    } else {
-                                      stringResource(id = R.string.none)
-                                    }
-                                NodeState.RUNNING_AS_EXIT_NODE ->
-                                    stringResource(id = R.string.running_exit_node)
-                                else ->
-                                    if (autoExitNodeEnabled) {
-                                      stringResource(id = R.string.auto_exit_node)
-                                    } else {
-                                      name ?: ""
-                                    }
-                              },
+                          when (nodeState) {
+                            NodeState.NONE ->
+                                if (autoExitNodeEnabled) {
+                                  stringResource(id = R.string.auto_exit_node)
+                                } else {
+                                  stringResource(id = R.string.none)
+                                }
+                            NodeState.RUNNING_AS_EXIT_NODE ->
+                                stringResource(id = R.string.running_exit_node)
+                            else ->
+                                if (autoExitNodeEnabled) {
+                                  stringResource(id = R.string.auto_exit_node)
+                                } else {
+                                  name ?: ""
+                                }
+                          },
                           style = MaterialTheme.typography.bodyMedium,
                           maxLines = 1,
                           overflow = TextOverflow.Ellipsis)
@@ -405,7 +405,8 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                     if (autoExitNodeEnabled && nodeState != NodeState.RUNNING_AS_EXIT_NODE) {
                       if (name != null || effectiveExitNodeId != null) {
                         Text(
-                            stringResource(R.string.auto_exit_node_effective, name ?: effectiveExitNodeId!!),
+                            stringResource(
+                                R.string.auto_exit_node_effective, name ?: effectiveExitNodeId!!),
                             style = MaterialTheme.typography.bodyMedium)
                       } else if (nodeState == NodeState.AUTO_PENDING) {
                         Text(
@@ -424,7 +425,7 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                                 NodeState.OFFLINE_MDM -> MaterialTheme.colorScheme.errorButton
                                 NodeState.RUNNING_AS_EXIT_NODE ->
                                     MaterialTheme.colorScheme.warningButton
-                                NodeState.ACTIVE_NOT_RUNNING, NodeState.AUTO_PENDING ->
+                                NodeState.ACTIVE_NOT_RUNNING ->
                                     MaterialTheme.colorScheme.exitNodeToggleButton
                                 else -> MaterialTheme.colorScheme.secondaryButton
                               },
@@ -436,9 +437,10 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                             Text(
                                 when (nodeState) {
                                   NodeState.OFFLINE_DISABLED -> stringResource(id = R.string.enable)
-                                  NodeState.ACTIVE_NOT_RUNNING, NodeState.AUTO_PENDING ->
+                                  NodeState.ACTIVE_NOT_RUNNING ->
                                       stringResource(id = R.string.enable)
-                                  NodeState.RUNNING_AS_EXIT_NODE -> stringResource(id = R.string.stop)
+                                  NodeState.RUNNING_AS_EXIT_NODE ->
+                                      stringResource(id = R.string.stop)
                                   else -> stringResource(id = R.string.disable)
                                 })
                           }

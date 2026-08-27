@@ -42,4 +42,24 @@ class IpnAutoExitNodeTest {
     assertEquals("any", copied.AutoExitNode)
     assertEquals(true, copied.AutoExitNodeSet)
   }
+
+  @Test
+  fun encodesMaskedPrefsForAuthKeyLoginWithoutEarlyWantRunning() {
+    val prefs =
+        Ipn.MaskedPrefs().apply {
+          WantRunning = false
+          AutoExitNode = "any"
+          LoggedOut = false
+          ControlURL = "https://headscale.example.com"
+        }
+    val encoded = Json.encodeToString(prefs).let(Json::parseToJsonElement).jsonObject
+
+    assertEquals("false", encoded.getValue("WantRunning").jsonPrimitive.content)
+    assertEquals("true", encoded.getValue("WantRunningSet").jsonPrimitive.content)
+    assertEquals("false", encoded.getValue("LoggedOut").jsonPrimitive.content)
+    assertEquals("true", encoded.getValue("LoggedOutSet").jsonPrimitive.content)
+    assertEquals("any", encoded.getValue("AutoExitNode").jsonPrimitive.content)
+    assertEquals(
+        "https://headscale.example.com", encoded.getValue("ControlURL").jsonPrimitive.content)
+  }
 }

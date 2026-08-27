@@ -9,6 +9,7 @@ import androidx.annotation.NonNull;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
+import com.tailscale.ipn.util.TSLog;
 /**
  * A worker that exists to support IPNReceiver.
  */
@@ -23,7 +24,14 @@ public final class StopVPNWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
-        UninitializedApp.get().stopVPN();
-        return Result.success();
+        TSLog.d("VpnLifecycle", "StopVPNWorker.doWork executing");
+        try {
+            UninitializedApp.get().stopVPN();
+            TSLog.d("VpnLifecycle", "StopVPNWorker.doWork stopVPN completed successfully");
+            return Result.success();
+        } catch (Exception e) {
+            TSLog.e("VpnLifecycle", "StopVPNWorker.doWork stopVPN failed: " + e.getMessage(), e);
+            return Result.failure();
+        }
     }
 }
