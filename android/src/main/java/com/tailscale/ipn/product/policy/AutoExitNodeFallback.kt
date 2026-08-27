@@ -10,6 +10,7 @@ import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.Tailcfg
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
+import com.tailscale.ipn.util.TSLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -108,20 +109,31 @@ class PolicyAwareAutoExitNodeFallbackController(
 
   fun start(scope: CoroutineScope) {
     if (!started.compareAndSet(false, true)) return
-    val authAndAccess = combine(authentikState, accessState) { auth, access -> auth to access }
-    val managed =
-        combine(mdmAllowedSuggestedExitNodes, mdmForcedExitNodeId) { allowed, forced ->
-          ManagedSettings(allowed, forced)
-        }
-    val prefsAndNetmap =
-        combine(prefs, netmap) { currentPrefs, currentNetmap -> currentPrefs to currentNetmap }
     scope.launch {
-      combine(authAndAccess, managed, prefsAndNetmap, runtimeSnapshot) {
-              (auth, access),
-              currentManaged,
-              (currentPrefs, currentNetmap),
-              currentRuntime ->
-            Inputs(auth, access, currentManaged, currentPrefs, currentNetmap, currentRuntime)
+      combine(
+              listOf(
+                  authentikState,
+                  accessState,
+                  mdmAllowedSuggestedExitNodes,
+                  mdmForcedExitNodeId,
+                  prefs,
+                  netmap,
+                  runtimeSnapshot,
+              )
+          ) { values ->
+            @Suppress("UNCHECKED_CAST")
+            Inputs(
+                authentik = values[0] as AuthentikState,
+                access = values[1] as AccessState,
+                managed =
+                    ManagedSettings(
+                        allowed = values[2] as SettingState<List<String>?>,
+                        forced = values[3] as SettingState<String?>,
+                    ),
+                prefs = values[4] as Ipn.Prefs?,
+                netmap = values[5] as Netmap.NetworkMap?,
+                runtime = values[6] as VpnRuntimeSnapshot,
+            )
           }
           .collect { process(scope, it) }
     }
@@ -133,6 +145,9 @@ class PolicyAwareAutoExitNodeFallbackController(
       synchronized(lock) { lastActionKey = null }
       return
     }
+    TSLog.d(
+        "AutoExitFallback",
+        "operation=decision desired=auto prefs=${inputs.prefs != null} netmap=${inputs.netmap != null} effective=${inputs.prefs?.activeExitNodeID ?: "none"} decision=$decision runtime=${inputs.runtime.state} generation=${inputs.runtime.generation}")
     val actionKey = actionKey(inputs, decision)
     synchronized(lock) {
       if (lastActionKey == actionKey) return

@@ -218,14 +218,16 @@ class MainViewModel(
       try {
         val currentState = Notifier.state.value
 
+        TSLog.d(
+            "VpnLifecycle",
+            "toggle requested desired=$desiredState state=$currentState active=${isVpnActive.value}")
         if (desiredState) {
-          // User wants to turn ON the VPN
-          when {
-            currentState != Ipn.State.Running -> requestVpnPermissionIfAuthorized()
-          }
+          // A stale backend Running state can survive service teardown/re-authentication. The
+          // interface state is the source of truth for whether a new start is needed.
+          if (currentState != Ipn.State.Running || !isVpnActive.value) requestVpnPermissionIfAuthorized()
         } else {
-          // User wants to turn OFF the VPN
           if (currentState != Ipn.State.Stopped && currentState != Ipn.State.NoState) {
+            TSLog.d("VpnLifecycle", "toggle stop requested state=$currentState active=${isVpnActive.value}")
             stopVPN()
           }
         }

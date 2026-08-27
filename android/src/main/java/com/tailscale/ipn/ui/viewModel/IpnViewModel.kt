@@ -56,6 +56,8 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
     ACTIVE_AND_RUNNING,
     // Last selected exit node is active but is not being used.
     ACTIVE_NOT_RUNNING,
+    // Native Auto is enabled but has not resolved a concrete exit node yet.
+    AUTO_PENDING,
     // Last selected exit node is currently offline.
     OFFLINE_ENABLED,
     // Last selected exit node has been de-selected and is currently offline.
@@ -108,7 +110,13 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
             val validPrefs = prefs ?: return@combine NodeState.NONE
             val validNetmap = netmap ?: return@combine NodeState.NONE
 
-            val chosenExitNodeId = validPrefs.activeExitNodeID ?: validPrefs.selectedExitNodeID
+            val autoExitNodeEnabled =
+                validPrefs.AutoExitNode == "any" ||
+                    runCatching { App.get().desiredExitModeStore.mode.value is DesiredExitMode.Auto }
+                        .getOrDefault(false)
+            val chosenExitNodeId =
+                (validPrefs.activeExitNodeID?.takeUnless { it == "auto:any" })
+                    ?: validPrefs.selectedExitNodeID
             val exitNodePeer =
                 chosenExitNodeId?.let { id -> validNetmap.Peers?.find { it.StableID == id } }
 
@@ -123,21 +131,18 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
                 }
               }
               exitNodePeer != null -> {
-                if (!validPrefs.activeExitNodeID.isNullOrEmpty()) {
+                if (!validPrefs.activeExitNodeID.isNullOrEmpty() &&
+                    validPrefs.activeExitNodeID != "auto:any") {
                   NodeState.ACTIVE_AND_RUNNING
                 } else {
                   NodeState.ACTIVE_NOT_RUNNING
                 }
               }
-              isRunningExitNode == true -> {
-                NodeState.RUNNING_AS_EXIT_NODE
-              }
-              else -> {
-                NodeState.NONE
-              }
+              autoExitNodeEnabled -> NodeState.AUTO_PENDING
+              isRunningExitNode == true -> NodeState.RUNNING_AS_EXIT_NODE
+              else -> NodeState.NONE
             }
-          }
-          .collect { nodeState -> _nodeState.value = nodeState }
+          }.collect { nodeState -> _nodeState.value = nodeState }
     }
     TSLog.d(TAG, "Created")
   }
@@ -245,10 +250,11 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   }
 
   fun logout(completionHandler: (Result<String>) -> Unit = {}) {
+    TSLog.d("AuthLifecycle", "logout requested")
     Client(viewModelScope).logout { result ->
       result
-          .onSuccess { TSLog.d(TAG, "Logout started: $it") }
-          .onFailure { TSLog.e(TAG, "Error starting logout: ${it.message}") }
+          .onSuccess { TSLog.d("AuthLifecycle", "logout started") }
+          .onFailure { TSLog.e("AuthLifecycle", "logout request failed: ${it.message}", it) }
       completionHandler(result)
     }
   }
@@ -304,18 +310,16 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
   fun toggleExitNode() {
     val prefs = prefs.value ?: return
-
-    LoadingIndicator.start()
     viewModelScope.launch {
       val desiredMode = runCatching { App.get().desiredExitModeStore.mode.value }.getOrNull()
+      val autoEnabled = prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto
       val mutation =
-          if (prefs.activeExitNodeID != null) {
-            // We have an active exit node so we should keep it, but disable it
-            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
-          } else if (prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto) {
+          if (autoEnabled && (prefs.activeExitNodeID == "auto:any" || prefs.activeExitNodeID == null)) {
             ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
+          } else if (prefs.activeExitNodeID != null) {
+            // We have an active concrete exit node so we should keep it, but disable it.
+            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
           } else if (prefs.selectedExitNodeID != null) {
-            // We have a prior exit node to enable
             ExitNodeMutation.Manual(prefs.selectedExitNodeID!!, prefs.ExitNodeAllowLANAccess)
           } else if (desiredMode is DesiredExitMode.Manual) {
             ExitNodeMutation.Manual(desiredMode.nodeId, prefs.ExitNodeAllowLANAccess)

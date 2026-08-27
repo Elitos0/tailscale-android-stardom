@@ -8,6 +8,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.auth.AuthSessionRepository
+import com.tailscale.ipn.util.TSLog
 import net.openid.appauth.AuthorizationException
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -61,11 +62,13 @@ class AccessRepository(
                   onSuccess = { token ->
                     val result = withContext(Dispatchers.IO) { policyApiClient.load(token) }
                     if (result == PolicyLoadResult.Unauthorized) {
+                      TSLog.e("AuthLifecycle", "policy refresh unauthorized; reauthentication required")
                       authSessionRepository.requireReauthentication()
                     }
                     resolve(result)
                   },
                   onFailure = {
+                    TSLog.e("AuthLifecycle", "policy refresh failed: ${it.message}", it)
                     // Invalid credentials must drop cache; transport errors keep last-valid.
                     val isAuthRevoked =
                         it.message == "Signed out" ||

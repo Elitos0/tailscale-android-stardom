@@ -60,7 +60,11 @@ object TSLog {
   class LibtailscaleWrapper {
     public fun sendLog(tag: String?, message: String) {
       val logTag = tag ?: ""
-      Libtailscale.sendLog((logTag + ": " + message).toByteArray(Charsets.UTF_8))
+      try {
+        Libtailscale.sendLog((logTag + ": " + message).toByteArray(Charsets.UTF_8))
+      } catch (_: Throwable) {
+        // Ignored in unit test environments where native libtailscale is unavailable
+      }
     }
   }
 }

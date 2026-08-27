@@ -349,6 +349,7 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                       when (nodeState) {
                         NodeState.ACTIVE_AND_RUNNING -> MaterialTheme.colorScheme.primaryListItem
                         NodeState.ACTIVE_NOT_RUNNING -> MaterialTheme.colorScheme.listItem
+                        NodeState.AUTO_PENDING -> MaterialTheme.colorScheme.listItem
                         NodeState.RUNNING_AS_EXIT_NODE -> MaterialTheme.colorScheme.warningListItem
                         NodeState.OFFLINE_ENABLED -> MaterialTheme.colorScheme.errorListItem
                         NodeState.OFFLINE_DISABLED -> MaterialTheme.colorScheme.errorListItem
@@ -371,7 +372,6 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                   headlineContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                       Text(
-                          text =
                               when (nodeState) {
                                 NodeState.NONE ->
                                     if (autoExitNodeEnabled) {
@@ -403,9 +403,13 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                   },
                   supportingContent = {
                     if (autoExitNodeEnabled && nodeState != NodeState.RUNNING_AS_EXIT_NODE) {
-                      (name ?: effectiveExitNodeId)?.let { effectiveNode ->
+                      if (name != null || effectiveExitNodeId != null) {
                         Text(
-                            stringResource(R.string.auto_exit_node_effective, effectiveNode),
+                            stringResource(R.string.auto_exit_node_effective, name ?: effectiveExitNodeId!!),
+                            style = MaterialTheme.typography.bodyMedium)
+                      } else if (nodeState == NodeState.AUTO_PENDING) {
+                        Text(
+                            stringResource(R.string.auto_exit_node_connecting),
                             style = MaterialTheme.typography.bodyMedium)
                       }
                     }
@@ -420,7 +424,7 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                                 NodeState.OFFLINE_MDM -> MaterialTheme.colorScheme.errorButton
                                 NodeState.RUNNING_AS_EXIT_NODE ->
                                     MaterialTheme.colorScheme.warningButton
-                                NodeState.ACTIVE_NOT_RUNNING ->
+                                NodeState.ACTIVE_NOT_RUNNING, NodeState.AUTO_PENDING ->
                                     MaterialTheme.colorScheme.exitNodeToggleButton
                                 else -> MaterialTheme.colorScheme.secondaryButton
                               },
@@ -432,10 +436,9 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                             Text(
                                 when (nodeState) {
                                   NodeState.OFFLINE_DISABLED -> stringResource(id = R.string.enable)
-                                  NodeState.ACTIVE_NOT_RUNNING ->
+                                  NodeState.ACTIVE_NOT_RUNNING, NodeState.AUTO_PENDING ->
                                       stringResource(id = R.string.enable)
-                                  NodeState.RUNNING_AS_EXIT_NODE ->
-                                      stringResource(id = R.string.stop)
+                                  NodeState.RUNNING_AS_EXIT_NODE -> stringResource(id = R.string.stop)
                                   else -> stringResource(id = R.string.disable)
                                 })
                           }

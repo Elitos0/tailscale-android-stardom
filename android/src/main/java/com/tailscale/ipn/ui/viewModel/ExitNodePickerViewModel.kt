@@ -18,6 +18,7 @@ import com.tailscale.ipn.ui.model.StableNodeID
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.util.LoadingIndicator
 import com.tailscale.ipn.ui.util.set
+import com.tailscale.ipn.util.TSLog
 import java.util.TreeMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -145,6 +146,9 @@ class ExitNodePickerViewModel(
   }
 
   private fun setExitNodePrefs(mutation: ExitNodeMutation) {
+    TSLog.d(
+        "ExitNodePicker",
+        "operation=mutate desired=${mutation::class.simpleName} prefs=${prefsFlow.value != null} netmap=${netmapFlow.value != null} selected=${prefsFlow.value?.selectedExitNodeID != null} effective=${prefsFlow.value?.activeExitNodeID ?: "none"}")
     LoadingIndicator.start()
     viewModelScope.launch {
       val result = mutationBoundary().mutateExitNode(mutation)
@@ -155,6 +159,11 @@ class ExitNodePickerViewModel(
           is ExitNodeMutation.Clear -> desiredExitModeStore()?.clear()
         }
         nav.onNavigateBackHome()
+      } else {
+        TSLog.e(
+            "ExitNodePicker",
+            "operation=mutate desired=${mutation::class.simpleName} failed=${result.exceptionOrNull()?.message}",
+            result.exceptionOrNull())
       }
       LoadingIndicator.stop()
     }

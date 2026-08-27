@@ -3,6 +3,7 @@
 
 package com.tailscale.ipn.product.policy
 
+import com.tailscale.ipn.util.TSLog
 import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
 import java.time.Duration
@@ -567,8 +568,10 @@ class VpnEntitlementController(
     if (active && runtime.state.value == VpnRuntimeState.Idle) {
       resetRevocationGuard()
     } else if (!active && runtime.state.value.isStartingOrRunning()) {
+      TSLog.e("VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}; revoking")
       revokeOnce()
     }
+    if (!active) TSLog.e("VpnLifecycle", "VPN start denied origin=$origin state=${runtime.state.value}")
     return active
   }
 

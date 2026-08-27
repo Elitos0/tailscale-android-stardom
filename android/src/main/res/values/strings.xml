@@ -7,6 +7,7 @@
     <string name="none">None</string>
     <string name="auto_exit_node">Auto</string>
     <string name="auto_exit_node_effective">Currently using %1$s</string>
+    <string name="auto_exit_node_connecting">Connecting to an exit node...</string>
     <string name="connect">Connect</string>
     <string name="vpn_access_active">VPN access active</string>
     <string name="vpn_access_disabled">VPN access is disabled</string>

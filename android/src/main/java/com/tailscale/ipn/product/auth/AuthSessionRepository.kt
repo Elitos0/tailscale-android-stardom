@@ -24,6 +24,7 @@ import net.openid.appauth.ResponseTypeValues
 import net.openid.appauth.TokenResponse
 import org.json.JSONObject
 
+import com.tailscale.ipn.util.TSLog
 private const val AUTH_STATE_KEY = "auth_state"
 private const val AUTH_PENDING_TRANSACTION_KEY = "pending_authorization_transaction"
 private const val AUTH_FIXED_HEADSCALE_CONTINUATION_KEY = "fixed_headscale_continuation"
@@ -148,6 +149,7 @@ class AuthSessionRepository(
     get() = synchronized(sessionLock) { !authState.isAuthorized }
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
+    TSLog.d("AuthLifecycle", "authorization started")
     val (generation, previous) =
         synchronized(sessionLock) {
           sessionGeneration += 1
@@ -162,6 +164,7 @@ class AuthSessionRepository(
 
     appAuth.discover { configuration, exception ->
       if (configuration == null) {
+        TSLog.e("AuthLifecycle", "authorization discovery failed", exception)
         completeAuthorization(
             generation,
             Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")),
@@ -177,7 +180,6 @@ class AuthSessionRepository(
       }
     }
   }
-
   fun handleAuthorizationIntent(
       context: Context,
       intent: Intent,
@@ -256,6 +258,7 @@ class AuthSessionRepository(
           if (!authState.isAuthorized) null else sessionGeneration to authState
         }
     if (captured == null) {
+      TSLog.e("AuthLifecycle", "token refresh rejected: signed out")
       onResult(Result.failure(IllegalStateException("Signed out")))
       return
     }
@@ -266,8 +269,10 @@ class AuthSessionRepository(
       val result =
           synchronized(sessionLock) {
             if (generation != sessionGeneration) {
+              TSLog.e("AuthLifecycle", "token refresh rejected: stale session generation")
               Result.failure(authSessionChanged())
             } else if (exception != null || accessToken.isNullOrBlank()) {
+              TSLog.e("AuthLifecycle", "token refresh failed: ${exception?.message ?: "empty token"}", exception)
               if (isInvalidOrRevokedCredential(exception)) {
                 pendingCompletion = clearSessionLocked(AuthentikState.ReauthenticationRequired)
                 appAuth.dispose()

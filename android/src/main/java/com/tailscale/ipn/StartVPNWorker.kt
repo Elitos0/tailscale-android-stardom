@@ -21,15 +21,22 @@ class StartVPNWorker(appContext: Context, workerParams: WorkerParameters) :
     CoroutineWorker(appContext, workerParams) {
   override suspend fun doWork(): Result {
     val app = App.get()
-    if (app.isAbleToStartVPN() && VpnService.prepare(app) == null) {
-      when (app.startVPNIfAuthorized(VpnStartOrigin.InternalWorker)) {
+    val prepared = VpnService.prepare(app) == null
+    val ableToStart = app.isAbleToStartVPN()
+    TSLog.d("VpnLifecycle", "worker start ableToStart=$ableToStart prepared=$prepared")
+    if (ableToStart && prepared) {
+      when (val dispatch = app.startVPNIfAuthorized(VpnStartOrigin.InternalWorker)) {
         VpnStartDispatchResult.Dispatched -> return Result.success()
-        VpnStartDispatchResult.Denied -> Unit
-        is VpnStartDispatchResult.Failed -> Unit
+        VpnStartDispatchResult.Denied ->
+            TSLog.e("VpnLifecycle", "worker start denied by entitlement")
+        is VpnStartDispatchResult.Failed ->
+            TSLog.e("VpnLifecycle", "worker start dispatch failed: ${dispatch.error.message}", dispatch.error)
       }
+    } else {
+      TSLog.e("VpnLifecycle", "worker start unavailable ableToStart=$ableToStart prepared=$prepared")
     }
 
-    TSLog.e("StartVPNWorker", "Stardom isn't authorized to start the VPN; notify the user.")
+    TSLog.e("StartVPNWorker", "VPN start failed; user interaction required")
     val notificationManager =
         app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val channelId = "start_vpn_channel"
