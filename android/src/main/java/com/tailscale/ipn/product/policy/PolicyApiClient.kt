@@ -147,20 +147,14 @@ class PolicyApiClient(
       if (statusCode == HttpURLConnection.HTTP_OK) {
         val bodyText = connection.inputStream.bufferedReader().use { it.readText() }
         val authKey = JSON.decodeFromString<NodeAuthKeyResponse>(bodyText).authKey
-        val redactedAuthKey =
-            if (authKey.length > 8) "${authKey.take(4)}...${authKey.takeLast(4)}" else "***"
         TSLog.d(
             TAG,
-            "PolicyApiClient.fetchNodeAuthKey response: status=$statusCode duration=${duration}ms body=${bodyText.take(300)} parsedAuthKey=$redactedAuthKey")
+            "PolicyApiClient.fetchNodeAuthKey response: status=$statusCode duration=${duration}ms fields=[authKey] keyLength=${authKey.length}")
         Result.success(authKey)
       } else {
-        val bodyPreview =
-            runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }
-                .getOrNull()
-                .orEmpty()
         TSLog.e(
             TAG,
-            "PolicyApiClient.fetchNodeAuthKey response error: status=$statusCode duration=${duration}ms body=${bodyPreview.take(300)}")
+            "PolicyApiClient.fetchNodeAuthKey response error: status=$statusCode duration=${duration}ms")
         Result.failure(IllegalStateException("Policy API returned $statusCode"))
       }
     } catch (e: Exception) {

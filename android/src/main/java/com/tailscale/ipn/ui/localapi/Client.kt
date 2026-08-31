@@ -65,22 +65,22 @@ typealias PingResultHandler = (Result<IpnState.PingResult>) -> Unit
  * Client provides a mechanism for calling Go's LocalAPIClient. Every LocalAPI endpoint has a
  * corresponding method on this Client.
  */
-class Client(private val scope: CoroutineScope) {
+open class Client(private val scope: CoroutineScope) {
   private val TAG = Client::class.simpleName
 
   // Access libtailscale.Application lazily
   private val app: libtailscale.Application by lazy { App.get().getLibtailscaleApp() }
 
-  fun start(options: Ipn.Options, responseHandler: (Result<Unit>) -> Unit) {
+  open fun start(options: Ipn.Options, responseHandler: (Result<Unit>) -> Unit) {
     val body = Json.encodeToString(options).toByteArray()
     return post(Endpoint.START, body, responseHandler = responseHandler)
   }
 
-  fun status(responseHandler: StatusResponseHandler) {
+  open fun status(responseHandler: StatusResponseHandler) {
     get(Endpoint.STATUS, responseHandler = responseHandler)
   }
 
-  fun ping(peer: Tailcfg.Node, responseHandler: PingResultHandler) {
+  open fun ping(peer: Tailcfg.Node, responseHandler: PingResultHandler) {
     val ip = peer.primaryIPv4Address.orEmpty()
     if (ip.isEmpty()) {
       responseHandler(Result.failure(Exception("No IP address for peer $peer")))
@@ -91,63 +91,63 @@ class Client(private val scope: CoroutineScope) {
     post(path, timeoutMillis = 2000L, responseHandler = responseHandler)
   }
 
-  fun bugReportId(responseHandler: BugReportIdHandler) {
+  open fun bugReportId(responseHandler: BugReportIdHandler) {
     post(Endpoint.BUG_REPORT, responseHandler = responseHandler)
   }
 
-  fun prefs(responseHandler: PrefsHandler) {
+  open fun prefs(responseHandler: PrefsHandler) {
     get(Endpoint.PREFS, responseHandler = responseHandler)
   }
 
-  fun editPrefs(prefs: Ipn.MaskedPrefs, responseHandler: (Result<Ipn.Prefs>) -> Unit) {
+  open fun editPrefs(prefs: Ipn.MaskedPrefs, responseHandler: (Result<Ipn.Prefs>) -> Unit) {
     val body = Json.encodeToString(prefs).toByteArray()
     return patch(Endpoint.PREFS, body, responseHandler = responseHandler)
   }
 
-  fun setUseExitNode(use: Boolean, responseHandler: (Result<Ipn.Prefs>) -> Unit) {
+  open fun setUseExitNode(use: Boolean, responseHandler: (Result<Ipn.Prefs>) -> Unit) {
     val path = "${Endpoint.ENABLE_EXIT_NODE}?enabled=$use"
     return post(path, responseHandler = responseHandler)
   }
 
-  fun profiles(responseHandler: (Result<List<IpnLocal.LoginProfile>>) -> Unit) {
+  open fun profiles(responseHandler: (Result<List<IpnLocal.LoginProfile>>) -> Unit) {
     get(Endpoint.PROFILES, responseHandler = responseHandler)
   }
 
-  fun currentProfile(responseHandler: (Result<IpnLocal.LoginProfile>) -> Unit) {
+  open fun currentProfile(responseHandler: (Result<IpnLocal.LoginProfile>) -> Unit) {
     return get(Endpoint.PROFILES_CURRENT, responseHandler = responseHandler)
   }
 
-  fun addProfile(responseHandler: (Result<String>) -> Unit = {}) {
+  open fun addProfile(responseHandler: (Result<String>) -> Unit = {}) {
     return put(Endpoint.PROFILES, responseHandler = responseHandler)
   }
 
-  fun deleteProfile(
+  open fun deleteProfile(
       profile: IpnLocal.LoginProfile,
       responseHandler: (Result<String>) -> Unit = {}
   ) {
     return delete(Endpoint.PROFILES + profile.ID, responseHandler = responseHandler)
   }
 
-  fun switchProfile(
+  open fun switchProfile(
       profile: IpnLocal.LoginProfile,
       responseHandler: (Result<String>) -> Unit = {}
   ) {
     return post(Endpoint.PROFILES + profile.ID, responseHandler = responseHandler)
   }
 
-  fun startLoginInteractive(responseHandler: (Result<Unit>) -> Unit) {
+  open fun startLoginInteractive(responseHandler: (Result<Unit>) -> Unit) {
     return post(Endpoint.LOGIN_INTERACTIVE, responseHandler = responseHandler)
   }
 
-  fun logout(responseHandler: (Result<String>) -> Unit) {
+  open fun logout(responseHandler: (Result<String>) -> Unit) {
     return post(Endpoint.LOGOUT, responseHandler = responseHandler)
   }
 
-  fun tailnetLockStatus(responseHandler: TailnetLockStatusResponseHandler) {
+  open fun tailnetLockStatus(responseHandler: TailnetLockStatusResponseHandler) {
     get(Endpoint.TKA_STATUS, responseHandler = responseHandler)
   }
 
-  fun fileTargets(responseHandler: (Result<List<Ipn.FileTarget>>) -> Unit) {
+  open fun fileTargets(responseHandler: (Result<List<Ipn.FileTarget>>) -> Unit) {
     get(Endpoint.FILE_TARGETS, responseHandler = responseHandler)
   }
 

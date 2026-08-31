@@ -21,6 +21,7 @@ import com.tailscale.ipn.ui.util.AdvertisedRoutesHelper
 import com.tailscale.ipn.ui.util.LoadingIndicator
 import com.tailscale.ipn.ui.util.set
 import com.tailscale.ipn.util.TSLog
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -30,7 +31,13 @@ import kotlinx.coroutines.launch
  * Base model for most models in this application. Provides common facilities for watching IPN
  * notifications, managing login/logout, updating preferences, etc.
  */
-open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewModel() {
+open class IpnViewModel(
+    private val observeUserProfiles: Boolean = true,
+    private val clientProvider: (CoroutineScope) -> Client = { Client(it) },
+    private val foregroundServiceLauncher: () -> Unit = {
+      runCatching { UninitializedApp.get().startForegroundForLogin() }
+    },
+) : ViewModel() {
   protected val TAG = this::class.simpleName
 
   val loggedInUser: StateFlow<IpnLocal.LoginProfile?> = MutableStateFlow(null)
@@ -186,15 +193,14 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       authKey: String? = null,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
-    val authKeyRedacted =
-        if (authKey != null) "${authKey.take(4)}...${authKey.takeLast(4)}" else "null"
-    TSLog.d(TAG, "login() starting: authKey=$authKeyRedacted maskedPrefs=$maskedPrefs")
+    val authKeyLog = if (authKey != null) "provided(len=${authKey.length})" else "null"
+    TSLog.d(TAG, "login() starting: authKey=$authKeyLog maskedPrefs=$maskedPrefs")
     // Start the IPNService foreground notification so that Android
     // does not freeze the process or cut network access while the user is in the browser
     // completing auth. The foreground service transitions to a full VPN service later when
     // startVPN() is called after the backend reaches Running state.
-    UninitializedApp.get().startForegroundForLogin()
-    val client = Client(viewModelScope)
+    foregroundServiceLauncher()
+    val client = clientProvider(viewModelScope)
 
     val finalMaskedPrefs = maskedPrefs?.deepCopy() ?: Ipn.MaskedPrefs()
     // Don't set WantRunning=true here. Setting it in editPrefs() triggers cc.Login(LoginDefault)
@@ -255,9 +261,8 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       controlURL: String? = ProductConfig.headscaleControlUrl,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
-    val authKeyRedacted =
-        if (authKey.isNotBlank()) "${authKey.take(4)}...${authKey.takeLast(4)}" else "empty"
-    TSLog.d(TAG, "loginWithAuthKey() called: controlURL=$controlURL authKey=$authKeyRedacted")
+    val authKeyLog = if (authKey.isNotBlank()) "provided(len=${authKey.length})" else "empty"
+    TSLog.d(TAG, "loginWithAuthKey() called: controlURL=$controlURL authKey=$authKeyLog")
     val prefs = Ipn.MaskedPrefs()
     prefs.WantRunning = false
     prefs.AutoExitNode = "any"
@@ -280,7 +285,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
   fun logout(completionHandler: (Result<String>) -> Unit = {}) {
     TSLog.d("AuthLifecycle", "logout requested")
-    Client(viewModelScope).logout { result ->
+    clientProvider(viewModelScope).logout { result ->
       result
           .onSuccess { TSLog.d("AuthLifecycle", "logout started") }
           .onFailure { TSLog.e("AuthLifecycle", "logout request failed: ${it.message}", it) }
@@ -291,13 +296,13 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   // User Profiles
 
   private fun loadUserProfiles() {
-    Client(viewModelScope).profiles { result ->
+    clientProvider(viewModelScope).profiles { result ->
       result.onSuccess(loginProfiles::set).onFailure {
         TSLog.e(TAG, "Error loading profiles: ${it.message}")
       }
     }
 
-    Client(viewModelScope).currentProfile { result ->
+    clientProvider(viewModelScope).currentProfile { result ->
       result
           .onSuccess { loggedInUser.set(if (it.isEmpty()) null else it) }
           .onFailure { TSLog.e(TAG, "Error loading current profile: ${it.message}") }
@@ -307,12 +312,13 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
   fun switchProfile(profile: IpnLocal.LoginProfile, completionHandler: (Result<String>) -> Unit) {
     TSLog.d(TAG, "switchProfile() called for profile=${profile.LocalUserID}")
     val switchProfile = {
-      Client(viewModelScope).switchProfile(profile) {
+      clientProvider(viewModelScope).switchProfile(profile) {
         startVPN()
         completionHandler(it)
       }
     }
-    Client(viewModelScope).editPrefs(Ipn.MaskedPrefs().apply { WantRunning = false }) { result ->
+    clientProvider(viewModelScope).editPrefs(Ipn.MaskedPrefs().apply { WantRunning = false }) {
+        result ->
       result
           .onSuccess { switchProfile() }
           .onFailure { TSLog.e(TAG, "Error setting wantRunning to false: ${it.message}") }
@@ -321,7 +327,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
   fun addProfile(completionHandler: (Result<String>) -> Unit) {
     TSLog.d(TAG, "addProfile() called")
-    Client(viewModelScope).addProfile {
+    clientProvider(viewModelScope).addProfile {
       if (it.isSuccess) {
         login()
       }
@@ -332,7 +338,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
 
   fun deleteProfile(profile: IpnLocal.LoginProfile, completionHandler: (Result<String>) -> Unit) {
     TSLog.d(TAG, "deleteProfile() called for profile=${profile.LocalUserID}")
-    Client(viewModelScope).deleteProfile(profile) {
+    clientProvider(viewModelScope).deleteProfile(profile) {
       viewModelScope.launch { loadUserProfiles() }
       completionHandler(it)
     }
@@ -389,7 +395,7 @@ open class IpnViewModel(private val observeUserProfiles: Boolean = true) : ViewM
       } else {
         newPrefs = removeAllZeroRoutes(currentPrefs)
       }
-      Client(viewModelScope).editPrefs(newPrefs) { result ->
+      clientProvider(viewModelScope).editPrefs(newPrefs) { result ->
         LoadingIndicator.stop()
         TSLog.d("RunExitNodeViewModel", "Edited prefs: $result")
       }

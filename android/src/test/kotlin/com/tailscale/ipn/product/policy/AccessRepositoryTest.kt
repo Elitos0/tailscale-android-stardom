@@ -352,6 +352,39 @@ class AccessRepositoryTest {
     val result = client.fetchNodeAuthKey("token")
     assertTrue(result.isFailure)
   }
+
+  @Test
+  fun fetchNodeAuthKeyDoesNotLogPlaintextAuthKey() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = com.tailscale.ipn.util.TSLog.libtailscaleWrapper
+    com.tailscale.ipn.util.TSLog.libtailscaleWrapper =
+        mock<com.tailscale.ipn.util.TSLog.LibtailscaleWrapper>().also {
+          org.mockito.Mockito.`when`(
+                  it.sendLog(
+                      org.mockito.ArgumentMatchers.anyString(),
+                      org.mockito.ArgumentMatchers.anyString()))
+              .thenAnswer { invocation ->
+                val msg = invocation.getArgument<String>(1)
+                loggedMessages.add(msg)
+                null
+              }
+        }
+    try {
+      val secretKey = "hskey-auth-super-secret-preauth-key-987654321"
+      val client =
+          PolicyApiClient(
+              connectionFactory = { FakeHttpURLConnection(200, "{\"authKey\":\"$secretKey\"}") })
+      val result = client.fetchNodeAuthKey("valid-bearer-token-123456789")
+      assertTrue(result.isSuccess)
+      assertEquals(secretKey, result.getOrNull())
+      for (msg in loggedMessages) {
+        assertFalse(
+            "Log message should not contain plaintext authKey: $msg", msg.contains(secretKey))
+      }
+    } finally {
+      com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
+    }
+  }
 }
 
 private fun repository(status: Int, body: String = ""): AccessRepository {
