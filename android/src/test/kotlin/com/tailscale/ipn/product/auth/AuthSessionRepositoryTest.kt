@@ -639,6 +639,150 @@ class AuthSessionRepositoryTest {
       TSLog.libtailscaleWrapper = originalLog
     }
   }
+
+  @Test
+  fun formatSafeDiscoveryDiagnosticsOutputsStructuredMetadataWithoutSecrets() {
+    val secretQuery = "secret_auth_code=abc12345&client_secret=topsecret"
+    val secretFrag = "secret_fragment_payload"
+    val rawUri = mock<Uri>()
+    whenever(rawUri.host).thenReturn("auth.example.com")
+    whenever(rawUri.path).thenReturn("/oauth2/v1/keys")
+    whenever(rawUri.toString())
+        .thenReturn("https://auth.example.com/oauth2/v1/keys?$secretQuery#$secretFrag")
+    val exception =
+        AuthorizationException(
+            AuthorizationException.TYPE_GENERAL_ERROR,
+            AuthorizationException.GeneralErrors.NETWORK_ERROR.code,
+            "network_error",
+            "Failed to reach discovery endpoint",
+            rawUri,
+            null)
+
+    val diagnostics = formatSafeDiscoveryDiagnostics(null, exception)
+
+    assertTrue(diagnostics.contains("configurationNull=true"))
+    assertTrue(diagnostics.contains("exceptionType=${AuthorizationException.TYPE_GENERAL_ERROR}"))
+    assertTrue(
+        diagnostics.contains(
+            "errorCode=${AuthorizationException.GeneralErrors.NETWORK_ERROR.code}"))
+    assertTrue(diagnostics.contains("oauthError=network_error"))
+    assertTrue(diagnostics.contains("errorDescription=Failed to reach discovery endpoint"))
+    assertTrue(diagnostics.contains("errorUriHost=auth.example.com"))
+    assertTrue(diagnostics.contains("errorUriPath=/oauth2/v1/keys"))
+    assertTrue(diagnostics.contains("errorUri=auth.example.com/oauth2/v1/keys"))
+    assertFalse(diagnostics.contains(secretQuery))
+    assertFalse(diagnostics.contains("abc12345"))
+    assertFalse(diagnostics.contains("topsecret"))
+    assertFalse(diagnostics.contains(secretFrag))
+  }
+
+  @Test
+  fun discoveryFailureLogsSafeMetadataAndLeavesSessionRetryable() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = TSLog.libtailscaleWrapper
+    TSLog.libtailscaleWrapper =
+        mock<LibtailscaleWrapper>().also {
+          whenever(it.sendLog(anyString(), anyString())).thenAnswer { invocation ->
+            val msg = invocation.getArgument<String>(1)
+            loggedMessages.add(msg)
+            null
+          }
+        }
+    try {
+      val rawUri = mock<Uri>()
+      whenever(rawUri.host).thenReturn("auth.example.com")
+      whenever(rawUri.path).thenReturn("/application/o/authorize/")
+      val exception =
+          AuthorizationException(
+              AuthorizationException.TYPE_GENERAL_ERROR,
+              AuthorizationException.GeneralErrors.NETWORK_ERROR.code,
+              "network_error",
+              "Unable to connect to discovery server",
+              rawUri,
+              null)
+      val gateway = FakeAppAuthGateway(discoveryException = exception)
+      val completion = mutableListOf<Result<Unit>>()
+      val repository =
+          AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+
+      repository.startAuthorization(context, completion::add)
+
+      assertEquals(1, completion.size)
+      assertTrue(completion.single().isFailure)
+      assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+
+      val discoverLog = loggedMessages.firstOrNull { it.contains("OIDC discover failed") }
+      assertNotNull("Expected OIDC discover failed log", discoverLog)
+      assertTrue(discoverLog!!.contains("configurationNull=true"))
+      assertTrue(discoverLog.contains("exceptionType=${AuthorizationException.TYPE_GENERAL_ERROR}"))
+      assertTrue(
+          discoverLog.contains(
+              "errorCode=${AuthorizationException.GeneralErrors.NETWORK_ERROR.code}"))
+      assertTrue(discoverLog.contains("oauthError=network_error"))
+      assertTrue(discoverLog.contains("errorDescription=Unable to connect to discovery server"))
+      assertTrue(discoverLog.contains("errorUriHost=auth.example.com"))
+      assertTrue(discoverLog.contains("errorUriPath=/application/o/authorize/"))
+
+      // Preserves retryability
+      val secondCompletion = mutableListOf<Result<Unit>>()
+      repository.startAuthorization(context, secondCompletion::add)
+      assertEquals(1, secondCompletion.size)
+      assertTrue(secondCompletion.single().isFailure)
+      assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+    } finally {
+      TSLog.libtailscaleWrapper = originalLog
+    }
+  }
+
+  @Test
+  fun realAppAuthGatewayDiscoverLogsStructuredFailureOnNullConfigOrException() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = TSLog.libtailscaleWrapper
+    TSLog.libtailscaleWrapper =
+        mock<LibtailscaleWrapper>().also {
+          whenever(it.sendLog(anyString(), anyString())).thenAnswer { invocation ->
+            val msg = invocation.getArgument<String>(1)
+            loggedMessages.add(msg)
+            null
+          }
+        }
+    try {
+      val rawUri = mock<Uri>()
+      whenever(rawUri.host).thenReturn("auth.stardom.net")
+      whenever(rawUri.path).thenReturn("/.well-known/openid-configuration")
+      val exception =
+          AuthorizationException(
+              AuthorizationException.TYPE_GENERAL_ERROR,
+              AuthorizationException.GeneralErrors.SERVER_ERROR.code,
+              "server_error",
+              "502 Bad Gateway",
+              rawUri,
+              null)
+      val gateway =
+          RealAppAuthGateway(
+              issuerUri = rawUri, fetchConfiguration = { _, callback -> callback(null, exception) })
+
+      var callbackInvoked = false
+      gateway.discover { config, ex ->
+        assertNull(config)
+        assertEquals(exception, ex)
+        callbackInvoked = true
+      }
+
+      assertTrue(callbackInvoked)
+      val gatewayLog = loggedMessages.firstOrNull { it.contains("OIDC gateway discover failed") }
+      assertNotNull("Expected gateway discover failure log", gatewayLog)
+      assertTrue(gatewayLog!!.contains("configurationNull=true"))
+      assertTrue(
+          gatewayLog.contains(
+              "errorCode=${AuthorizationException.GeneralErrors.SERVER_ERROR.code}"))
+      assertTrue(gatewayLog.contains("oauthError=server_error"))
+      assertTrue(gatewayLog.contains("errorDescription=502 Bad Gateway"))
+      assertTrue(gatewayLog.contains("errorUriHost=auth.stardom.net"))
+    } finally {
+      TSLog.libtailscaleWrapper = originalLog
+    }
+  }
 }
 
 private fun callbackIntent(action: String): Intent =

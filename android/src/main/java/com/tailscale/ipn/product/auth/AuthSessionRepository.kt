@@ -169,7 +169,7 @@ class AuthSessionRepository(
       if (configuration == null) {
         TSLog.e(
             "AuthLifecycle",
-            "OIDC discover failed: error=${exception?.javaClass?.simpleName ?: "unknown"}")
+            "OIDC discover failed: " + formatSafeDiscoveryDiagnostics(configuration, exception))
         completeAuthorization(
             generation,
             Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")),
@@ -431,6 +431,29 @@ class AuthSessionRepository(
       if (state.isAuthorized) AuthentikState.Authorized else AuthentikState.SignedOut
 }
 
+internal fun formatSafeDiscoveryDiagnostics(
+    configuration: AuthorizationServiceConfiguration?,
+    exception: AuthorizationException?,
+): String {
+  val errorUri = exception?.errorUri
+  val errorUriHost = errorUri?.host?.ifEmpty { null }
+  val errorUriPath = errorUri?.path?.ifEmpty { null }
+  val errorUriFormatted =
+      if (errorUriHost != null || errorUriPath != null) {
+        "${errorUriHost.orEmpty()}${errorUriPath.orEmpty()}"
+      } else {
+        null
+      }
+  return "configurationNull=${configuration == null}" +
+      " exceptionType=${exception?.type}" +
+      " errorCode=${exception?.code}" +
+      " oauthError=${exception?.error}" +
+      " errorDescription=${exception?.errorDescription}" +
+      " errorUriHost=${errorUriHost}" +
+      " errorUriPath=${errorUriPath}" +
+      " errorUri=${errorUriFormatted}"
+}
+
 private class PersistedAuthSessionState(override val appAuthState: AuthState) : AuthSessionState {
   override val isAuthorized: Boolean
     get() = appAuthState.isAuthorized
@@ -520,14 +543,28 @@ private fun responseMatchesPendingRequest(
       request.additionalParameters == pending.additionalParameters
 }
 
-private class RealAppAuthGateway : AppAuthGateway {
+internal class RealAppAuthGateway(
+    private val issuerUri: Uri = Uri.parse(ProductConfig.authentikIssuerUrl),
+    private val fetchConfiguration:
+        (Uri, (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit) -> Unit =
+        { uri, callback ->
+          AuthorizationServiceConfiguration.fetchFromIssuer(uri, callback)
+        },
+) : AppAuthGateway {
   private var authorizationService: AuthorizationService? = null
 
   override fun discover(
       callback: (AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit
   ) {
-    AuthorizationServiceConfiguration.fetchFromIssuer(
-        Uri.parse(ProductConfig.authentikIssuerUrl), callback)
+    fetchConfiguration(issuerUri) { configuration, exception ->
+      if (configuration == null || exception != null) {
+        TSLog.e(
+            "AuthLifecycle",
+            "OIDC gateway discover failed: " +
+                formatSafeDiscoveryDiagnostics(configuration, exception))
+      }
+      callback(configuration, exception)
+    }
   }
 
   override fun createAuthorizationRequest(

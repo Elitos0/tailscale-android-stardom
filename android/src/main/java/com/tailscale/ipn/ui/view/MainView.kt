@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -252,6 +253,9 @@ fun resolveStardomVpnState(
   }
 }
 
+internal fun isPowerControlEnabled(connectionStage: ConnectionStage): Boolean =
+    connectionStage != ConnectionStage.SignIn && connectionStage != ConnectionStage.AccessDisabled
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainView(
@@ -383,6 +387,8 @@ fun MainView(
             isStub = isStub)
       }
 
+  val isPowerControlEnabled = isPowerControlEnabled(connectionStage)
+
   val onPowerToggle: () -> Unit = {
     when {
       stardomVpnState.isConnected -> {
@@ -395,14 +401,16 @@ fun MainView(
         if (connectionStage == ConnectionStage.AccessUnavailable) {
           refreshAccess()
         } else if (connectionStage == ConnectionStage.SignIn) {
-          navigation.onNavigateStardomLogin()
+          /* Power control remains unavailable/disabled while unauthenticated */
         } else {
           viewModel.toggleVpn(desiredState = true)
         }
       }
       else -> {
         when (connectionStage) {
-          ConnectionStage.SignIn -> navigation.onNavigateStardomLogin()
+          ConnectionStage.SignIn -> {
+            /* Power control remains unavailable/disabled while unauthenticated */
+          }
           ConnectionStage.RequestVpnPermission ->
               viewModel.showVPNPermissionLauncherIfUnauthorized()
           ConnectionStage.AccessUnavailable -> refreshAccess()
@@ -442,6 +450,7 @@ fun MainView(
                       StardomOrbitControl(
                           vpnState = stardomVpnState,
                           onClick = onPowerToggle,
+                          enabled = isPowerControlEnabled,
                           language = selectedLanguage,
                           modifier = Modifier.fillMaxWidth())
 
@@ -805,11 +814,12 @@ fun ConnectView(
               contentAlignment = Alignment.Center,
               modifier =
                   Modifier.fillMaxWidth()
+                      .testTag("login_button")
                       .background(StardomColors.Selected)
                       .clickable(onClickLabel = "Log In") { loginAction() }
                       .padding(vertical = 10.dp)) {
                 Text(
-                    text = "LOG IN VIA AUTHENTIK ❯",
+                    text = "SIGN IN ❯",
                     color = StardomColors.Background,
                     fontFamily = SpaceGrotesk,
                     fontWeight = FontWeight.Bold,

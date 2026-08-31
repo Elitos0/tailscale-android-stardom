@@ -52,6 +52,7 @@ fun StardomOrbitControl(
     vpnState: VpnState,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     language: AppLanguage = AppLanguage.RU
 ) {
   val connected = vpnState.isConnected
@@ -223,7 +224,7 @@ fun StardomOrbitControl(
                 .background(StardomColors.Panel)
                 .border(width = 1.dp, color = buttonBorderColor)
                 .testTag("vpn_power_button")
-                .clickable(onClickLabel = "VPN power toggle") { onClick() },
+                .clickable(enabled = enabled, onClickLabel = "VPN power toggle") { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
           Icon(

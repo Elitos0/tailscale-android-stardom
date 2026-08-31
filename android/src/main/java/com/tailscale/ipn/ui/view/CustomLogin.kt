@@ -192,7 +192,7 @@ fun LoginWithCustomControlURLView(
                                             }
                                             .padding(vertical = 14.dp)) {
                                       Text(
-                                          text = "AUTHENTICATE VIA AUTHENTIK ❯",
+                                          text = "SIGN IN ❯",
                                           color = StardomColors.Background,
                                           fontSize = 11.sp,
                                           fontWeight = FontWeight.Bold,

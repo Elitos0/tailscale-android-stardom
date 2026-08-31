@@ -223,4 +223,19 @@ class MainViewTest {
       assertTrue(server.loadPercent in 1..100)
     }
   }
+
+  // --- Power Control Enabled State Tests ---
+
+  @Test
+  fun powerControlDisabledWhenUnauthenticatedOrAccessDisabled() {
+    assertFalse(isPowerControlEnabled(ConnectionStage.SignIn))
+    assertFalse(isPowerControlEnabled(ConnectionStage.AccessDisabled))
+  }
+
+  @Test
+  fun powerControlEnabledWhenConnectOrPermissionOrUnavailable() {
+    assertTrue(isPowerControlEnabled(ConnectionStage.Connect))
+    assertTrue(isPowerControlEnabled(ConnectionStage.RequestVpnPermission))
+    assertTrue(isPowerControlEnabled(ConnectionStage.AccessUnavailable))
+  }
 }
