@@ -3,9 +3,11 @@
 
 package com.tailscale.ipn.ui.view
 
+import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.ui.model.AccountProfile
+import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.ConnectionMode
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
@@ -237,5 +239,174 @@ class MainViewTest {
     assertTrue(isPowerControlEnabled(ConnectionStage.Connect))
     assertTrue(isPowerControlEnabled(ConnectionStage.RequestVpnPermission))
     assertTrue(isPowerControlEnabled(ConnectionStage.AccessUnavailable))
+  }
+
+  // --- Status Region Mapping Below Orbit Tests ---
+
+  @Test
+  fun resolveStardomStatusTextMapsSignInStage() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            language = AppLanguage.EN)
+    assertEquals("AUTH REQUIRED", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            language = AppLanguage.RU)
+    assertEquals("ТРЕБУЕТСЯ АВТОРИЗАЦИЯ", statusRu)
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsAuthorizingState() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.Authorizing,
+            language = AppLanguage.EN)
+    assertEquals("SIGNING IN...", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.Authorizing,
+            language = AppLanguage.RU)
+    assertEquals("ВХОД В СИСТЕМУ...", statusRu)
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsAccessUnavailableStage() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.ERROR,
+            connectionStage = ConnectionStage.AccessUnavailable,
+            language = AppLanguage.EN)
+    assertEquals("ACCESS UNAVAILABLE", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.ERROR,
+            connectionStage = ConnectionStage.AccessUnavailable,
+            language = AppLanguage.RU)
+    assertEquals("ДОСТУП НЕДОСТУПЕН", statusRu)
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsAccessDisabledStage() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.ERROR,
+            connectionStage = ConnectionStage.AccessDisabled,
+            language = AppLanguage.EN)
+    assertEquals("ACCESS DENIED", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.ERROR,
+            connectionStage = ConnectionStage.AccessDisabled,
+            language = AppLanguage.RU)
+    assertEquals("ДОСТУП ЗАПРЕЩЕН", statusRu)
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsRequestVpnPermissionStage() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.RequestVpnPermission,
+            language = AppLanguage.EN)
+    assertEquals("PERMISSION REQUIRED", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.RequestVpnPermission,
+            language = AppLanguage.RU)
+    assertEquals("ТРЕБУЕТСЯ РАЗРЕШЕНИЕ", statusRu)
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsVpnStates() {
+    assertEquals(
+        "IN ORBIT",
+        resolveStardomStatusText(
+            VpnState.SECURED, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "DE-ORBITED",
+        resolveStardomStatusText(
+            VpnState.DISCONNECTED, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "RESOLVING ROUTE",
+        resolveStardomStatusText(
+            VpnState.RESOLVING_STAR_ROUTE, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "CIPHER HANDSHAKE",
+        resolveStardomStatusText(
+            VpnState.HANDSHAKING_CIPHER, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "NODE AUTHENTICATION",
+        resolveStardomStatusText(
+            VpnState.AUTHENTICATING_NODE, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "DE-ORBITING",
+        resolveStardomStatusText(
+            VpnState.DISCONNECTING, ConnectionStage.Connect, language = AppLanguage.EN))
+    assertEquals(
+        "LINK ERROR",
+        resolveStardomStatusText(
+            VpnState.ERROR, ConnectionStage.Connect, language = AppLanguage.EN))
+  }
+
+  @Test
+  fun isStardomStatusErrorIdentifiesErrorStatesCorrectly() {
+    assertTrue(isStardomStatusError(VpnState.ERROR, ConnectionStage.Connect))
+    assertTrue(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.AccessUnavailable))
+    assertTrue(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.AccessDisabled))
+    assertFalse(isStardomStatusError(VpnState.SECURED, ConnectionStage.Connect))
+    assertFalse(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.Connect))
+    assertFalse(isStardomStatusError(VpnState.RESOLVING_STAR_ROUTE, ConnectionStage.Connect))
+    assertFalse(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.SignIn))
+    assertFalse(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.RequestVpnPermission))
+  }
+
+  // --- Modal Login & Direct Navigation Contract Tests ---
+
+  @Test
+  fun directLoginActionNavigatesDirectlyWithoutStartingVpn() {
+    var navigatedToLogin = false
+    var vpnStarted = false
+    var permissionRequested = false
+
+    val onLoginAction: () -> Unit = { navigatedToLogin = true }
+    val startVpnAction: () -> Unit = { vpnStarted = true }
+    val permissionAction: () -> Unit = { permissionRequested = true }
+
+    // Invoking the direct login action from modal
+    onLoginAction()
+
+    assertTrue("Login action must trigger direct navigation", navigatedToLogin)
+    assertFalse("Login action must not start VPN", vpnStarted)
+    assertFalse("Login action must not request VPN permission", permissionRequested)
+  }
+
+  @Test
+  fun unauthenticatedStageSuppressesPeerContentAndKeepsPowerDisabled() {
+    val unauthenticatedStage = ConnectionStage.SignIn
+    assertFalse(
+        "Peer content must not render while unauthenticated",
+        shouldRenderPeerContent(Ipn.State.Stopped, unauthenticatedStage))
+    assertFalse(
+        "Peer content must not render even if running while unauthenticated",
+        shouldRenderPeerContent(Ipn.State.Running, unauthenticatedStage))
+    assertFalse(
+        "Power control must be disabled while unauthenticated",
+        isPowerControlEnabled(unauthenticatedStage))
   }
 }

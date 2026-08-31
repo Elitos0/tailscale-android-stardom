@@ -52,8 +52,7 @@ fun StardomSettingsSheet(
     selectedLanguage: AppLanguage,
     onSelectLanguage: (AppLanguage) -> Unit,
     sheetState: SheetState,
-    onDismiss: () -> Unit,
-    onNavigateToAdvancedSettings: (() -> Unit)? = null
+    onDismiss: () -> Unit
 ) {
   var killSwitchEnabled by remember { mutableStateOf(true) }
   var dnsLeakGuardEnabled by remember { mutableStateOf(true) }
@@ -368,28 +367,6 @@ fun StardomSettingsSheet(
                         checked = autoConnectOnWifi,
                         onCheckedChange = { autoConnectOnWifi = it })
                   }
-
-              if (onNavigateToAdvancedSettings != null) {
-                Spacer(modifier = Modifier.height(18.dp))
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .background(StardomColors.Panel)
-                            .border(1.dp, StardomColors.Border)
-                            .clickable(onClickLabel = "Tailscale System Settings") {
-                              onNavigateToAdvancedSettings()
-                              onDismiss()
-                            }
-                            .padding(vertical = 12.dp)) {
-                      Text(
-                          text = "TAILSCALE SYSTEM CONFIG ❯",
-                          color = StardomColors.TextSecondary,
-                          fontSize = 10.sp,
-                          fontFamily = IbmPlexMono,
-                          letterSpacing = 1.sp)
-                    }
-              }
 
               Spacer(modifier = Modifier.height(20.dp))
             }

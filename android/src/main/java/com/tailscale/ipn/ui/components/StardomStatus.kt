@@ -23,7 +23,8 @@ import com.tailscale.ipn.ui.theme.StardomColors
 
 @Composable
 fun StardomStatus(
-    vpnState: VpnState,
+    statusText: String,
+    isError: Boolean = false,
     modifier: Modifier = Modifier,
     language: AppLanguage = AppLanguage.RU
 ) {
@@ -37,14 +38,25 @@ fun StardomStatus(
 
     Spacer(Modifier.height(6.dp))
 
-    val statusText = StardomLocalization.powerButtonStatus(vpnState, language)
-
     Text(
         text = statusText,
-        color = if (vpnState.isError) StardomColors.Error else StardomColors.TextPrimary,
+        color = if (isError) StardomColors.Error else StardomColors.TextPrimary,
         fontFamily = SpaceGrotesk,
         fontWeight = FontWeight.Medium,
         fontSize = 23.sp,
         letterSpacing = 3.5.sp)
   }
+}
+
+@Composable
+fun StardomStatus(
+    vpnState: VpnState,
+    modifier: Modifier = Modifier,
+    language: AppLanguage = AppLanguage.RU
+) {
+  StardomStatus(
+      statusText = StardomLocalization.powerButtonStatus(vpnState, language),
+      isError = vpnState.isError,
+      modifier = modifier,
+      language = language)
 }
