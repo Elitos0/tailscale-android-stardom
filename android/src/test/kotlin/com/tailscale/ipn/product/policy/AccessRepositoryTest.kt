@@ -329,6 +329,254 @@ class AccessRepositoryTest {
   }
 
   @Test
+  fun refreshDoesNotMakeNetworkRequestWhenCacheIsUnexpiredAndCooldownNotElapsed() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", currentTime + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  FakeHttpURLConnection(200, "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+                }),
+            cacheStore = cache,
+            nowMillis = { currentTime },
+        )
+
+    // First refresh: lastRefreshEpochMillis is 0, so cooldown elapsed -> performs network refresh
+    val state1 = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(emptySet()), state1)
+    assertEquals(1, httpRequests)
+
+    // Second refresh 100ms later: cache is valid (now + 5 min) and cooldown (5s) not elapsed
+    currentTime += 100
+    val state2 = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(emptySet()), state2)
+    // No additional network requests
+    assertEquals(1, httpRequests)
+  }
+
+  @Test
+  fun refreshMakesNetworkRequestWhenForced() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", currentTime + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  FakeHttpURLConnection(200, "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+                }),
+            cacheStore = cache,
+            nowMillis = { currentTime },
+        )
+
+    repository.refresh(mock(), authSessionRepository)
+    assertEquals(1, httpRequests)
+
+    // Call again 100ms later with force = true
+    currentTime += 100
+    val state = repository.refresh(mock(), authSessionRepository, force = true)
+    assertEquals(AccessState.Active(emptySet()), state)
+    assertEquals(2, httpRequests)
+  }
+
+  @Test
+  fun refreshMakesNetworkRequestWhenCooldownElapsed() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? =
+              CachedAccessPolicy("v1", currentTime + 60_000, setOf("node-a"))
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  FakeHttpURLConnection(200, "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+                }),
+            cacheStore = cache,
+            nowMillis = { currentTime },
+        )
+
+    repository.refresh(mock(), authSessionRepository)
+    assertEquals(1, httpRequests)
+
+    // Cooldown elapsed (6 seconds later)
+    currentTime += 6_000
+    val state = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(emptySet()), state)
+    assertEquals(2, httpRequests)
+  }
+
+  @Test
+  fun refreshThrottlesRapidCallsWhenCacheUnavailable() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  throw IOException("offline")
+                }),
+            nowMillis = { currentTime },
+        )
+
+    val state1 = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Unavailable, state1)
+    assertEquals(1, httpRequests)
+
+    // Rapid retry 50ms later
+    currentTime += 50
+    val state2 = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Unavailable, state2)
+    // Throttled: no new HTTP requests
+    assertEquals(1, httpRequests)
+  }
+
+  @Test
+  fun clearResetsCooldown() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  FakeHttpURLConnection(200, "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+                }),
+            nowMillis = { currentTime },
+        )
+
+    repository.refresh(mock(), authSessionRepository)
+    assertEquals(1, httpRequests)
+
+    // Clear resets state and timestamp
+    repository.clear()
+    assertEquals(AccessState.Unavailable, repository.state.value)
+
+    // Even within cooldown interval, clear allows an immediate refresh
+    currentTime += 50
+    val state = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(emptySet()), state)
+    assertEquals(2, httpRequests)
+  }
+
+  @Test
+  fun loadSetsCooldownTimestamp() = runBlocking {
+    var currentTime = 1_000_000L
+    var httpRequests = 0
+    val cache =
+        object : AccessPolicyCacheStore {
+          var policy: CachedAccessPolicy? = null
+
+          override fun read() = policy
+
+          override fun write(policy: CachedAccessPolicy) {
+            this.policy = policy
+          }
+
+          override fun clear() {
+            policy = null
+          }
+        }
+    val authSessionRepository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage("state"),
+            FakeSessionState(isAuthorized = true),
+            FakeAppAuthGateway(freshToken = "token"))
+    val repository =
+        AccessRepository(
+            PolicyApiClient(
+                connectionFactory = {
+                  httpRequests++
+                  FakeHttpURLConnection(200, "{\"access\":\"active\",\"allowedExitNodes\":[]}")
+                }),
+            cacheStore = cache,
+            nowMillis = { currentTime },
+        )
+
+    // load is called directly with token (e.g. during login)
+    val state1 = repository.load("token-123")
+    assertEquals(AccessState.Active(emptySet()), state1)
+    assertEquals(1, httpRequests)
+
+    // Immediate refresh 100ms later should be throttled using the valid cache
+    currentTime += 100
+    val state2 = repository.refresh(mock(), authSessionRepository)
+    assertEquals(AccessState.Active(emptySet()), state2)
+    assertEquals(1, httpRequests)
+  }
+
+  @Test
   fun fetchNodeAuthKeyReturnsAuthKeyOn200() {
     val client =
         PolicyApiClient(

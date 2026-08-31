@@ -19,11 +19,53 @@ import kotlinx.coroutines.withContext
 
 const val AUTH_KEY_LENGTH = 16
 
-open class CustomLoginViewModel : IpnViewModel() {
+open class CustomLoginViewModel(
+    observeUserProfiles: Boolean = true,
+    clientProvider: (kotlinx.coroutines.CoroutineScope) -> com.tailscale.ipn.ui.localapi.Client = {
+      com.tailscale.ipn.ui.localapi.Client(it)
+    },
+    foregroundServiceLauncher: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startForegroundForLogin() }
+    },
+    desiredExitModeStoreProvider: () -> com.tailscale.ipn.product.policy.DesiredExitModeStore? = {
+      runCatching { com.tailscale.ipn.App.get().desiredExitModeStore }.getOrNull()
+    },
+    vpnStarter: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startVPN() }
+    },
+) :
+    IpnViewModel(
+        observeUserProfiles = observeUserProfiles,
+        clientProvider = clientProvider,
+        foregroundServiceLauncher = foregroundServiceLauncher,
+        desiredExitModeStoreProvider = desiredExitModeStoreProvider,
+        vpnStarter = vpnStarter,
+    ) {
   val errorDialog: StateFlow<ErrorDialogType?> = MutableStateFlow(null)
 }
 
-class LoginWithAuthKeyViewModel : CustomLoginViewModel() {
+class LoginWithAuthKeyViewModel(
+    observeUserProfiles: Boolean = true,
+    clientProvider: (kotlinx.coroutines.CoroutineScope) -> com.tailscale.ipn.ui.localapi.Client = {
+      com.tailscale.ipn.ui.localapi.Client(it)
+    },
+    foregroundServiceLauncher: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startForegroundForLogin() }
+    },
+    desiredExitModeStoreProvider: () -> com.tailscale.ipn.product.policy.DesiredExitModeStore? = {
+      runCatching { com.tailscale.ipn.App.get().desiredExitModeStore }.getOrNull()
+    },
+    vpnStarter: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startVPN() }
+    },
+) :
+    CustomLoginViewModel(
+        observeUserProfiles = observeUserProfiles,
+        clientProvider = clientProvider,
+        foregroundServiceLauncher = foregroundServiceLauncher,
+        desiredExitModeStoreProvider = desiredExitModeStoreProvider,
+        vpnStarter = vpnStarter,
+    ) {
   // Sets the auth key and invokes the login flow
   fun setAuthKey(authKey: String, onSuccess: () -> Unit) {
     // The most basic of checks for auth key syntax
@@ -33,7 +75,10 @@ class LoginWithAuthKeyViewModel : CustomLoginViewModel() {
     }
     loginWithAuthKey(authKey) {
       it.onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
-      it.onSuccess { onSuccess() }
+      it.onSuccess {
+        startVPN()
+        onSuccess()
+      }
     }
   }
 }
@@ -50,7 +95,29 @@ class LoginWithCustomControlURLViewModelFactory(
 class LoginWithCustomControlURLViewModel(
     private val authSessionRepository: AuthSessionRepository,
     private val policyApiClient: PolicyApiClient = PolicyApiClient(),
-) : CustomLoginViewModel() {
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val mainDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main,
+    observeUserProfiles: Boolean = true,
+    clientProvider: (kotlinx.coroutines.CoroutineScope) -> com.tailscale.ipn.ui.localapi.Client = {
+      com.tailscale.ipn.ui.localapi.Client(it)
+    },
+    foregroundServiceLauncher: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startForegroundForLogin() }
+    },
+    desiredExitModeStoreProvider: () -> com.tailscale.ipn.product.policy.DesiredExitModeStore? = {
+      runCatching { com.tailscale.ipn.App.get().desiredExitModeStore }.getOrNull()
+    },
+    vpnStarter: () -> Unit = {
+      runCatching { com.tailscale.ipn.UninitializedApp.get().startVPN() }
+    },
+) :
+    CustomLoginViewModel(
+        observeUserProfiles = observeUserProfiles,
+        clientProvider = clientProvider,
+        foregroundServiceLauncher = foregroundServiceLauncher,
+        desiredExitModeStoreProvider = desiredExitModeStoreProvider,
+        vpnStarter = vpnStarter,
+    ) {
   // Authentik identity is established before obtaining node auth key and logging in.
   fun setControlURL(context: Context, onSuccess: () -> Unit) {
     authSessionRepository.startAuthorization(context) { authentication ->
@@ -61,9 +128,9 @@ class LoginWithCustomControlURLViewModel(
               tokenResult
                   .onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
                   .onSuccess { token ->
-                    viewModelScope.launch(Dispatchers.IO) {
+                    viewModelScope.launch(ioDispatcher) {
                       val keyResult = policyApiClient.fetchNodeAuthKey(token)
-                      withContext(Dispatchers.Main) {
+                      withContext(mainDispatcher) {
                         keyResult
                             .onFailure { error ->
                               if (error
@@ -79,7 +146,10 @@ class LoginWithCustomControlURLViewModel(
                                     .onFailure {
                                       errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
                                     }
-                                    .onSuccess { onSuccess() }
+                                    .onSuccess {
+                                      startVPN()
+                                      onSuccess()
+                                    }
                               }
                             }
                       }

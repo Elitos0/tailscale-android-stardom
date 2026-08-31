@@ -11,7 +11,6 @@ import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.policy.DesiredExitMode
 import com.tailscale.ipn.product.policy.DesiredExitModeStore
-import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
@@ -41,6 +40,8 @@ open class IpnViewModel(
     private val desiredExitModeStoreProvider: () -> DesiredExitModeStore? = {
       runCatching { App.get().desiredExitModeStore }.getOrNull()
     },
+    private val vpnStarter: () -> Unit = { runCatching { UninitializedApp.get().startVPN() } },
+    private val vpnStopper: () -> Unit = { runCatching { UninitializedApp.get().stopVPN() } },
 ) : ViewModel() {
   protected val TAG = this::class.simpleName
 
@@ -169,12 +170,12 @@ open class IpnViewModel(
   // VPN Control
   fun startVPN() {
     TSLog.d(TAG, "startVPN() invoked")
-    UninitializedApp.get().startVPN()
+    vpnStarter()
   }
 
   fun stopVPN() {
     TSLog.d(TAG, "stopVPN() invoked")
-    UninitializedApp.get().stopVPN()
+    vpnStopper()
   }
 
   // Login/Logout
@@ -347,48 +348,6 @@ open class IpnViewModel(
     clientProvider(viewModelScope).deleteProfile(profile) {
       viewModelScope.launch { loadUserProfiles() }
       completionHandler(it)
-    }
-  }
-
-  // Exit Node Manipulation
-
-  fun toggleExitNode() {
-    val prefs = prefs.value ?: return
-    viewModelScope.launch {
-      val desiredMode = runCatching { App.get().desiredExitModeStore.mode.value }.getOrNull()
-      val autoEnabled = prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto
-      val mutation =
-          if (autoEnabled) {
-            // Auto exit node is currently active or pending — toggle turns it off.
-            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
-          } else if (prefs.activeExitNodeID != null) {
-            // We have an active concrete exit node so we should keep it, but disable it.
-            ExitNodeMutation.Clear(prefs.ExitNodeAllowLANAccess)
-          } else if (prefs.selectedExitNodeID != null) {
-            ExitNodeMutation.Manual(prefs.selectedExitNodeID!!, prefs.ExitNodeAllowLANAccess)
-          } else if (desiredMode is DesiredExitMode.Manual) {
-            ExitNodeMutation.Manual(desiredMode.nodeId, prefs.ExitNodeAllowLANAccess)
-          } else {
-            ExitNodeMutation.Auto(prefs.ExitNodeAllowLANAccess)
-          }
-      TSLog.d(
-          TAG,
-          "toggleExitNode() invoked: desiredMode=$desiredMode autoEnabled=$autoEnabled active=${prefs.activeExitNodeID} selected=${prefs.selectedExitNodeID} mutation=$mutation")
-      App.get()
-          .mutateExitNodePrefs(mutation)
-          .onSuccess {
-            TSLog.d(TAG, "toggleExitNode: mutation applied successfully ($mutation)")
-            runCatching {
-              when (mutation) {
-                is ExitNodeMutation.Auto -> App.get().desiredExitModeStore.set(DesiredExitMode.Auto)
-                is ExitNodeMutation.Manual ->
-                    App.get().desiredExitModeStore.set(DesiredExitMode.Manual(mutation.nodeId))
-                is ExitNodeMutation.Clear -> App.get().desiredExitModeStore.clear()
-              }
-            }
-          }
-          .onFailure { TSLog.e(TAG, "toggleExitNode failed: ${it.message}", it) }
-      LoadingIndicator.stop()
     }
   }
 

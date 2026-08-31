@@ -41,7 +41,12 @@ class HealthNotifier(
 
           // Ignored on Android because we already have a dedicated connected/not connected
           // notification
-          "wantrunning-false")
+          "wantrunning-false",
+
+          // Ignored on Android because login state and re-authentication are handled by
+          // the UI/session lifecycle, and stale login failure warnings from Go HealthTracker
+          // must not persist once the tunnel is in Running state.
+          "login-state")
 
   init {
     // This roughly matches the iOS/macOS implementation in terms of debouncing, and ignoring

@@ -148,7 +148,7 @@ class ExitNodePickerViewModelTest {
   }
 
   @Test
-  fun clearingExitNodeKeepsExistingStableNodeClearPath() = runTest {
+  fun settingExitNodeWithBlankOrNullIdDoesNotMutate() = runTest {
     val boundary = CapturingMutationBoundary()
     val viewModel = pickerViewModelCapturing(boundary)
 
@@ -158,9 +158,16 @@ class ExitNodePickerViewModelTest {
             online = MutableStateFlow(true),
             selected = false,
         ))
+    viewModel.setExitNode(
+        ExitNodePickerViewModel.ExitNode(
+            id = "",
+            label = "Blank",
+            online = MutableStateFlow(true),
+            selected = false,
+        ))
     advanceUntilIdle()
 
-    assertEquals(listOf(ExitNodeMutation.Clear()), boundary.mutations)
+    assertTrue(boundary.mutations.isEmpty())
   }
 
   @Test
@@ -306,7 +313,7 @@ class ExitNodePickerViewModelTest {
   }
 
   @Test
-  fun clearingExitNodeClearsDesiredExitModeStore() = runTest {
+  fun settingExitNodeWithBlankOrNullIdDoesNotClearDesiredExitModeStore() = runTest {
     val boundary = CapturingMutationBoundary()
     val store = FakeDesiredExitModeStore(initial = DesiredExitMode.Auto)
     val viewModel =
@@ -325,8 +332,60 @@ class ExitNodePickerViewModelTest {
         ))
     advanceUntilIdle()
 
-    assertEquals(1, store.clears)
-    assertNull(store.mode.value)
+    assertEquals(0, store.clears)
+    assertEquals(DesiredExitMode.Auto, store.mode.value)
+    assertTrue(boundary.mutations.isEmpty())
+  }
+
+  @Test
+  fun lanToggleWhenNoExitNodeConfiguredFallsBackToAutoMutation() = runTest {
+    val seen = mutableListOf<ExitNodeMutation>()
+    val boundary =
+        object : ExitNodeMutationBoundary {
+          override suspend fun mutateExitNode(mutation: ExitNodeMutation): Result<Unit> {
+            seen += mutation
+            return Result.success(Unit)
+          }
+        }
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = MutableStateFlow(AccessState.Active(emptySet())),
+            prefsFlow = MutableStateFlow(Ipn.Prefs(ExitNodeAllowLANAccess = false)),
+            mutationBoundaryOverride = boundary,
+        )
+
+    viewModel.toggleAllowLANAccess {}
+    advanceUntilIdle()
+
+    assertEquals(listOf(ExitNodeMutation.Auto(allowLanAccess = true)), seen)
+  }
+
+  @Test
+  fun tailnetExitNodesExcludeNoneAndContainOnlyAllowedEligibleNodes() = runTest {
+    val netmap =
+        MutableStateFlow(
+            networkMap(
+                exitNode("node-b", "Bravo"),
+                exitNode("node-a", "Alpha"),
+                exitNode("node-unallowed", "Unallowed"),
+            ))
+    val prefs = MutableStateFlow<Ipn.Prefs?>(Ipn.Prefs())
+    val access = MutableStateFlow<AccessState>(AccessState.Active(setOf("node-a", "node-b")))
+    val viewModel =
+        ExitNodePickerViewModel(
+            nav = testNavigation,
+            accessState = access,
+            netmapFlow = netmap,
+            prefsFlow = prefs,
+        )
+
+    advanceUntilIdle()
+
+    val nodes = viewModel.tailnetExitNodes.value
+    assertEquals(listOf("Alpha", "Bravo"), nodes.map { it.label })
+    assertTrue(nodes.all { !it.id.isNullOrEmpty() })
+    assertFalse(nodes.any { it.label == "None" })
   }
 
   @Test

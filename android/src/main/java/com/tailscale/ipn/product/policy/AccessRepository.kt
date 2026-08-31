@@ -9,6 +9,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.product.auth.AuthSessionRepository
 import com.tailscale.ipn.util.TSLog
+import java.time.Duration
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,11 +32,14 @@ data class CachedAccessPolicy(
 class AccessRepository(
     private val policyApiClient: PolicyApiClient = PolicyApiClient(),
     private val cacheStore: AccessPolicyCacheStore? = null,
+    minRefreshInterval: Duration = Duration.ofSeconds(5),
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
+  private val minRefreshIntervalMillis = minRefreshInterval.toMillis().coerceAtLeast(0)
   private val refreshMutex = Mutex()
   private val _state = MutableStateFlow<AccessState>(AccessState.Unavailable)
   val state: StateFlow<AccessState> = _state.asStateFlow()
+  private var lastRefreshEpochMillis: Long = 0L
 
   init {
     cacheStore
@@ -45,6 +49,7 @@ class AccessRepository(
   }
 
   fun load(token: String): AccessState {
+    lastRefreshEpochMillis = nowMillis()
     val next = resolve(policyApiClient.load(token))
     _state.value = next
     return next
@@ -52,11 +57,33 @@ class AccessRepository(
 
   fun clear() {
     cacheStore?.clear()
+    lastRefreshEpochMillis = 0L
     _state.value = AccessState.Unavailable
   }
 
-  suspend fun refresh(context: Context, authSessionRepository: AuthSessionRepository): AccessState {
+  suspend fun refresh(
+      context: Context,
+      authSessionRepository: AuthSessionRepository,
+      force: Boolean = false,
+  ): AccessState {
     return refreshMutex.withLock {
+      val now = nowMillis()
+      val cached = cacheStore?.read()
+      val isCacheValid = cached != null && cached.validUntilEpochMillis > now
+      val cooldownElapsed = (now - lastRefreshEpochMillis) >= minRefreshIntervalMillis
+
+      if (!force) {
+        if (isCacheValid && !cooldownElapsed) {
+          val active = AccessState.Active(cached!!.allowedExitNodeIds)
+          _state.value = active
+          return@withLock active
+        }
+        if (!isCacheValid && !cooldownElapsed && lastRefreshEpochMillis > 0L) {
+          return@withLock _state.value
+        }
+      }
+
+      lastRefreshEpochMillis = now
       val state =
           freshToken(context, authSessionRepository)
               .fold(

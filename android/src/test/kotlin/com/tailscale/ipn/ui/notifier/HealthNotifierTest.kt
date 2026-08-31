@@ -206,9 +206,28 @@ class HealthNotifierTest {
             Title = "Unstable",
             Text = "Using unstable version",
         )
-    healthFlow.value = healthState(unstableWarning)
+    val loginStateWarning =
+        UnhealthyState(
+            WarnableCode = "login-state",
+            Severity = Health.Severity.high,
+            Title = "Logged out",
+            Text = "fetch control key: unexpected EOF",
+            ImpactsConnectivity = true,
+        )
+    val wantRunningWarning =
+        UnhealthyState(
+            WarnableCode = "wantrunning-false",
+            Severity = Health.Severity.low,
+            Title = "Stopped",
+            Text = "Tailscale is stopped",
+        )
+    healthFlow.value = healthState(unstableWarning, loginStateWarning, wantRunningWarning)
     settle()
-    assertTrue(notifier.currentWarnings.value.isEmpty())
+    assertTrue(
+        "Ignored warnable codes (unstable, login-state, wantrunning-false) should be filtered",
+        notifier.currentWarnings.value.isEmpty(),
+    )
+    assertNull("Icon should remain null when all warnings are ignored", notifier.currentIcon.value)
   }
 
   @Test
@@ -246,5 +265,30 @@ class HealthNotifierTest {
         "No stale warnings after rapid toggling",
         notifier.currentWarnings.value.isEmpty(),
     )
+  }
+
+  @Test
+  fun staleLoginStateWarningIsFilteredWhenRunning() = runTest {
+    val (healthFlow, _, notifier) = createRunningNotifier()
+
+    val loginErrorWarning =
+        UnhealthyState(
+            WarnableCode = "login-state",
+            Severity = Health.Severity.high,
+            Title = "Logged out",
+            Text =
+                "You are logged out. The last login error was: fetch control key: Get \"https://headscale.example.com/key?v=142\": unexpected EOF",
+            ImpactsConnectivity = true,
+        )
+
+    healthFlow.value = healthState(loginErrorWarning)
+    settle()
+
+    assertTrue(
+        "login-state warning should be completely ignored in Running state",
+        notifier.currentWarnings.value.isEmpty(),
+    )
+    assertNull(
+        "Health icon should remain null when login-state is filtered", notifier.currentIcon.value)
   }
 }

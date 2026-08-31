@@ -92,14 +92,11 @@ import com.tailscale.ipn.ui.model.Permissions
 import com.tailscale.ipn.ui.model.Tailcfg
 import com.tailscale.ipn.ui.theme.customErrorContainer
 import com.tailscale.ipn.ui.theme.disabled
-import com.tailscale.ipn.ui.theme.errorButton
 import com.tailscale.ipn.ui.theme.errorListItem
-import com.tailscale.ipn.ui.theme.exitNodeToggleButton
 import com.tailscale.ipn.ui.theme.listItem
 import com.tailscale.ipn.ui.theme.minTextSize
 import com.tailscale.ipn.ui.theme.primaryListItem
 import com.tailscale.ipn.ui.theme.searchBarColors
-import com.tailscale.ipn.ui.theme.secondaryButton
 import com.tailscale.ipn.ui.theme.short
 import com.tailscale.ipn.ui.theme.surfaceContainerListItem
 import com.tailscale.ipn.ui.theme.warningButton
@@ -173,7 +170,7 @@ fun MainView(
                     accessState = accessState,
                     isVpnPrepared = isPrepared)
             val refreshAccess: () -> Unit = {
-              refreshScope.launch { sessionController.refreshAccess(context) }
+              refreshScope.launch { sessionController.refreshAccess(context, force = true) }
               Unit
             }
 
@@ -377,7 +374,9 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                                 if (autoExitNodeEnabled) {
                                   stringResource(id = R.string.auto_exit_node)
                                 } else {
-                                  stringResource(id = R.string.none)
+                                  name
+                                      ?: chosenExitNodeId
+                                      ?: stringResource(id = R.string.auto_exit_node)
                                 }
                             NodeState.RUNNING_AS_EXIT_NODE ->
                                 stringResource(id = R.string.running_exit_node)
@@ -385,7 +384,7 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                                 if (autoExitNodeEnabled) {
                                   stringResource(id = R.string.auto_exit_node)
                                 } else {
-                                  name ?: ""
+                                  name ?: chosenExitNodeId ?: ""
                                 }
                           },
                           style = MaterialTheme.typography.bodyMedium,
@@ -416,33 +415,11 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                     }
                   },
                   trailingContent = {
-                    if (nodeState != NodeState.NONE) {
+                    if (nodeState == NodeState.RUNNING_AS_EXIT_NODE) {
                       Button(
-                          colors =
-                              when (nodeState) {
-                                NodeState.OFFLINE_ENABLED -> MaterialTheme.colorScheme.errorButton
-                                NodeState.OFFLINE_DISABLED -> MaterialTheme.colorScheme.errorButton
-                                NodeState.OFFLINE_MDM -> MaterialTheme.colorScheme.errorButton
-                                NodeState.RUNNING_AS_EXIT_NODE ->
-                                    MaterialTheme.colorScheme.warningButton
-                                NodeState.ACTIVE_NOT_RUNNING ->
-                                    MaterialTheme.colorScheme.exitNodeToggleButton
-                                else -> MaterialTheme.colorScheme.secondaryButton
-                              },
-                          onClick = {
-                            if (nodeState == NodeState.RUNNING_AS_EXIT_NODE)
-                                viewModel.setRunningExitNode(false)
-                            else viewModel.toggleExitNode()
-                          }) {
-                            Text(
-                                when (nodeState) {
-                                  NodeState.OFFLINE_DISABLED -> stringResource(id = R.string.enable)
-                                  NodeState.ACTIVE_NOT_RUNNING ->
-                                      stringResource(id = R.string.enable)
-                                  NodeState.RUNNING_AS_EXIT_NODE ->
-                                      stringResource(id = R.string.stop)
-                                  else -> stringResource(id = R.string.disable)
-                                })
+                          colors = MaterialTheme.colorScheme.warningButton,
+                          onClick = { viewModel.setRunningExitNode(false) }) {
+                            Text(stringResource(id = R.string.stop))
                           }
                     }
                   })

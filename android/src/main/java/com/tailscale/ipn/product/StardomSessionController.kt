@@ -42,8 +42,8 @@ class StardomSessionController(
     accessRepository.clear()
   }
 
-  suspend fun refreshAccess(context: Context): AccessState =
-      accessRepository.refresh(context, authSessionRepository)
+  suspend fun refreshAccess(context: Context, force: Boolean = false): AccessState =
+      accessRepository.refresh(context, authSessionRepository, force = force)
 
   fun clearSession() {
     authSessionRepository.clearSession()

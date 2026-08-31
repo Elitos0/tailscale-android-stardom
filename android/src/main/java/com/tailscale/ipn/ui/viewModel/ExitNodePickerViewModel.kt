@@ -140,9 +140,8 @@ class ExitNodePickerViewModel(
   fun setExitNode(node: ExitNode) {
     if (node.mullvad) return
     val nodeId = node.id?.trim().orEmpty()
-    val mutation =
-        if (nodeId.isEmpty()) ExitNodeMutation.Clear() else ExitNodeMutation.Manual(nodeId)
-    setExitNodePrefs(mutation)
+    if (nodeId.isEmpty()) return
+    setExitNodePrefs(ExitNodeMutation.Manual(nodeId))
   }
 
   fun setAutoExitNode() {
@@ -183,14 +182,18 @@ class ExitNodePickerViewModel(
             }
 
     val allowLanAccess = !prefs.ExitNodeAllowLANAccess
+    val desiredMode = desiredExitModeStore()?.mode?.value
     val mutation =
         when {
-          prefs.AutoExitNode == "any" -> ExitNodeMutation.Auto(allowLanAccess)
+          prefs.AutoExitNode == "any" || desiredMode is DesiredExitMode.Auto ->
+              ExitNodeMutation.Auto(allowLanAccess)
           !prefs.activeExitNodeID.isNullOrBlank() ->
               ExitNodeMutation.Manual(checkNotNull(prefs.activeExitNodeID), allowLanAccess)
           !prefs.selectedExitNodeID.isNullOrBlank() ->
               ExitNodeMutation.Manual(checkNotNull(prefs.selectedExitNodeID), allowLanAccess)
-          else -> ExitNodeMutation.Clear(allowLanAccess)
+          desiredMode is DesiredExitMode.Manual ->
+              ExitNodeMutation.Manual(desiredMode.nodeId, allowLanAccess)
+          else -> ExitNodeMutation.Auto(allowLanAccess)
         }
     viewModelScope.launch {
       val result = mutationBoundary().mutateExitNode(mutation)

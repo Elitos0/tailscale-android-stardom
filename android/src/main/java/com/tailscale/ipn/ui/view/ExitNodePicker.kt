@@ -35,7 +35,6 @@ import com.tailscale.ipn.ui.util.itemsWithDividers
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerNav
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModelFactory
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -69,13 +68,6 @@ fun ExitNodePicker(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))
           } else {
-            ExitNodeItem(
-                model,
-                ExitNodePickerViewModel.ExitNode(
-                    label = stringResource(R.string.none),
-                    online = MutableStateFlow(true),
-                    selected = !anyActive,
-                ))
             AutoExitNodeItem(model, autoExitNode)
           }
           if (showRunAsExitNode.value == ShowHide.Show) {
