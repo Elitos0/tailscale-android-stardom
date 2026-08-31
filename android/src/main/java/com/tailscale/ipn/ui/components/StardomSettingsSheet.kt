@@ -24,10 +24,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -47,18 +43,13 @@ import com.tailscale.ipn.ui.theme.StardomColors
 fun StardomSettingsSheet(
     selectedProtocol: VpnProtocol,
     onSelectProtocol: (VpnProtocol) -> Unit,
-    selectedDns: DnsProvider,
-    onSelectDns: (DnsProvider) -> Unit,
+    selectedDns: DnsProvider = DnsProvider.STARDOM_ZERO_KNOWLEDGE,
+    onSelectDns: (DnsProvider) -> Unit = {},
     selectedLanguage: AppLanguage,
     onSelectLanguage: (AppLanguage) -> Unit,
     sheetState: SheetState,
     onDismiss: () -> Unit
 ) {
-  var killSwitchEnabled by remember { mutableStateOf(true) }
-  var dnsLeakGuardEnabled by remember { mutableStateOf(true) }
-  var obfuscationEnabled by remember { mutableStateOf(true) }
-  var autoConnectOnWifi by remember { mutableStateOf(false) }
-
   ModalBottomSheet(
       onDismissRequest = onDismiss,
       sheetState = sheetState,
@@ -117,7 +108,7 @@ fun StardomSettingsSheet(
 
               Spacer(modifier = Modifier.height(18.dp))
 
-              // Section: Language Switcher
+              // Section: Language Switcher (Functional)
               SettingsSectionHeader(title = StardomLocalization.languageSection(selectedLanguage))
               Row(
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -173,7 +164,7 @@ fun StardomSettingsSheet(
 
               Spacer(modifier = Modifier.height(18.dp))
 
-              // Section: Protocol Engine
+              // Section: Protocol Engine (WireGuard functional, others disabled Coming Soon)
               SettingsSectionHeader(title = StardomLocalization.protocolSection(selectedLanguage))
               Column(
                   verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -262,27 +253,25 @@ fun StardomSettingsSheet(
 
               Spacer(modifier = Modifier.height(18.dp))
 
-              // Section: DNS Resolver
+              // Section: DNS Resolver (Informational / Route-Managed, others Coming Soon)
               SettingsSectionHeader(title = StardomLocalization.dnsSection(selectedLanguage))
               Column(
                   verticalArrangement = Arrangement.spacedBy(6.dp),
                   modifier = Modifier.fillMaxWidth()) {
                     DnsProvider.entries.forEach { dns ->
-                      val isSelected = dns == selectedDns
+                      val isDefault = dns == DnsProvider.STARDOM_ZERO_KNOWLEDGE
+
                       Box(
                           modifier =
                               Modifier.fillMaxWidth()
                                   .testTag("dns_option_${dns.name}")
                                   .background(
-                                      if (isSelected) StardomColors.PanelSelected
+                                      if (isDefault) StardomColors.PanelSelected
                                       else StardomColors.Panel)
                                   .border(
                                       1.dp,
-                                      if (isSelected) StardomColors.BorderStrong
+                                      if (isDefault) StardomColors.BorderStrong
                                       else StardomColors.BorderFaint)
-                                  .clickable(onClickLabel = "DNS ${dns.displayName}") {
-                                    onSelectDns(dns)
-                                  }
                                   .padding(12.dp)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -294,10 +283,10 @@ fun StardomSettingsSheet(
                                             Modifier.size(10.dp)
                                                 .border(
                                                     1.dp,
-                                                    if (isSelected) StardomColors.Selected
+                                                    if (isDefault) StardomColors.Selected
                                                     else StardomColors.TextMuted),
                                         contentAlignment = Alignment.Center) {
-                                          if (isSelected) {
+                                          if (isDefault) {
                                             Box(
                                                 modifier =
                                                     Modifier.size(4.dp)
@@ -309,8 +298,8 @@ fun StardomSettingsSheet(
                                       Text(
                                           text = dns.displayName,
                                           color =
-                                              if (isSelected) StardomColors.TextPrimary
-                                              else StardomColors.TextSecondary,
+                                              if (isDefault) StardomColors.TextPrimary
+                                              else StardomColors.TextMuted,
                                           fontSize = 12.sp,
                                           fontWeight = FontWeight.Medium,
                                           fontFamily = SpaceGrotesk)
@@ -323,10 +312,19 @@ fun StardomSettingsSheet(
                                     }
                                   }
 
-                                  if (isSelected) {
+                                  if (isDefault) {
                                     Text(
-                                        text = StardomLocalization.activeStatus(selectedLanguage),
-                                        color = StardomColors.TextPrimary,
+                                        text =
+                                            StardomLocalization.dnsManagedStatus(selectedLanguage),
+                                        color = StardomColors.TextSecondary,
+                                        fontSize = 9.sp,
+                                        fontFamily = IbmPlexMono,
+                                        letterSpacing = 1.sp)
+                                  } else {
+                                    Text(
+                                        text =
+                                            StardomLocalization.comingSoonStatus(selectedLanguage),
+                                        color = StardomColors.TextMuted,
                                         fontSize = 9.sp,
                                         fontFamily = IbmPlexMono,
                                         letterSpacing = 1.sp)
@@ -338,34 +336,34 @@ fun StardomSettingsSheet(
 
               Spacer(modifier = Modifier.height(18.dp))
 
-              // Section: Security Toggles
+              // Section: Security Toggles (Coming Soon stubs)
               SettingsSectionHeader(title = StardomLocalization.securitySection(selectedLanguage))
               Column(
                   verticalArrangement = Arrangement.spacedBy(6.dp),
                   modifier = Modifier.fillMaxWidth()) {
-                    SecurityToggleItem(
+                    SecurityToggleStubItem(
                         title = StardomLocalization.killSwitchTitle(selectedLanguage),
                         description = StardomLocalization.killSwitchDesc(selectedLanguage),
-                        checked = killSwitchEnabled,
-                        onCheckedChange = { killSwitchEnabled = it })
+                        language = selectedLanguage,
+                        testTag = "security_toggle_kill_switch")
 
-                    SecurityToggleItem(
+                    SecurityToggleStubItem(
                         title = StardomLocalization.dnsGuardTitle(selectedLanguage),
                         description = StardomLocalization.dnsGuardDesc(selectedLanguage),
-                        checked = dnsLeakGuardEnabled,
-                        onCheckedChange = { dnsLeakGuardEnabled = it })
+                        language = selectedLanguage,
+                        testTag = "security_toggle_dns_guard")
 
-                    SecurityToggleItem(
+                    SecurityToggleStubItem(
                         title = StardomLocalization.obfuscationTitle(selectedLanguage),
                         description = StardomLocalization.obfuscationDesc(selectedLanguage),
-                        checked = obfuscationEnabled,
-                        onCheckedChange = { obfuscationEnabled = it })
+                        language = selectedLanguage,
+                        testTag = "security_toggle_obfuscation")
 
-                    SecurityToggleItem(
+                    SecurityToggleStubItem(
                         title = StardomLocalization.autoWifiTitle(selectedLanguage),
                         description = StardomLocalization.autoWifiDesc(selectedLanguage),
-                        checked = autoConnectOnWifi,
-                        onCheckedChange = { autoConnectOnWifi = it })
+                        language = selectedLanguage,
+                        testTag = "security_toggle_auto_wifi")
                   }
 
               Spacer(modifier = Modifier.height(20.dp))
@@ -385,18 +383,18 @@ private fun SettingsSectionHeader(title: String) {
 }
 
 @Composable
-private fun SecurityToggleItem(
+private fun SecurityToggleStubItem(
     title: String,
     description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    language: AppLanguage,
+    testTag: String
 ) {
   Box(
       modifier =
           Modifier.fillMaxWidth()
+              .testTag(testTag)
               .background(StardomColors.Panel)
-              .border(1.dp, if (checked) StardomColors.BorderStrong else StardomColors.BorderFaint)
-              .clickable(onClickLabel = title) { onCheckedChange(!checked) }
+              .border(1.dp, StardomColors.BorderFaint)
               .padding(12.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -405,7 +403,7 @@ private fun SecurityToggleItem(
               Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = if (checked) StardomColors.TextPrimary else StardomColors.TextSecondary,
+                    color = StardomColors.TextMuted,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     fontFamily = SpaceGrotesk)
@@ -419,17 +417,12 @@ private fun SecurityToggleItem(
 
               Spacer(Modifier.width(12.dp))
 
-              Box(
-                  modifier =
-                      Modifier.size(18.dp)
-                          .border(
-                              1.dp,
-                              if (checked) StardomColors.Selected else StardomColors.TextMuted),
-                  contentAlignment = Alignment.Center) {
-                    if (checked) {
-                      Box(modifier = Modifier.size(10.dp).background(StardomColors.Selected))
-                    }
-                  }
+              Text(
+                  text = StardomLocalization.comingSoonStatus(language),
+                  color = StardomColors.TextMuted,
+                  fontSize = 9.sp,
+                  fontFamily = IbmPlexMono,
+                  letterSpacing = 1.sp)
             }
       }
 }

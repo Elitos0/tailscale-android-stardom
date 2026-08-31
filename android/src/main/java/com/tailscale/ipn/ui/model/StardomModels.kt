@@ -261,6 +261,12 @@ object StardomLocalization {
         AppLanguage.EN -> "LOCKED"
       }
 
+  fun dnsManagedStatus(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "УПРАВЛЯЕТСЯ МАРШРУТОМ"
+        AppLanguage.EN -> "MANAGED // SECURE ROUTE"
+      }
+
   fun killSwitchTitle(lang: AppLanguage): String =
       when (lang) {
         AppLanguage.RU -> "KILL SWITCH // БЛОКИРОВКА УТЕЧЕК"

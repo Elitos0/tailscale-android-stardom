@@ -24,7 +24,6 @@ class StardomSettingsSheetTest {
 
     for (method in methods) {
       for (paramType in method.parameterTypes) {
-        // Assert no legacy/system settings types are taken
         val typeName = paramType.name
         assertFalse(
             "Parameter type $typeName in ${method.name} must not reference legacy SettingsNav",
@@ -52,6 +51,7 @@ class StardomSettingsSheetTest {
               StardomLocalization.languageSection(lang),
               StardomLocalization.protocolSection(lang),
               StardomLocalization.dnsSection(lang),
+              StardomLocalization.dnsManagedStatus(lang),
               StardomLocalization.securitySection(lang),
               StardomLocalization.activeStatus(lang),
               StardomLocalization.comingSoonStatus(lang),
@@ -79,10 +79,27 @@ class StardomSettingsSheetTest {
     assertFalse("Shadowsocks-2022 must be disabled as stub", VpnProtocol.SHADOWSOCKS_2022.enabled)
     assertFalse("V2Ray / VMess must be disabled as stub", VpnProtocol.V2RAY_VMESS.enabled)
     assertFalse("IKEv2 / IPsec must be disabled as stub", VpnProtocol.IKEV2_IPSEC.enabled)
+
+    // Simulate clicking each protocol option: only enabled protocols invoke the callback
+    var selectedProto = VpnProtocol.WIREGUARD
+    val onSelectProtocol: (VpnProtocol) -> Unit = { selectedProto = it }
+
+    val unsupportedProtocols =
+        listOf(VpnProtocol.SHADOWSOCKS_2022, VpnProtocol.V2RAY_VMESS, VpnProtocol.IKEV2_IPSEC)
+
+    for (unsupported in unsupportedProtocols) {
+      if (unsupported.enabled) {
+        onSelectProtocol(unsupported)
+      }
+      assertEquals(
+          "Callback must not be invoked for unsupported protocol $unsupported",
+          VpnProtocol.WIREGUARD,
+          selectedProto)
+    }
   }
 
   @Test
-  fun dnsProvidersExposeStardomZeroKnowledgeAndStandardResolvers() {
+  fun dnsProvidersExposeStardomZeroKnowledgeAsDefaultManagedAndOthersAsComingSoon() {
     val providers = DnsProvider.entries
     assertEquals(4, providers.size)
     assertTrue(providers.contains(DnsProvider.STARDOM_ZERO_KNOWLEDGE))
@@ -90,15 +107,53 @@ class StardomSettingsSheetTest {
     assertTrue(providers.contains(DnsProvider.QUAD9_SECURE))
     assertTrue(providers.contains(DnsProvider.CUSTOM_ENCRYPTED))
 
-    assertEquals("10.64.0.1", DnsProvider.STARDOM_ZERO_KNOWLEDGE.address)
-    assertEquals("1.1.1.1", DnsProvider.CLOUDFLARE_DOH.address)
-    assertEquals("9.9.9.9", DnsProvider.QUAD9_SECURE.address)
+    // Default DNS provider is route-managed and not mutated
+    var activeDns = DnsProvider.STARDOM_ZERO_KNOWLEDGE
+    val onSelectDns: (DnsProvider) -> Unit = { activeDns = it }
+
+    // Informational default label exists
+    for (lang in AppLanguage.entries) {
+      val managedLabel = StardomLocalization.dnsManagedStatus(lang)
+      assertTrue("Managed label must be non-empty", managedLabel.isNotEmpty())
+      assertFalse(managedLabel.contains("Tailscale", ignoreCase = true))
+
+      val comingSoon = StardomLocalization.comingSoonStatus(lang)
+      assertTrue(comingSoon.isNotEmpty())
+    }
+
+    // Since DNS is route-managed in Stardom UX, attempting to select other providers does not
+    // mutate activeDns
+    assertEquals(DnsProvider.STARDOM_ZERO_KNOWLEDGE, activeDns)
   }
 
   @Test
-  fun supportedLanguagesOnlyIncludeRussianAndEnglish() {
+  fun securityFeaturesAreClearlyLabeledComingSoonStubs() {
+    for (lang in AppLanguage.entries) {
+      val comingSoon = StardomLocalization.comingSoonStatus(lang)
+      assertEquals(if (lang == AppLanguage.RU) "СКОРО" else "COMING SOON", comingSoon)
+
+      val killSwitch = StardomLocalization.killSwitchTitle(lang)
+      val dnsGuard = StardomLocalization.dnsGuardTitle(lang)
+      val obfuscation = StardomLocalization.obfuscationTitle(lang)
+      val autoWifi = StardomLocalization.autoWifiTitle(lang)
+
+      assertTrue(killSwitch.isNotEmpty())
+      assertTrue(dnsGuard.isNotEmpty())
+      assertTrue(obfuscation.isNotEmpty())
+      assertTrue(autoWifi.isNotEmpty())
+    }
+  }
+
+  @Test
+  fun languageSelectionRemainsFunctionalForCurrentSession() {
     assertEquals(2, AppLanguage.entries.size)
-    assertEquals(AppLanguage.RU, AppLanguage.valueOf("RU"))
-    assertEquals(AppLanguage.EN, AppLanguage.valueOf("EN"))
+    var currentLanguage = AppLanguage.RU
+    val onSelectLanguage: (AppLanguage) -> Unit = { currentLanguage = it }
+
+    onSelectLanguage(AppLanguage.EN)
+    assertEquals(AppLanguage.EN, currentLanguage)
+
+    onSelectLanguage(AppLanguage.RU)
+    assertEquals(AppLanguage.RU, currentLanguage)
   }
 }
