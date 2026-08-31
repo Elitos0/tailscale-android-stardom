@@ -75,10 +75,7 @@ class LoginWithAuthKeyViewModel(
     }
     loginWithAuthKey(authKey) {
       it.onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
-      it.onSuccess {
-        startVPN()
-        onSuccess()
-      }
+      it.onSuccess { onSuccess() }
     }
   }
 }
@@ -146,10 +143,7 @@ class LoginWithCustomControlURLViewModel(
                                     .onFailure {
                                       errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
                                     }
-                                    .onSuccess {
-                                      startVPN()
-                                      onSuccess()
-                                    }
+                                    .onSuccess { onSuccess() }
                               }
                             }
                       }

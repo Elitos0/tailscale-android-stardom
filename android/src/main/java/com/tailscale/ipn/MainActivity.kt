@@ -587,7 +587,6 @@ class MainActivity : ComponentActivity() {
                                 navController.popBackStack(
                                     route = StardomRoute.MAIN.path, inclusive = false)
                               }
-                              viewModel.showVPNPermissionLauncherIfUnauthorized()
                             }
                       }
                     }

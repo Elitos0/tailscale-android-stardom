@@ -131,7 +131,7 @@ class CustomLoginViewModelTest {
   }
 
   @Test
-  fun loginWithAuthKeySuccessStartsVpnAndInvokesOnSuccess() = runTest {
+  fun loginWithAuthKeySuccessDoesNotStartVpnAndInvokesOnSuccess() = runTest {
     var vpnStarts = 0
     var successes = 0
     val viewModel =
@@ -144,7 +144,7 @@ class CustomLoginViewModelTest {
     viewModel.setAuthKey("tskey-auth-sample123") { successes++ }
 
     assertNull(viewModel.errorDialog.value)
-    assertEquals(1, vpnStarts)
+    assertEquals(0, vpnStarts)
     assertEquals(1, successes)
   }
 
@@ -269,7 +269,7 @@ class CustomLoginViewModelTest {
   }
 
   @Test
-  fun loginWithCustomControlURLSuccessStartsVpnAndInvokesOnSuccess() = runTest {
+  fun loginWithCustomControlURLSuccessDoesNotStartVpnAndInvokesOnSuccess() = runTest {
     val authSession = mock<AuthSessionRepository>()
     val policyApiClient =
         PolicyApiClient(
@@ -313,7 +313,7 @@ class CustomLoginViewModelTest {
     advanceUntilIdle()
 
     assertNull(viewModel.errorDialog.value)
-    assertEquals(1, vpnStarts)
+    assertEquals(0, vpnStarts)
     assertEquals(1, successes)
   }
 }
