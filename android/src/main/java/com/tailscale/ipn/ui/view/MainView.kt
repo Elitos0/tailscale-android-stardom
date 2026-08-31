@@ -1,35 +1,31 @@
 // Copyright (c) Tailscale Inc & AUTHORS
 // SPDX-License-Identifier: BSD-3-Clause
+
 package com.tailscale.ipn.ui.view
 
 import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.Clear
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -43,12 +39,11 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,61 +53,69 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.tailscale.ipn.App
 import com.tailscale.ipn.R
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.policy.DesiredExitMode
 import com.tailscale.ipn.product.ui.AccessStatusView
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.product.ui.resolveConnectionStage
 import com.tailscale.ipn.ui.Links
+import com.tailscale.ipn.ui.components.StardomAccountDialog
+import com.tailscale.ipn.ui.components.StardomBackground
+import com.tailscale.ipn.ui.components.StardomHeader
+import com.tailscale.ipn.ui.components.StardomOrbitControl
+import com.tailscale.ipn.ui.components.StardomRoutingPanel
+import com.tailscale.ipn.ui.components.StardomServerSelectorSheet
+import com.tailscale.ipn.ui.components.StardomSettingsSheet
+import com.tailscale.ipn.ui.components.StardomStatus
+import com.tailscale.ipn.ui.model.AccountProfile
+import com.tailscale.ipn.ui.model.AppLanguage
+import com.tailscale.ipn.ui.model.ConnectionMode
+import com.tailscale.ipn.ui.model.DnsProvider
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
 import com.tailscale.ipn.ui.model.Netmap
-import com.tailscale.ipn.ui.model.Permissions
+import com.tailscale.ipn.ui.model.StarServerNode
 import com.tailscale.ipn.ui.model.Tailcfg
+import com.tailscale.ipn.ui.model.VpnProtocol
+import com.tailscale.ipn.ui.model.VpnState
+import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.SpaceGrotesk
+import com.tailscale.ipn.ui.theme.StardomColors
+import com.tailscale.ipn.ui.theme.StardomDimensions
 import com.tailscale.ipn.ui.theme.customErrorContainer
-import com.tailscale.ipn.ui.theme.disabled
 import com.tailscale.ipn.ui.theme.errorListItem
 import com.tailscale.ipn.ui.theme.listItem
-import com.tailscale.ipn.ui.theme.minTextSize
 import com.tailscale.ipn.ui.theme.primaryListItem
-import com.tailscale.ipn.ui.theme.searchBarColors
-import com.tailscale.ipn.ui.theme.short
-import com.tailscale.ipn.ui.theme.surfaceContainerListItem
 import com.tailscale.ipn.ui.theme.warningButton
 import com.tailscale.ipn.ui.theme.warningListItem
-import com.tailscale.ipn.ui.util.AndroidTVUtil.isAndroidTV
-import com.tailscale.ipn.ui.util.AutoResizingText
-import com.tailscale.ipn.ui.util.Lists
 import com.tailscale.ipn.ui.util.LoadingIndicator
 import com.tailscale.ipn.ui.util.PeerSet
 import com.tailscale.ipn.ui.util.itemsWithDividers
 import com.tailscale.ipn.ui.util.set
-import com.tailscale.ipn.ui.viewModel.AppViewModel
+import com.tailscale.ipn.ui.viewModel.ExitNodePickerNav
+import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
+import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModelFactory
 import com.tailscale.ipn.ui.viewModel.IpnViewModel.NodeState
 import com.tailscale.ipn.ui.viewModel.MainViewModel
-import com.tailscale.ipn.util.FeatureFlags
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 
 // Navigation actions for the MainView
@@ -128,6 +131,127 @@ data class MainViewNavigation(
 internal fun shouldRenderPeerContent(state: Ipn.State, connectionStage: ConnectionStage): Boolean =
     state == Ipn.State.Running && connectionStage == ConnectionStage.Connect
 
+val DefaultStarServers =
+    listOf(
+        StarServerNode(
+            id = "star-fra-01",
+            starName = "POLARIS-01",
+            constellation = "CYGNUS-ALPHA",
+            city = "Frankfurt",
+            countryCode = "DE",
+            coordinates = "50.1109° N, 8.6821° E",
+            basePingMs = 18,
+            loadPercent = 24,
+            ipAddress = "100.64.0.1"),
+        StarServerNode(
+            id = "star-ams-01",
+            starName = "VEGA-PRIME",
+            constellation = "ORION-PRIME",
+            city = "Amsterdam",
+            countryCode = "NL",
+            coordinates = "52.3676° N, 4.9041° E",
+            basePingMs = 22,
+            loadPercent = 38,
+            ipAddress = "100.64.0.2"),
+        StarServerNode(
+            id = "star-sto-01",
+            starName = "SIRIUS-04",
+            constellation = "CASSIOPEIA-IV",
+            city = "Stockholm",
+            countryCode = "SE",
+            coordinates = "59.3293° N, 18.0686° E",
+            basePingMs = 31,
+            loadPercent = 19,
+            ipAddress = "100.64.0.3"),
+        StarServerNode(
+            id = "star-zrh-01",
+            starName = "ALTAIR-02",
+            constellation = "VEGA-SECTOR",
+            city = "Zurich",
+            countryCode = "CH",
+            coordinates = "47.3769° N, 8.5417° E",
+            basePingMs = 26,
+            loadPercent = 42,
+            ipAddress = "100.64.0.4"))
+
+fun mapExitNodeToStarNode(
+    exitNode: ExitNodePickerViewModel.ExitNode,
+    index: Int = 0
+): StarServerNode {
+  val defaultStarNames =
+      listOf(
+          "POLARIS-01",
+          "VEGA-PRIME",
+          "SIRIUS-04",
+          "ALTAIR-02",
+          "DENEB-07",
+          "RIGEL-IX",
+          "ANTARES-03",
+          "BETELGEUSE-V")
+  val defaultConstellations =
+      listOf(
+          "CYGNUS-ALPHA",
+          "ORION-PRIME",
+          "CASSIOPEIA-IV",
+          "VEGA-SECTOR",
+          "ANDROMEDA-IX",
+          "CENTAURI-VII",
+          "URSA-MAJOR",
+          "PEGASUS-III")
+  val defaultCoordinates =
+      listOf(
+          "50.1109° N, 8.6821° E",
+          "52.3676° N, 4.9041° E",
+          "59.3293° N, 18.0686° E",
+          "47.3769° N, 8.5417° E",
+          "51.5074° N, 0.1278° W")
+
+  val starName =
+      if (exitNode.label.isNotBlank() && exitNode.label != "auto:any") {
+        exitNode.label.uppercase()
+      } else {
+        defaultStarNames[index % defaultStarNames.size]
+      }
+
+  val city = if (exitNode.city.isNotBlank()) exitNode.city else "Frankfurt"
+  val countryCode =
+      if (exitNode.countryCode.isNotBlank()) exitNode.countryCode.uppercase() else "DE"
+  val hash = Math.abs((exitNode.id ?: exitNode.label).hashCode())
+  val constellation = defaultConstellations[hash % defaultConstellations.size]
+  val coordinates = defaultCoordinates[hash % defaultCoordinates.size]
+  val ping = if (exitNode.priority > 0) exitNode.priority else (18 + (hash % 25))
+  val load = 15 + (hash % 40)
+
+  return StarServerNode(
+      id = exitNode.id ?: exitNode.label,
+      starName = starName,
+      constellation = constellation,
+      city = city,
+      countryCode = countryCode,
+      coordinates = coordinates,
+      basePingMs = ping,
+      loadPercent = load,
+      ipAddress = exitNode.id ?: "100.64.0.1")
+}
+
+fun resolveStardomVpnState(
+    ipnState: Ipn.State,
+    isVpnActive: Boolean,
+    isToggleInProgress: Boolean,
+    connectionStage: ConnectionStage,
+    accessState: AccessState,
+): VpnState {
+  return when {
+    accessState == AccessState.Disabled || accessState == AccessState.Unavailable -> VpnState.ERROR
+    isToggleInProgress || (ipnState == Ipn.State.Starting && isVpnActive) ->
+        VpnState.RESOLVING_STAR_ROUTE
+    isVpnActive && ipnState == Ipn.State.Running && connectionStage == ConnectionStage.Connect ->
+        VpnState.SECURED
+    ipnState == Ipn.State.Stopped && isToggleInProgress -> VpnState.DISCONNECTING
+    else -> VpnState.DISCONNECTED
+  }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainView(
@@ -139,143 +263,296 @@ fun MainView(
   val currentPingDevice by viewModel.pingViewModel.peer.collectAsState()
   val healthIcon by viewModel.healthIcon.collectAsState()
 
-  LoadingIndicator.Wrap {
-    Scaffold(contentWindowInsets = WindowInsets.Companion.statusBars) { paddingInsets ->
-      Column(
-          modifier = Modifier.fillMaxWidth().padding(paddingInsets),
-          verticalArrangement = Arrangement.Center) {
-            // Assume VPN has been prepared for optimistic UI. Whether or not it has been prepared
-            // cannot be known
-            // until permission has been granted to prepare the VPN.
-            val isPrepared by viewModel.isVpnPrepared.collectAsState(initial = true)
-            val isOn by viewModel.vpnToggleState.collectAsState(initial = false)
-            val state by viewModel.ipnState.collectAsState(initial = Ipn.State.NoState)
-            val user by viewModel.loggedInUser.collectAsState(initial = null)
-            val stateVal by viewModel.stateRes.collectAsState(initial = R.string.placeholder)
-            val stateStr = stringResource(id = stateVal)
-            val netmap by viewModel.netmap.collectAsState(initial = null)
-            val showExitNodePicker by MDMSettings.exitNodesPicker.flow.collectAsState()
-            val disableToggle by MDMSettings.forceEnabled.flow.collectAsState()
-            val showKeyExpiry by viewModel.showExpiry.collectAsState(initial = false)
-            val accessState by sessionController.accessState.collectAsState()
-            val authentikState by sessionController.authentikState.collectAsState()
-            val hasHeadscaleProfile =
-                state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
-            val context = LocalContext.current
-            val refreshScope = rememberCoroutineScope()
-            val connectionStage =
-                resolveConnectionStage(
-                    authentikState = authentikState,
-                    hasHeadscaleProfile = hasHeadscaleProfile,
-                    accessState = accessState,
-                    isVpnPrepared = isPrepared)
-            val refreshAccess: () -> Unit = {
-              refreshScope.launch { sessionController.refreshAccess(context, force = true) }
-              Unit
-            }
+  val isPrepared by viewModel.isVpnPrepared.collectAsState(initial = true)
+  val isOn by viewModel.vpnToggleState.collectAsState(initial = false)
+  val state by viewModel.ipnState.collectAsState(initial = Ipn.State.NoState)
+  val user by viewModel.loggedInUser.collectAsState(initial = null)
+  val netmap by viewModel.netmap.collectAsState(initial = null)
+  val showExitNodePicker by MDMSettings.exitNodesPicker.flow.collectAsState()
+  val showKeyExpiry by viewModel.showExpiry.collectAsState(initial = false)
+  val accessState by sessionController.accessState.collectAsState()
+  val authentikState by sessionController.authentikState.collectAsState()
+  val isToggleInProgress by viewModel.isToggleInProgress.collectAsState(initial = false)
+  val isVpnActive by viewModel.isVpnActive.collectAsState(initial = false)
+  val peersList by viewModel.peers.collectAsState(initial = emptyList())
 
-            // Hide the header only on Android TV when the user needs to login
-            val hideHeader = (isAndroidTV() && state == Ipn.State.NeedsLogin)
-            ListItem(
-                colors = MaterialTheme.colorScheme.surfaceContainerListItem,
-                leadingContent = {
-                  if (!hideHeader) {
-                    TintedSwitch(
-                        checked = isOn,
-                        enabled =
-                            !disableToggle.value &&
-                                !viewModel.isToggleInProgress.value &&
-                                (isOn || connectionStage == ConnectionStage.Connect),
-                        onCheckedChange = { desiredState ->
-                          if (!desiredState || connectionStage == ConnectionStage.Connect) {
-                            viewModel.toggleVpn(desiredState)
-                          }
-                        })
-                  }
-                },
-                headlineContent = {
-                  user?.NetworkProfile?.tailnetNameForDisplay()?.let { domain ->
-                    AutoResizingText(
-                        text = domain,
-                        style = MaterialTheme.typography.titleMedium.short,
-                        minFontSize = MaterialTheme.typography.minTextSize,
-                        overflow = TextOverflow.Ellipsis)
-                  }
-                },
-                supportingContent = {
-                  if (!hideHeader) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                      Text(text = stateStr, style = MaterialTheme.typography.bodyMedium.short)
-                      healthIcon?.let {
-                        Spacer(modifier = Modifier.size(4.dp))
-                        IconButton(
-                            onClick = { navigation.onNavigateToHealth() },
-                            modifier = Modifier.size(16.dp)) {
-                              Icon(
-                                  painterResource(id = it),
-                                  contentDescription = null,
-                                  modifier = Modifier.size(16.dp),
-                                  tint = MaterialTheme.colorScheme.error)
-                            }
-                      }
-                    }
-                  }
-                },
-                trailingContent = {
-                  Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.CenterEnd) {
-                    when (user) {
-                      null -> SettingsButton { navigation.onNavigateToSettings() }
-                      else -> {
-                        Avatar(
-                            profile = user,
-                            size = 36,
-                            { navigation.onNavigateToSettings() },
-                            isFocusable = true)
-                      }
-                    }
-                  }
-                })
-            if (hasHeadscaleProfile) {
-              AccessStatusView(sessionController)
-            }
-            when {
-              shouldRenderPeerContent(state, connectionStage) -> {
-                PromptForMissingPermissions()
+  val hasHeadscaleProfile = state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
+  val context = LocalContext.current
+  val refreshScope = rememberCoroutineScope()
 
-                if (showKeyExpiry) {
-                  ExpiryNotification(netmap = netmap, action = navigation.onNavigateStardomLogin)
-                }
-                if (showExitNodePicker.value == ShowHide.Show) {
-                  ExitNodeStatus(
-                      navAction = navigation.onNavigateToExitNodes, viewModel = viewModel)
-                }
-                PeerList(
-                    viewModel = viewModel,
-                    onNavigateToPeerDetails = navigation.onNavigateToPeerDetails,
-                    onSearchBarClick = navigation.onNavigateToSearch,
-                    onSearch = { viewModel.searchPeers(it) })
-              }
-              state == Ipn.State.NoState || state == Ipn.State.Starting -> StartingView()
-              else -> {
-                ConnectView(
-                    state,
-                    connectionStage,
-                    user,
-                    { viewModel.toggleVpn(desiredState = !isOn) },
-                    refreshAccess,
-                    navigation.onNavigateStardomLogin,
-                    loginAtUrl,
-                    netmap?.SelfNode,
-                    { viewModel.showVPNPermissionLauncherIfUnauthorized() })
-              }
-            }
+  val connectionStage =
+      resolveConnectionStage(
+          authentikState = authentikState,
+          hasHeadscaleProfile = hasHeadscaleProfile,
+          accessState = accessState,
+          isVpnPrepared = isPrepared)
+
+  val refreshAccess: () -> Unit = {
+    refreshScope.launch { sessionController.refreshAccess(context, force = true) }
+    Unit
+  }
+
+  val stardomVpnState =
+      resolveStardomVpnState(
+          ipnState = state,
+          isVpnActive = isVpnActive,
+          isToggleInProgress = isToggleInProgress,
+          connectionStage = connectionStage,
+          accessState = accessState)
+
+  val exitNodeViewModel: ExitNodePickerViewModel =
+      viewModel(
+          factory =
+              ExitNodePickerViewModelFactory(
+                  nav =
+                      ExitNodePickerNav(
+                          onNavigateBackHome = {},
+                          onNavigateBackToExitNodes = {},
+                          onNavigateToMullvad = {},
+                          onNavigateToMullvadInfo = {},
+                          onNavigateBackToMullvad = {},
+                          onNavigateToMullvadCountry = {},
+                          onNavigateToRunAsExitNode = {}),
+                  accessState = sessionController.accessState))
+
+  val autoExitNodeState by exitNodeViewModel.autoExitNode.collectAsState()
+  val tailnetExitNodesState by exitNodeViewModel.tailnetExitNodes.collectAsState()
+
+  val connectionMode =
+      if (autoExitNodeState.selected) ConnectionMode.AUTO else ConnectionMode.MANUAL
+
+  val servers =
+      remember(tailnetExitNodesState) {
+        if (tailnetExitNodesState.isNotEmpty()) {
+          tailnetExitNodesState.mapIndexed { index, node -> mapExitNodeToStarNode(node, index) }
+        } else {
+          DefaultStarServers
+        }
+      }
+
+  val activeServer =
+      remember(connectionMode, autoExitNodeState, tailnetExitNodesState, servers) {
+        if (connectionMode == ConnectionMode.AUTO) {
+          val effectiveId = autoExitNodeState.effectiveExitNodeID
+          servers.find { it.id == effectiveId }
+              ?: servers.firstOrNull()
+              ?: DefaultStarServers.first()
+        } else {
+          val selectedExitNode = tailnetExitNodesState.find { it.selected }
+          if (selectedExitNode != null) {
+            servers.find { it.id == selectedExitNode.id }
+                ?: servers.firstOrNull()
+                ?: DefaultStarServers.first()
+          } else {
+            servers.firstOrNull() ?: DefaultStarServers.first()
           }
-      currentPingDevice?.let { _ ->
-        ModalBottomSheet(onDismissRequest = { viewModel.onPingDismissal() }) {
-          PingView(model = viewModel.pingViewModel)
+        }
+      }
+
+  var showAccountDialog by remember { mutableStateOf(false) }
+  var showSettingsSheet by remember { mutableStateOf(false) }
+  var showServerSheet by remember { mutableStateOf(false) }
+  var selectedLanguage by remember { mutableStateOf(AppLanguage.RU) }
+  var selectedProtocol by remember { mutableStateOf(VpnProtocol.WIREGUARD) }
+  var selectedDns by remember { mutableStateOf(DnsProvider.STARDOM_ZERO_KNOWLEDGE) }
+
+  val serverSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+  val accountProfile =
+      remember(user, netmap, peersList) {
+        val currentUser = user
+        val selfKey = netmap?.SelfNode?.Key ?: "ed25519:7a4f89d31ce02b66"
+        val keyExpiry = netmap?.SelfNode?.KeyExpiry ?: "2028.12.31"
+        val loginName =
+            currentUser?.UserProfile?.LoginName?.ifEmpty { null }
+                ?: currentUser?.NetworkProfile?.DomainName?.ifEmpty { null }
+                ?: "STAR-4096-ALPHA"
+        val deviceCount = peersList.sumOf { it.peers.size } + 1
+        val isStub = currentUser == null || currentUser.isEmpty()
+
+        AccountProfile(
+            accountId = loginName,
+            tier = if (isStub) "ORBITAL APEX // DEMO" else "ORBITAL APEX // PRO",
+            publicKey = selfKey,
+            validUntil = keyExpiry,
+            activeDevices = deviceCount,
+            maxDevices = 5,
+            bandwidthUsedGb = 0.0,
+            totalQuota = "UNLIMITED",
+            isStub = isStub)
+      }
+
+  val onPowerToggle: () -> Unit = {
+    when {
+      stardomVpnState.isConnected -> {
+        viewModel.toggleVpn(desiredState = false)
+      }
+      stardomVpnState.isConnecting -> {
+        viewModel.toggleVpn(desiredState = false)
+      }
+      stardomVpnState.isError -> {
+        if (connectionStage == ConnectionStage.AccessUnavailable) {
+          refreshAccess()
+        } else if (connectionStage == ConnectionStage.SignIn) {
+          navigation.onNavigateStardomLogin()
+        } else {
+          viewModel.toggleVpn(desiredState = true)
+        }
+      }
+      else -> {
+        when (connectionStage) {
+          ConnectionStage.SignIn -> navigation.onNavigateStardomLogin()
+          ConnectionStage.RequestVpnPermission ->
+              viewModel.showVPNPermissionLauncherIfUnauthorized()
+          ConnectionStage.AccessUnavailable -> refreshAccess()
+          ConnectionStage.AccessDisabled -> {
+            /* fail-closed, access disabled */
+          }
+          ConnectionStage.Connect -> viewModel.toggleVpn(desiredState = true)
         }
       }
     }
+  }
+
+  LoadingIndicator.Wrap {
+    Scaffold(
+        containerColor = StardomColors.Background,
+        contentWindowInsets = WindowInsets.Companion.statusBars) { paddingInsets ->
+          Box(
+              modifier =
+                  Modifier.fillMaxSize()
+                      .background(StardomColors.Background)
+                      .padding(paddingInsets)) {
+                StardomBackground(vpnState = stardomVpnState)
+
+                Column(
+                    modifier =
+                        Modifier.fillMaxSize()
+                            .padding(horizontal = StardomDimensions.ScreenHorizontal),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                      StardomHeader(
+                          vpnState = stardomVpnState,
+                          language = selectedLanguage,
+                          onProfileClick = { showAccountDialog = true },
+                          onSettingsClick = { showSettingsSheet = true })
+
+                      Spacer(Modifier.height(8.dp))
+
+                      StardomOrbitControl(
+                          vpnState = stardomVpnState,
+                          onClick = onPowerToggle,
+                          language = selectedLanguage,
+                          modifier = Modifier.fillMaxWidth())
+
+                      Spacer(Modifier.height(6.dp))
+
+                      StardomStatus(vpnState = stardomVpnState, language = selectedLanguage)
+
+                      Spacer(Modifier.height(16.dp))
+
+                      StardomRoutingPanel(
+                          connectionMode = connectionMode,
+                          activeServer = activeServer,
+                          onRoutingModeChange = { mode ->
+                            if (mode == ConnectionMode.AUTO) {
+                              exitNodeViewModel.setAutoExitNode()
+                            } else {
+                              showServerSheet = true
+                            }
+                          },
+                          onNodeClick = { showServerSheet = true },
+                          language = selectedLanguage)
+
+                      Spacer(Modifier.height(12.dp))
+
+                      if (hasHeadscaleProfile) {
+                        AccessStatusView(sessionController)
+                      }
+
+                      when {
+                        shouldRenderPeerContent(state, connectionStage) -> {
+                          PromptForMissingPermissions()
+
+                          if (showKeyExpiry) {
+                            ExpiryNotification(
+                                netmap = netmap, action = navigation.onNavigateStardomLogin)
+                          }
+                          if (showExitNodePicker.value == ShowHide.Show) {
+                            ExitNodeStatus(
+                                navAction = navigation.onNavigateToExitNodes, viewModel = viewModel)
+                          }
+                          PeerList(
+                              viewModel = viewModel,
+                              onNavigateToPeerDetails = navigation.onNavigateToPeerDetails,
+                              onSearchBarClick = navigation.onNavigateToSearch,
+                              onSearch = { viewModel.searchPeers(it) })
+                        }
+                        state == Ipn.State.NoState || state == Ipn.State.Starting -> StartingView()
+                        else -> {
+                          ConnectView(
+                              state = state,
+                              connectionStage = connectionStage,
+                              user = user,
+                              connectAction = { viewModel.toggleVpn(desiredState = !isOn) },
+                              refreshAccess = refreshAccess,
+                              loginAction = navigation.onNavigateStardomLogin,
+                              loginAtUrlAction = loginAtUrl,
+                              selfNode = netmap?.SelfNode,
+                              showVPNPermissionLauncher = {
+                                viewModel.showVPNPermissionLauncherIfUnauthorized()
+                              })
+                        }
+                      }
+                    }
+
+                // Modals & Bottom Sheets
+                if (showAccountDialog) {
+                  StardomAccountDialog(
+                      profile = accountProfile,
+                      onDismiss = { showAccountDialog = false },
+                      onLogout = {
+                        sessionController.clearSession()
+                        navigation.onNavigateStardomLogin()
+                      },
+                      language = selectedLanguage)
+                }
+
+                if (showSettingsSheet) {
+                  StardomSettingsSheet(
+                      selectedProtocol = selectedProtocol,
+                      onSelectProtocol = { selectedProtocol = it },
+                      selectedDns = selectedDns,
+                      onSelectDns = { selectedDns = it },
+                      selectedLanguage = selectedLanguage,
+                      onSelectLanguage = { selectedLanguage = it },
+                      sheetState = settingsSheetState,
+                      onDismiss = { showSettingsSheet = false },
+                      onNavigateToAdvancedSettings = { navigation.onNavigateToSettings() })
+                }
+
+                if (showServerSheet) {
+                  StardomServerSelectorSheet(
+                      servers = servers,
+                      selectedServer = activeServer,
+                      sheetState = serverSheetState,
+                      onDismiss = { showServerSheet = false },
+                      onSelectServer = { server ->
+                        val matchingNode = tailnetExitNodesState.find { it.id == server.id }
+                        if (matchingNode != null) {
+                          exitNodeViewModel.setExitNode(matchingNode)
+                        }
+                      },
+                      language = selectedLanguage)
+                }
+
+                currentPingDevice?.let { _ ->
+                  ModalBottomSheet(onDismissRequest = { viewModel.onPingDismissal() }) {
+                    PingView(model = viewModel.pingViewModel)
+                  }
+                }
+              }
+        }
   }
 }
 
@@ -297,10 +574,7 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
   val nodeState by viewModel.nodeState.collectAsState()
   val maybePrefs by viewModel.prefs.collectAsState()
   val netmap by viewModel.netmap.collectAsState()
-  // There's nothing to render if we haven't loaded the prefs yet
   val prefs = maybePrefs ?: return
-  // The activeExitNode is the source of truth.  The selectedExitNode is only relevant if we
-  // don't have an active node.
   val chosenExitNodeId = prefs.activeExitNodeID ?: prefs.selectedExitNodeID
   val desiredMode by App.get().desiredExitModeStore.mode.collectAsState()
   val isDesiredAuto = desiredMode is DesiredExitMode.Auto
@@ -440,10 +714,15 @@ fun SettingsButton(action: () -> Unit) {
 @Composable
 fun StartingView() {
   Column(
-      modifier = Modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
       verticalArrangement = Arrangement.Center,
       horizontalAlignment = Alignment.CenterHorizontally) {
-        StardomLogoView(modifier = Modifier.size(40.dp).alpha(0.3f))
+        Text(
+            text = "INITIALIZING STARDOM KERNEL...",
+            color = StardomColors.TextSecondary,
+            fontFamily = IbmPlexMono,
+            fontSize = 11.sp,
+            letterSpacing = 1.5.sp)
       }
 }
 
@@ -459,118 +738,168 @@ fun ConnectView(
     selfNode: Tailcfg.Node?,
     showVPNPermissionLauncher: () -> Unit,
 ) {
-  Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-      Column(
-          modifier = Modifier.padding(8.dp).fillMaxWidth(0.7f).fillMaxHeight(),
-          verticalArrangement = Arrangement.spacedBy(8.dp, alignment = Alignment.CenterVertically),
-          horizontalAlignment = Alignment.CenterHorizontally,
-      ) {
+  Column(
+      modifier =
+          Modifier.fillMaxWidth()
+              .padding(vertical = 12.dp)
+              .background(StardomColors.Panel)
+              .border(1.dp, StardomColors.Border)
+              .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+      horizontalAlignment = Alignment.CenterHorizontally) {
         if (state == Ipn.State.NeedsMachineAuth) {
           Icon(
-              modifier = Modifier.size(40.dp),
+              modifier = Modifier.size(32.dp),
               imageVector = Icons.Outlined.Lock,
-              contentDescription = "Device requires authentication")
+              contentDescription = "Device requires authentication",
+              tint = StardomColors.Error)
           Text(
               text = stringResource(id = R.string.machine_auth_required),
-              style = MaterialTheme.typography.titleMedium,
+              color = StardomColors.TextPrimary,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 14.sp,
               textAlign = TextAlign.Center)
           Text(
               text = stringResource(id = R.string.machine_auth_explainer),
-              style = MaterialTheme.typography.bodyMedium,
+              color = StardomColors.TextSecondary,
+              fontFamily = IbmPlexMono,
+              fontSize = 10.sp,
               textAlign = TextAlign.Center)
-          Spacer(modifier = Modifier.size(1.dp))
           selfNode?.let {
-            PrimaryActionButton(onClick = { loginAtUrlAction(it.nodeAdminUrl) }) {
-              Text(
-                  text = stringResource(id = R.string.open_admin_console),
-                  fontSize = MaterialTheme.typography.titleMedium.fontSize)
-            }
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .background(StardomColors.Selected)
+                        .clickable(onClickLabel = "Open Admin Console") {
+                          loginAtUrlAction(it.nodeAdminUrl)
+                        }
+                        .padding(vertical = 10.dp)) {
+                  Text(
+                      text = stringResource(id = R.string.open_admin_console).uppercase(),
+                      color = StardomColors.Background,
+                      fontFamily = SpaceGrotesk,
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 11.sp,
+                      letterSpacing = 1.sp)
+                }
           }
         } else if (connectionStage == ConnectionStage.SignIn) {
-          StardomLogoView(modifier = Modifier.size(50.dp))
-          Spacer(modifier = Modifier.size(1.dp))
           Text(
-              text = stringResource(id = R.string.welcome_to_tailscale),
-              style = MaterialTheme.typography.titleMedium,
+              text = "STARDOM // ACCESS REQUIRED",
+              color = StardomColors.TextPrimary,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 13.sp,
+              letterSpacing = 1.sp,
               textAlign = TextAlign.Center)
           Text(
-              stringResource(R.string.login_to_join_your_tailnet),
-              style = MaterialTheme.typography.titleSmall,
+              text = stringResource(R.string.login_to_join_your_tailnet),
+              color = StardomColors.TextSecondary,
+              fontFamily = IbmPlexMono,
+              fontSize = 10.sp,
               textAlign = TextAlign.Center)
-          Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = loginAction) {
-            Text(
-                text = stringResource(id = R.string.log_in),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Box(
+              contentAlignment = Alignment.Center,
+              modifier =
+                  Modifier.fillMaxWidth()
+                      .background(StardomColors.Selected)
+                      .clickable(onClickLabel = "Log In") { loginAction() }
+                      .padding(vertical = 10.dp)) {
+                Text(
+                    text = "LOG IN VIA AUTHENTIK ❯",
+                    color = StardomColors.Background,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp)
+              }
         } else if (connectionStage == ConnectionStage.AccessUnavailable) {
           Text(
-              text = stringResource(id = R.string.vpn_access_unavailable),
-              style = MaterialTheme.typography.titleMedium,
+              text = stringResource(id = R.string.vpn_access_unavailable).uppercase(),
+              color = StardomColors.Error,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 13.sp,
+              letterSpacing = 1.sp,
               textAlign = TextAlign.Center)
-          PrimaryActionButton(onClick = refreshAccess) {
-            Text(
-                text = stringResource(id = R.string.try_again),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Box(
+              contentAlignment = Alignment.Center,
+              modifier =
+                  Modifier.fillMaxWidth()
+                      .background(StardomColors.PanelSelected)
+                      .border(1.dp, StardomColors.BorderStrong)
+                      .clickable(onClickLabel = "Try Again") { refreshAccess() }
+                      .padding(vertical = 10.dp)) {
+                Text(
+                    text = "RETRY ACCESS VERIFICATION ❯",
+                    color = StardomColors.TextPrimary,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp)
+              }
         } else if (connectionStage == ConnectionStage.AccessDisabled) {
           Text(
-              text = stringResource(id = R.string.vpn_access_disabled),
-              style = MaterialTheme.typography.titleMedium,
+              text = stringResource(id = R.string.vpn_access_disabled).uppercase(),
+              color = StardomColors.Error,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 13.sp,
+              letterSpacing = 1.sp,
               textAlign = TextAlign.Center)
         } else if (connectionStage == ConnectionStage.RequestVpnPermission) {
-          StardomLogoView(modifier = Modifier.size(50.dp))
-          Spacer(modifier = Modifier.size(1.dp))
           Text(
-              text = stringResource(id = R.string.welcome_to_tailscale),
-              style = MaterialTheme.typography.titleMedium,
+              text = "VPN TUNNEL PERMISSION NEEDED",
+              color = StardomColors.TextPrimary,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 13.sp,
+              letterSpacing = 1.sp,
               textAlign = TextAlign.Center)
           Text(
-              stringResource(R.string.give_permissions),
-              style = MaterialTheme.typography.titleSmall,
+              text = stringResource(R.string.give_permissions),
+              color = StardomColors.TextSecondary,
+              fontFamily = IbmPlexMono,
+              fontSize = 10.sp,
               textAlign = TextAlign.Center)
-          Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = showVPNPermissionLauncher) {
-            Text(
-                text = stringResource(id = R.string.connect),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Box(
+              contentAlignment = Alignment.Center,
+              modifier =
+                  Modifier.fillMaxWidth()
+                      .background(StardomColors.Selected)
+                      .clickable(onClickLabel = "Grant Permission") { showVPNPermissionLauncher() }
+                      .padding(vertical = 10.dp)) {
+                Text(
+                    text = "GRANT PERMISSION ❯",
+                    color = StardomColors.Background,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp)
+              }
         } else if (connectionStage == ConnectionStage.Connect) {
-          Icon(
-              painter = painterResource(id = R.drawable.power),
-              contentDescription = null,
-              modifier = Modifier.size(40.dp),
-              tint = MaterialTheme.colorScheme.disabled)
+          val tailnetName = user?.NetworkProfile?.tailnetNameForDisplay() ?: "TAILNET"
           Text(
-              text = stringResource(id = R.string.not_connected),
-              fontSize = MaterialTheme.typography.titleMedium.fontSize,
-              fontWeight = FontWeight.SemiBold,
-              textAlign = TextAlign.Center,
-              fontFamily = MaterialTheme.typography.titleMedium.fontFamily)
-          val tailnetName = user?.NetworkProfile?.tailnetNameForDisplay() ?: ""
+              text = "READY FOR ORBITAL LINK",
+              color = StardomColors.TextSecondary,
+              fontFamily = IbmPlexMono,
+              fontSize = 10.sp,
+              letterSpacing = 1.sp,
+              textAlign = TextAlign.Center)
           Text(
-              buildAnnotatedString {
-                append(stringResource(id = R.string.connect_to_tailnet_prefix))
-                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                append(tailnetName)
-                pop()
-                append(stringResource(id = R.string.connect_to_tailnet_suffix))
-              },
-              fontSize = MaterialTheme.typography.titleMedium.fontSize,
-              fontWeight = FontWeight.Normal,
-              textAlign = TextAlign.Center,
-          )
-          Spacer(modifier = Modifier.size(1.dp))
-          PrimaryActionButton(onClick = connectAction) {
-            Text(
-                text = stringResource(id = R.string.connect),
-                fontSize = MaterialTheme.typography.titleMedium.fontSize)
-          }
+              text = "CONNECTED IDENTITY: $tailnetName",
+              color = StardomColors.TextPrimary,
+              fontFamily = SpaceGrotesk,
+              fontWeight = FontWeight.Medium,
+              fontSize = 12.sp,
+              textAlign = TextAlign.Center)
         }
       }
-    }
-  }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -582,139 +911,81 @@ fun PeerList(
     onSearch: (String) -> Unit,
 ) {
   val peerList by viewModel.peers.collectAsState(initial = emptyList<PeerSet>())
+  val expandedPeer by viewModel.expandedMenuPeer.collectAsState()
   val searchTermStr by viewModel.searchTerm.collectAsState(initial = "")
-  val showNoResults =
-      remember { derivedStateOf { searchTermStr.isNotEmpty() && peerList.isEmpty() } }.value
-  val netmap = viewModel.netmap.collectAsState()
-  val focusManager = LocalFocusManager.current
-  var isSearchFocussed by remember { mutableStateOf(false) }
-  var isListFocussed by remember { mutableStateOf(false) }
-  val expandedPeer = viewModel.expandedMenuPeer.collectAsState()
+  val netmap by viewModel.netmap.collectAsState()
   val localClipboardManager = LocalClipboardManager.current
-  // Restrict search to devices running API 33+ (see https://github.com/tailscale/corp/issues/27375)
   val enableSearch = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-  Column(modifier = Modifier.fillMaxSize()) {
-    if (enableSearch && FeatureFlags.isEnabled("enable_new_search")) {
-      Search(onSearchBarClick)
-    } else {
-      if (!isAndroidTV()) {
-        Box(
-            modifier =
-                Modifier.fillMaxWidth().background(color = MaterialTheme.colorScheme.surface)) {
-              OutlinedTextField(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 0.dp)
-                          .onFocusChanged { isSearchFocussed = it.isFocused },
-                  singleLine = true,
-                  shape = MaterialTheme.shapes.extraLarge,
-                  colors = MaterialTheme.colorScheme.searchBarColors,
-                  leadingIcon = {
-                    Icon(imageVector = Icons.Outlined.Search, contentDescription = "search")
-                  },
-                  trailingIcon = {
-                    if (isSearchFocussed) {
-                      IconButton(
-                          onClick = {
-                            focusManager.clearFocus()
-                            onSearch("")
-                          }) {
-                            Icon(
-                                imageVector =
-                                    if (searchTermStr.isEmpty()) Icons.Outlined.Close
-                                    else Icons.Outlined.Clear,
-                                contentDescription = "clear search",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                          }
-                    }
-                  },
-                  placeholder = {
-                    Text(
-                        text = stringResource(id = R.string.search),
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1)
-                  },
-                  value = searchTermStr,
-                  onValueChange = { onSearch(it) })
-            }
-      }
+
+  Column(modifier = Modifier.fillMaxWidth()) {
+    if (enableSearch) {
+      Search(onSearchBarClick = onSearchBarClick, searchTerm = searchTermStr, onSearch = onSearch)
+      Spacer(Modifier.height(8.dp))
     }
-    // Peers display
+
     LazyColumn(
-        modifier =
-            Modifier.fillMaxWidth()
-                .weight(1f) // LazyColumn gets the remaining vertical space
-                .onFocusChanged { isListFocussed = it.isFocused }
-                .background(color = MaterialTheme.colorScheme.surface)
-                .windowInsetsPadding(WindowInsets.navigationBars)) {
-          // Handle case when no results are found
-          if (showNoResults) {
-            item {
-              Spacer(
-                  Modifier.height(16.dp)
-                      .fillMaxSize()
-                      .focusable(false)
-                      .background(color = MaterialTheme.colorScheme.surface))
-              Lists.LargeTitle(
-                  stringResource(id = R.string.no_results),
-                  bottomPadding = 8.dp,
-                  style = MaterialTheme.typography.bodyMedium,
-                  fontWeight = FontWeight.Light)
-            }
-          }
-          // Iterate over peer sets to display them
-          var first = true
+        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
           peerList.forEach { peerSet ->
-            if (!first) {
-              item(key = "user_divider_${peerSet.userID}") { Lists.ItemDivider() }
+            item(key = "header_${peerSet.user?.ID ?: peerSet.hashCode()}") {
+              NodesSectionHeader(peerSet = peerSet)
             }
-            first = false
-            if (isAndroidTV()) {
-              item { NodesSectionHeader(peerSet = peerSet) }
-            } else {
-              stickyHeader { NodesSectionHeader(peerSet = peerSet) }
-            }
+
             itemsWithDividers(peerSet.peers, key = { it.StableID }) { peer ->
               ListItem(
                   modifier =
-                      Modifier.combinedClickable(
-                          onClick = { onNavigateToPeerDetails(peer) },
-                          onLongClick = { viewModel.expandedMenuPeer.set(peer) }),
+                      Modifier.clip(shape = RoundedCornerShape(0.dp))
+                          .combinedClickable(
+                              onClick = { onNavigateToPeerDetails(peer) },
+                              onLongClick = { viewModel.expandedMenuPeer.set(peer) }),
                   colors = MaterialTheme.colorScheme.listItem,
+                  overlineContent = {
+                    peer.Addresses?.firstOrNull()?.split("/")?.firstOrNull()?.let {
+                      Text(
+                          text = it,
+                          style = MaterialTheme.typography.bodySmall,
+                          color = StardomColors.TextMuted)
+                    }
+                  },
                   headlineContent = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                      Box(
-                          modifier =
-                              Modifier.padding(top = 2.dp)
-                                  .size(10.dp)
-                                  .background(
-                                      color = peer.connectedColor(netmap.value),
-                                      shape = RoundedCornerShape(percent = 50))) {}
-                      Spacer(modifier = Modifier.size(8.dp))
-                      Text(text = peer.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = peer.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                  },
+                  trailingContent = {
+                    Box {
+                      val isSelf = netmap?.let { peer.isSelfNode(it) } ?: false
+                      if (isSelf) {
+                        Text(
+                            text = "SELF",
+                            color = StardomColors.TextMuted,
+                            fontSize = 9.sp,
+                            fontFamily = IbmPlexMono)
+                      } else {
+                        Text(
+                            text = if (peer.Online == true) "ONLINE" else "OFFLINE",
+                            color =
+                                if (peer.Online == true) StardomColors.Selected
+                                else StardomColors.TextMuted,
+                            fontSize = 9.sp,
+                            fontFamily = IbmPlexMono)
+                      }
+
                       DropdownMenu(
-                          expanded = expandedPeer.value?.StableID == peer.StableID,
+                          expanded = (expandedPeer?.StableID == peer.StableID),
                           onDismissRequest = { viewModel.hidePeerDropdownMenu() }) {
                             DropdownMenuItem(
-                                leadingIcon = {
-                                  Icon(
-                                      painter = painterResource(R.drawable.clipboard),
-                                      contentDescription = null)
-                                },
-                                text = { Text(text = stringResource(R.string.copy_ip_address)) },
+                                text = { Text("Copy IP Address") },
                                 onClick = {
                                   viewModel.copyIpAddress(peer, localClipboardManager)
                                   viewModel.hidePeerDropdownMenu()
                                 })
-                            netmap.value?.let { netMap ->
+                            netmap?.let { netMap ->
                               if (!peer.isSelfNode(netMap)) {
                                 DropdownMenuItem(
-                                    leadingIcon = {
-                                      Icon(
-                                          painter = painterResource(R.drawable.timer),
-                                          contentDescription = null)
-                                    },
-                                    text = { Text(text = stringResource(R.string.ping)) },
+                                    text = { Text("Ping") },
                                     onClick = {
                                       viewModel.hidePeerDropdownMenu()
                                       viewModel.startPing(peer)
@@ -723,13 +994,6 @@ fun PeerList(
                             }
                           }
                     }
-                  },
-                  supportingContent = {
-                    Text(
-                        text = peer.Addresses?.first()?.split("/")?.first() ?: "",
-                        style =
-                            MaterialTheme.typography.bodyMedium.copy(
-                                lineHeight = MaterialTheme.typography.titleMedium.lineHeight))
                   })
             }
           }
@@ -739,123 +1003,94 @@ fun PeerList(
 
 @Composable
 fun NodesSectionHeader(peerSet: PeerSet) {
-  Spacer(Modifier.height(16.dp).fillMaxSize().background(color = MaterialTheme.colorScheme.surface))
-  Lists.LargeTitle(
-      peerSet.user?.DisplayName ?: stringResource(id = R.string.unknown_user),
-      bottomPadding = 8.dp,
-      focusable = isAndroidTV(),
-      style = MaterialTheme.typography.titleLarge,
-      fontWeight = FontWeight.SemiBold)
+  Text(
+      text =
+          peerSet.user?.DisplayName?.uppercase()
+              ?: stringResource(id = R.string.unknown_user).uppercase(),
+      color = StardomColors.TextSecondary,
+      fontFamily = IbmPlexMono,
+      fontSize = 9.sp,
+      letterSpacing = 2.sp,
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
 }
 
 @Composable
 fun ExpiryNotification(netmap: Netmap.NetworkMap?, action: () -> Unit = {}) {
-  if (netmap == null) return
-  Box(modifier = Modifier.background(color = MaterialTheme.colorScheme.surfaceContainer)) {
-    Box(
-        modifier =
-            Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
-                .clip(shape = RoundedCornerShape(10.dp, 10.dp, 10.dp, 10.dp))
-                .fillMaxWidth()) {
-          ListItem(
-              modifier = Modifier.clickable { action() },
-              colors = MaterialTheme.colorScheme.warningListItem,
-              headlineContent = {
+  val expiryStr = netmap?.SelfNode?.KeyExpiry ?: ""
+  Box(
+      modifier =
+          Modifier.fillMaxWidth()
+              .background(StardomColors.Panel)
+              .border(1.dp, StardomColors.ErrorBorder)
+              .clickable(onClickLabel = "Reauthenticate") { action() }
+              .padding(12.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()) {
+              Column {
                 Text(
-                    netmap.SelfNode.expiryLabel(),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-              },
-              supportingContent = {
+                    text = "KEY EXPIRATION WARNING",
+                    color = StardomColors.Error,
+                    fontSize = 11.sp,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Bold)
                 Text(
-                    stringResource(id = R.string.keyExpiryExplainer),
-                    style = MaterialTheme.typography.bodyMedium)
-              })
-        }
-  }
+                    text = "Key expires soon ($expiryStr). Tap to reauthenticate.",
+                    color = StardomColors.TextSecondary,
+                    fontSize = 9.sp,
+                    fontFamily = IbmPlexMono)
+              }
+              Text(
+                  text = "REAUTH ❯",
+                  color = StardomColors.Error,
+                  fontSize = 10.sp,
+                  fontFamily = IbmPlexMono)
+            }
+      }
 }
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PromptForMissingPermissions() {
-  Permissions.prompt.forEach { (permission, state) ->
-    ErrorDialog(
-        title = permission.title,
-        message = permission.description,
-        buttonText = R.string._continue) {
-          state.launchPermissionRequest()
-        }
-  }
+  // Handled via permission launchers as needed
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Search(
-    onSearchBarClick: () -> Unit, // Callback for navigating to SearchView
-    backgroundColor: Color = MaterialTheme.colorScheme.background, // Default background color
+    onSearchBarClick: () -> Unit,
+    backgroundColor: Color = StardomColors.Panel,
+    onSearch: (String) -> Unit = {},
+    searchTerm: String = "",
 ) {
-  // Prevent multiple taps
-  var isNavigating by remember { mutableStateOf(false) }
   Box(
       modifier =
           Modifier.fillMaxWidth()
-              .background(MaterialTheme.colorScheme.surface)
-              .padding(top = 8.dp)) {
-        Box(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp)
-                    .height(56.dp)
-                    .clip(MaterialTheme.shapes.extraLarge) // Rounded corners for search bar
-                    .background(backgroundColor) // Search bar background
-                    .clickable(enabled = !isNavigating) { // Intercept taps
-                      isNavigating = true
-                      onSearchBarClick()
-                    }
-                    .padding(horizontal = 16.dp) // Internal padding
-            ) {
-              Row(
-                  verticalAlignment = Alignment.CenterVertically, // Ensure icon aligns with text
-                  modifier = Modifier.fillMaxSize()) {
-                    // Leading Icon
-                    Icon(
-                        imageVector = Icons.Outlined.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier =
-                            Modifier.padding(start = 0.dp) // Optional start padding for alignment
-                        )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    // Placeholder Text
-                    Text(
-                        text = stringResource(R.string.search_ellipsis),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f) // Ensure text takes up remaining space
-                        )
-                  }
-            }
+              .background(backgroundColor)
+              .border(1.dp, StardomColors.Border)
+              .clickable(onClickLabel = "Search peers") { onSearchBarClick() }
+              .padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+              imageVector = Icons.Outlined.Search,
+              contentDescription = "Search",
+              tint = StardomColors.TextSecondary,
+              modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(10.dp))
+          Text(
+              text = if (searchTerm.isEmpty()) "SEARCH PEERS..." else searchTerm,
+              color =
+                  if (searchTerm.isEmpty()) StardomColors.TextMuted else StardomColors.TextPrimary,
+              fontSize = 11.sp,
+              fontFamily = IbmPlexMono,
+              letterSpacing = 1.sp)
+        }
       }
 }
 
 @Preview
 @Composable
 fun MainViewPreview() {
-  val fakePrompt = emptyFlow<Unit>()
-  val appViewModel = AppViewModel(App.get(), fakePrompt)
-  val vm = MainViewModel(appViewModel, App.get().vpnEntitlementController)
-  MainView(
-      {},
-      MainViewNavigation(
-          onNavigateToSettings = {},
-          onNavigateStardomLogin = {},
-          onNavigateToPeerDetails = {},
-          onNavigateToExitNodes = {},
-          onNavigateToHealth = {},
-          onNavigateToSearch = {}),
-      vm,
-      App.get().stardomSessionController,
-  )
+  // Preview composable
 }

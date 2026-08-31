@@ -4,6 +4,7 @@
 package com.tailscale.ipn.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
@@ -12,6 +13,7 @@ import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
@@ -23,11 +25,21 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
+val StardomShapes =
+    Shapes(
+        extraSmall = RoundedCornerShape(0.dp),
+        small = RoundedCornerShape(0.dp),
+        medium = RoundedCornerShape(0.dp),
+        large = RoundedCornerShape(0.dp),
+        extraLarge = RoundedCornerShape(0.dp),
+    )
+
 @Composable
-fun AppTheme(useDarkTheme: Boolean = isSystemInDarkTheme(), content: @Composable() () -> Unit) {
+fun AppTheme(useDarkTheme: Boolean = true, content: @Composable () -> Unit) {
   val colors =
       if (useDarkTheme) {
         DarkColors
@@ -37,23 +49,28 @@ fun AppTheme(useDarkTheme: Boolean = isSystemInDarkTheme(), content: @Composable
 
   val typography =
       Typography(
-          // titleMedium is styled to be slightly larger than bodyMedium for emphasis
           titleMedium =
-              MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, lineHeight = 26.sp),
-          // bodyMedium is styled to use same line height as titleMedium to ensure even vertical
-          // margins in list items.
-          bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp))
+              MaterialTheme.typography.titleMedium.copy(
+                  fontFamily = SpaceGrotesk, fontSize = 18.sp, lineHeight = 26.sp),
+          bodyMedium =
+              MaterialTheme.typography.bodyMedium.copy(
+                  fontFamily = IbmPlexMono, fontSize = 14.sp, lineHeight = 20.sp),
+          bodySmall =
+              MaterialTheme.typography.bodySmall.copy(
+                  fontFamily = IbmPlexMono, fontSize = 11.sp, lineHeight = 15.sp),
+      )
 
   // TODO: Migrate to Activity.enableEdgeToEdge
   @Suppress("deprecation") val systemUiController = rememberSystemUiController()
 
   DisposableEffect(systemUiController, useDarkTheme) {
-    systemUiController.setStatusBarColor(color = colors.surfaceContainer)
-    systemUiController.setNavigationBarColor(color = Color.Black)
+    systemUiController.setStatusBarColor(color = StardomColors.Background)
+    systemUiController.setNavigationBarColor(color = StardomColors.Background)
     onDispose {}
   }
 
-  MaterialTheme(colorScheme = colors, typography = typography, content = content)
+  MaterialTheme(
+      colorScheme = colors, shapes = StardomShapes, typography = typography, content = content)
 }
 
 private val LightColors =
@@ -87,31 +104,37 @@ private val LightColors =
 
 private val DarkColors =
     darkColorScheme(
-        primary = Color(0xFF3E5DB3), // blue-600
-        onPrimary = Color(0xFFFFFFFF), // white
-        primaryContainer = Color(0xFFf0f5ff), // blue-0
-        onPrimaryContainer = Color(0xFF5A82DC), // blue-400
-        error = Color(0xFFEF5350), // red-400
-        onError = Color(0xFFFFFFFF), // white
-        errorContainer = Color(0xFFfff6f4), // red-0
-        onErrorContainer = Color(0xFF940822), // red-600
-        surfaceDim = Color(0xFF1f1e1e), // gray-900
-        surface = Color(0xFF232222), // gray-800
-        background = Color(0xFF181717), // gray-1000
-        surfaceBright = Color(0xFF444342), // gray-600
-        surfaceContainerLowest = Color(0xFF1f1e1e), // gray-900
-        surfaceContainerLow = Color(0xFF232222), // gray-800
-        surfaceContainer = Color(0xFF181717), // gray-1000
-        surfaceContainerHigh = Color(0xFF232222), // gray-800
-        surfaceContainerHighest = Color(0xFF2e2d2d), // gray-700
-        surfaceVariant = Color(0xFF1f1e1e), // gray-900
-        onSurface = Color(0xFFfaf9f8), // gray-0
-        onSurfaceVariant = Color(0xFFafacab), // gray-400
-        outline = Color(0xFF706E6D), // gray-500
-        outlineVariant = Color(0xFF2E2D2D), // gray-700
-        inverseSurface = Color(0xFFEDEBEA), // gray-200
-        inverseOnSurface = Color(0xFF000000), // black
-        scrim = Color(0xAA000000), // black
+        primary = StardomColors.TextPrimary,
+        onPrimary = StardomColors.Background,
+        primaryContainer = StardomColors.PanelSelected,
+        onPrimaryContainer = StardomColors.TextPrimary,
+        secondary = StardomColors.TextSecondary,
+        onSecondary = StardomColors.Background,
+        secondaryContainer = StardomColors.Panel,
+        onSecondaryContainer = StardomColors.TextSecondary,
+        tertiary = StardomColors.TextPrimary,
+        onTertiary = StardomColors.Background,
+        error = StardomColors.Error,
+        onError = StardomColors.Background,
+        errorContainer = StardomColors.ErrorBorder,
+        onErrorContainer = StardomColors.TextPrimary,
+        surfaceDim = StardomColors.Background,
+        surface = StardomColors.Panel,
+        background = StardomColors.Background,
+        surfaceBright = StardomColors.PanelSelected,
+        surfaceContainerLowest = StardomColors.Background,
+        surfaceContainerLow = StardomColors.Panel,
+        surfaceContainer = StardomColors.Panel,
+        surfaceContainerHigh = StardomColors.PanelSelected,
+        surfaceContainerHighest = StardomColors.PanelSelected,
+        surfaceVariant = StardomColors.Panel,
+        onSurface = StardomColors.TextPrimary,
+        onSurfaceVariant = StardomColors.TextSecondary,
+        outline = StardomColors.Border,
+        outlineVariant = StardomColors.BorderFaint,
+        inverseSurface = StardomColors.PanelSelected,
+        inverseOnSurface = StardomColors.TextPrimary,
+        scrim = StardomColors.Background,
     )
 
 val ColorScheme.warning: Color
