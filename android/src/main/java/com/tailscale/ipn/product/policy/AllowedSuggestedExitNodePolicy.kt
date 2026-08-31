@@ -6,6 +6,8 @@ package com.tailscale.ipn.product.policy
 import com.tailscale.ipn.mdm.SettingState
 import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.ui.model.Netmap
+import com.tailscale.ipn.util.TSLog
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -56,7 +58,10 @@ class AllowedSuggestedExitNodePolicyController(
     private val mdmForcedExitNodeId: StateFlow<SettingState<String?>> =
         MutableStateFlow(SettingState(null, false)),
     private val prefs: StateFlow<Ipn.Prefs?>,
-    private val runtimeSnapshot: StateFlow<VpnRuntimeSnapshot>,
+    private val runtimeSnapshot: StateFlow<VpnRuntimeSnapshot> =
+        MutableStateFlow(VpnRuntimeSnapshot(VpnRuntimeState.Idle, generation = 0)),
+    private val desiredExitModeStore: DesiredExitModeStore? = null,
+    private val netmap: StateFlow<Netmap.NetworkMap?>? = null,
     private val notifyPolicyChanged: () -> Unit,
     private val revokeDisallowedAutoExitNode: () -> Unit,
     private val clearDisallowedExitNode: (((Result<Unit>) -> Unit) -> Unit) = { complete ->
@@ -79,7 +84,9 @@ class AllowedSuggestedExitNodePolicyController(
       val accessState: AccessState,
       val mdm: ManagedAllowedSuggestedExitNodes,
       val manualSelectionMutable: Boolean,
+      val netmap: Netmap.NetworkMap?,
       val prefs: AutoExitPrefs?,
+      val desiredExitMode: DesiredExitMode?,
       val runtimeSnapshot: VpnRuntimeSnapshot,
   )
 
@@ -87,6 +94,8 @@ class AllowedSuggestedExitNodePolicyController(
       val candidates: List<String>,
       val json: String,
       val prefs: AutoExitPrefs?,
+      val netmap: Netmap.NetworkMap?,
+      val desiredExitMode: DesiredExitMode?,
       val runtimeSnapshot: VpnRuntimeSnapshot,
       val manualSelectionMutable: Boolean,
   )
@@ -116,12 +125,27 @@ class AllowedSuggestedExitNodePolicyController(
   fun isVpnStartAllowed(activeAccess: AccessState.Active): Boolean {
     val evaluation = evaluateStable(activeAccess)
     val currentPrefs = evaluation.prefs ?: return false
+    if (evaluation.desiredExitMode is DesiredExitMode.Auto &&
+        evaluation.eligibleOnlineCandidates().isEmpty()) {
+      // StopAndClear removes native Auto fields but intentionally retains Auto intent.
+      TSLog.w(
+          "AutoExitPolicy",
+          "VPN start denied: Auto exit mode is enabled but no eligible online exit node is available")
+      return false
+    }
+    if (evaluation.desiredExitMode is DesiredExitMode.Manual &&
+        evaluation.desiredExitMode.nodeId !in evaluation.candidates) {
+      return false
+    }
     // Native Auto may still have an empty ExitNodeID (or unresolved blackhole) while the
     // allow-list is non-empty. That is a safe start: fallback/native resolution fill the
     // concrete exit after the tunnel is authorized. Blocking empty Auto here leaves
     // WantRunning=true after process death with a dead toggle the user cannot flip on.
     // A concrete ExitNodeID under Auto must still belong to the allow-list (stale node).
     if (currentPrefs.autoExitNode == NATIVE_AUTO_EXIT_NODE_ANY) {
+      if (evaluation.desiredExitMode is DesiredExitMode.Manual) {
+        return evaluation.desiredExitMode.nodeId in evaluation.candidates
+      }
       if (evaluation.candidates.isEmpty()) return false
       val effective = currentPrefs.effectiveExitNodeID?.trim().orEmpty()
       if (effective.isEmpty() || effective == NATIVE_AUTO_EXIT_NODE_BLACKHOLE) return true
@@ -154,22 +178,34 @@ class AllowedSuggestedExitNodePolicyController(
           combine(mdmAllowedSuggestedExitNodes, mdmForcedExitNodeId) { allowed, forced ->
             allowed to forced
           }
+      val netmapFlow = netmap ?: MutableStateFlow<Netmap.NetworkMap?>(null)
       combine(
-              authentikState,
-              accessState,
-              managedExitNodeSettings,
-              prefs,
-              runtimeSnapshot,
-          ) { currentAuthentik, currentAccess, currentMdm, currentPrefs, currentRuntime ->
-            Inputs(
-                authentikState = currentAuthentik,
-                accessState = currentAccess.snapshot(),
-                mdm = currentMdm.first.toManagedAllowList(),
-                manualSelectionMutable = !currentMdm.second.isSet,
-                prefs = currentPrefs.snapshot(),
-                runtimeSnapshot = currentRuntime,
-            )
-          }
+              listOf(
+                  authentikState,
+                  accessState,
+                  managedExitNodeSettings,
+                  prefs,
+                  netmapFlow,
+                  runtimeSnapshot,
+              )) { values ->
+                @Suppress("UNCHECKED_CAST")
+                Inputs(
+                    authentikState = values[0] as AuthentikState,
+                    accessState = (values[1] as AccessState).snapshot(),
+                    mdm =
+                        (values[2] as Pair<SettingState<List<String>?>, SettingState<String?>>)
+                            .first
+                            .toManagedAllowList(),
+                    manualSelectionMutable =
+                        !(values[2] as Pair<SettingState<List<String>?>, SettingState<String?>>)
+                            .second
+                            .isSet,
+                    prefs = (values[3] as Ipn.Prefs?).snapshot(),
+                    netmap = values[4] as Netmap.NetworkMap?,
+                    desiredExitMode = desiredExitModeStore?.mode?.value,
+                    runtimeSnapshot = values[5] as VpnRuntimeSnapshot,
+                )
+              }
           .collect { process(evaluate(it)) }
     }
   }
@@ -192,7 +228,9 @@ class AllowedSuggestedExitNodePolicyController(
           accessState = accessState.value.snapshot(),
           mdm = mdmAllowedSuggestedExitNodes.value.toManagedAllowList(),
           manualSelectionMutable = !mdmForcedExitNodeId.value.isSet,
+          netmap = netmap?.value,
           prefs = prefs.value.snapshot(),
+          desiredExitMode = desiredExitModeStore?.mode?.value,
           runtimeSnapshot = runtimeSnapshot.value,
       )
 
@@ -208,6 +246,8 @@ class AllowedSuggestedExitNodePolicyController(
           candidates,
           jsonEncoder(candidates),
           inputs.prefs,
+          inputs.netmap,
+          inputs.desiredExitMode,
           inputs.runtimeSnapshot,
           inputs.manualSelectionMutable,
       )
@@ -221,6 +261,8 @@ class AllowedSuggestedExitNodePolicyController(
           emptyList(),
           "[]",
           inputs.prefs,
+          inputs.netmap,
+          inputs.desiredExitMode,
           inputs.runtimeSnapshot,
           inputs.manualSelectionMutable,
       )
@@ -286,6 +328,17 @@ class AllowedSuggestedExitNodePolicyController(
         reportCallbackError("notify", error)
       }
     }
+  }
+
+  private fun Evaluation.eligibleOnlineCandidates(): List<String> {
+    val currentNetmap = netmap ?: return candidates
+    val onlineExitNodeIds =
+        currentNetmap.Peers.orEmpty()
+            .filter { it.Online == true && it.isExitNode }
+            .map { it.StableID.trim() }
+            .filter(String::isNotEmpty)
+            .toSet()
+    return candidates.filter { it in onlineExitNodeIds }
   }
 
   private fun reportCallbackError(operation: String, error: Throwable) {

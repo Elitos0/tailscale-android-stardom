@@ -55,7 +55,9 @@ interface AuthorizationTransactionStorage {
 
   fun markFixedHeadscaleContinuation()
 
-  fun consumeFixedHeadscaleContinuation(): Boolean
+  fun hasFixedHeadscaleContinuation(): Boolean
+
+  fun ackFixedHeadscaleContinuation()
 
   fun clear()
 }
@@ -165,7 +167,9 @@ class AuthSessionRepository(
     TSLog.d("AuthLifecycle", "OIDC discover starting...")
     appAuth.discover { configuration, exception ->
       if (configuration == null) {
-        TSLog.e("AuthLifecycle", "OIDC discover failed: ${exception?.message}", exception)
+        TSLog.e(
+            "AuthLifecycle",
+            "OIDC discover failed: error=${exception?.javaClass?.simpleName ?: "unknown"}")
         completeAuthorization(
             generation,
             Result.failure(exception ?: IllegalStateException("Unable to discover OIDC issuer")),
@@ -174,7 +178,7 @@ class AuthSessionRepository(
       }
       TSLog.d(
           "AuthLifecycle",
-          "OIDC discover succeeded: authEndpoint=${configuration.authorizationEndpoint} tokenEndpoint=${configuration.tokenEndpoint}")
+          "OIDC discover succeeded: issuerHost=${configuration.authorizationEndpoint?.host ?: "unknown"}")
 
       synchronized(sessionLock) {
         if (generation != sessionGeneration) {
@@ -185,8 +189,9 @@ class AuthSessionRepository(
         }
         val request = appAuth.createAuthorizationRequest(configuration)
         transactionStorage.write(PendingAuthorizationTransaction(request, nowMillis()))
-        val sanitizedUri = sanitizeUri(request.toUri())
-        TSLog.d("AuthLifecycle", "OIDC launch browser: state=${request.state} uri=$sanitizedUri")
+        TSLog.d(
+            "AuthLifecycle",
+            "OIDC launch browser: issuerHost=${configuration.authorizationEndpoint?.host ?: "unknown"}")
         appAuth.startAuthorization(context, request)
       }
     }
@@ -199,10 +204,9 @@ class AuthSessionRepository(
       onFinished: () -> Unit = {},
   ) {
     val generation = synchronized(sessionLock) { sessionGeneration }
-    val sanitizedData = sanitizeUri(intent.data)
     TSLog.d(
         "AuthLifecycle",
-        "OIDC callback received: action=${intent.action} data=$sanitizedData stateExtra=${intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA)}")
+        "OIDC callback received: action=${intent.action} hasData=${intent.data != null} hasStateExtra=${intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA) != null}")
     val result =
         appAuth.authorizationResult(intent)
             ?: run {
@@ -242,8 +246,7 @@ class AuthSessionRepository(
     if (response == null) {
       TSLog.e(
           "AuthLifecycle",
-          "OIDC callback authorization failed or cancelled: ${result.exception?.message}",
-          result.exception)
+          "OIDC callback authorization failed or cancelled: error=${result.exception?.javaClass?.simpleName ?: "unknown"}")
       completeAuthorization(
           generation,
           Result.failure(result.exception ?: IllegalStateException("Authorization was cancelled")),
@@ -252,7 +255,7 @@ class AuthSessionRepository(
       return
     }
 
-    TSLog.d("AuthLifecycle", "OIDC code exchange start: state=${response.state}")
+    TSLog.d("AuthLifecycle", "OIDC code exchange start")
     appAuth.exchangeCode(context, response) { tokenResponse, tokenException ->
       val callbackIsCurrent =
           synchronized(sessionLock) {
@@ -270,18 +273,16 @@ class AuthSessionRepository(
         if (tokenResponse == null) {
           TSLog.e(
               "AuthLifecycle",
-              "OIDC code exchange failed: ${tokenException?.message}",
-              tokenException)
+              "OIDC code exchange failed: error=${tokenException?.javaClass?.simpleName ?: "unknown"}")
           completeAuthorization(
               generation,
               Result.failure(
                   tokenException ?: IllegalStateException("Unable to exchange OIDC code")),
               authorized = false)
         } else {
-          val tokenLog = tokenResponse.accessToken?.let { "provided(len=${it.length})" } ?: "null"
           TSLog.d(
               "AuthLifecycle",
-              "OIDC code exchange succeeded: accessToken=$tokenLog idToken=${tokenResponse.idToken != null} refreshToken=${tokenResponse.refreshToken != null}")
+              "OIDC code exchange succeeded: accessTokenPresent=${tokenResponse.accessToken != null} idTokenPresent=${tokenResponse.idToken != null} refreshTokenPresent=${tokenResponse.refreshToken != null}")
           completeAuthorization(
               generation,
               Result.success(Unit),
@@ -320,8 +321,7 @@ class AuthSessionRepository(
             } else if (exception != null || accessToken.isNullOrBlank()) {
               TSLog.e(
                   "AuthLifecycle",
-                  "OIDC token refresh failed: ${exception?.message ?: "empty token"}",
-                  exception)
+                  "OIDC token refresh failed: error=${exception?.javaClass?.simpleName ?: "empty token"}")
               if (isInvalidOrRevokedCredential(exception)) {
                 pendingCompletion = clearSessionLocked(AuthentikState.ReauthenticationRequired)
                 appAuth.dispose()
@@ -330,8 +330,7 @@ class AuthSessionRepository(
               }
               Result.failure(exception ?: IllegalStateException("Unable to refresh token"))
             } else {
-              val tokenLog = "provided(len=${accessToken.length})"
-              TSLog.d("AuthLifecycle", "OIDC token refresh succeeded: accessToken=$tokenLog")
+              TSLog.d("AuthLifecycle", "OIDC token refresh succeeded: accessTokenPresent=true")
               persistLocked()
               _authentikState.value = AuthentikState.Authorized
               Result.success(accessToken)
@@ -366,8 +365,11 @@ class AuthSessionRepository(
     }
   }
 
-  fun consumeFixedHeadscaleContinuation(): Boolean =
-      synchronized(sessionLock) { transactionStorage.consumeFixedHeadscaleContinuation() }
+  fun hasFixedHeadscaleContinuation(): Boolean =
+      synchronized(sessionLock) { transactionStorage.hasFixedHeadscaleContinuation() }
+
+  fun ackFixedHeadscaleContinuation() =
+      synchronized(sessionLock) { transactionStorage.ackFixedHeadscaleContinuation() }
 
   private fun clearSession(state: AuthentikState) {
     TSLog.d("AuthLifecycle", "OIDC clearSession: targetState=$state")
@@ -676,12 +678,12 @@ private class EncryptedAuthorizationTransactionStorage(
     }
   }
 
-  override fun consumeFixedHeadscaleContinuation(): Boolean =
-      synchronized(this) {
-        if (!preferences.getBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, false))
-            return@synchronized false
-        preferences.edit().remove(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY).commit()
-      }
+  override fun hasFixedHeadscaleContinuation(): Boolean =
+      synchronized(this) { preferences.getBoolean(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY, false) }
+
+  override fun ackFixedHeadscaleContinuation() {
+    synchronized(this) { preferences.edit().remove(AUTH_FIXED_HEADSCALE_CONTINUATION_KEY).commit() }
+  }
 
   override fun clear() {
     synchronized(this) {
@@ -711,8 +713,11 @@ private class InMemoryAuthorizationTransactionStorage : AuthorizationTransaction
     fixedHeadscaleContinuation = true
   }
 
-  override fun consumeFixedHeadscaleContinuation(): Boolean =
-      fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
+  override fun hasFixedHeadscaleContinuation(): Boolean = fixedHeadscaleContinuation
+
+  override fun ackFixedHeadscaleContinuation() {
+    fixedHeadscaleContinuation = false
+  }
 
   override fun clear() {
     transaction = null

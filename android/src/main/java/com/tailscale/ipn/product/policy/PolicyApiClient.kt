@@ -35,17 +35,17 @@ class PolicyApiClient(
   fun load(token: String): PolicyLoadResult {
     var connection: HttpURLConnection? = null
     val startTime = nowMillis()
-    val urlString = "${baseUrl.trimEnd('/')}/v1/me"
-    val authHeader = redactBearerToken(token)
+    val path = "/v1/me"
+    val requestUrl = sanitizeUrl("${baseUrl.trimEnd('/')}$path")
     TSLog.d(
-        TAG, "PolicyApiClient.load request: GET $urlString, headers: [Authorization: $authHeader]")
+        TAG, "PolicyApiClient.load request: method=GET url=$requestUrl Authorization=<redacted>")
     return try {
-      val url = URL(urlString)
+      val url = URL("${baseUrl.trimEnd('/')}$path")
       if (url.protocol != "https" || url.host.isBlank()) {
         val duration = nowMillis() - startTime
         TSLog.w(
             TAG,
-            "PolicyApiClient.load invalid URL: $urlString duration=${duration}ms -> Unavailable")
+            "PolicyApiClient.load response: method=GET url=$requestUrl status=invalid duration=${duration}ms bodyLength=0 result=Unavailable")
         return PolicyLoadResult.Unavailable
       }
       connection =
@@ -58,43 +58,27 @@ class PolicyApiClient(
           }
 
       val statusCode = connection.responseCode
+      val bodyText = readResponseBody(connection, statusCode)
+      val bodyLength = bodyText.toByteArray(Charsets.UTF_8).size
       val duration = nowMillis() - startTime
       val result =
           when (statusCode) {
-            HttpURLConnection.HTTP_UNAUTHORIZED -> {
-              TSLog.d(
-                  TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Unauthorized")
-              PolicyLoadResult.Unauthorized
-            }
-            HttpURLConnection.HTTP_FORBIDDEN -> {
-              TSLog.d(
-                  TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Disabled")
-              PolicyLoadResult.Disabled
-            }
-            HttpURLConnection.HTTP_OK -> {
-              val bodyText = connection.inputStream.bufferedReader().use { it.readText() }
-              val parsed = parseActiveAccess(bodyText)
-              TSLog.d(
-                  TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=$parsed")
-              parsed
-            }
-            else -> {
-              TSLog.d(
-                  TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Unavailable")
-              PolicyLoadResult.Unavailable
-            }
+            HttpURLConnection.HTTP_UNAUTHORIZED -> PolicyLoadResult.Unauthorized
+            HttpURLConnection.HTTP_FORBIDDEN -> PolicyLoadResult.Disabled
+            HttpURLConnection.HTTP_OK ->
+                runCatching { parseActiveAccess(bodyText) }
+                    .getOrElse { PolicyLoadResult.Unavailable }
+            else -> PolicyLoadResult.Unavailable
           }
+      TSLog.d(
+          TAG,
+          "PolicyApiClient.load response: method=GET url=${sanitizeUrl(url.toString())} status=$statusCode duration=${duration}ms bodyLength=$bodyLength result=${resultSummary(result)}")
       result
     } catch (e: Exception) {
       val duration = nowMillis() - startTime
       TSLog.e(
           TAG,
-          "PolicyApiClient.load request failed: GET $urlString duration=${duration}ms error=${e.message}",
-          e)
+          "PolicyApiClient.load request failed: method=GET url=$requestUrl duration=${duration}ms error=${e::class.java.simpleName}")
       PolicyLoadResult.Unavailable
     } finally {
       connection?.let {
@@ -107,17 +91,18 @@ class PolicyApiClient(
   fun fetchNodeAuthKey(token: String): Result<String> {
     var connection: HttpURLConnection? = null
     val startTime = nowMillis()
-    val urlString = "${baseUrl.trimEnd('/')}/v1/node-auth-key"
-    val authHeader = redactBearerToken(token)
+    val path = "/v1/node-auth-key"
+    val requestUrl = sanitizeUrl("${baseUrl.trimEnd('/')}$path")
     TSLog.d(
         TAG,
-        "PolicyApiClient.fetchNodeAuthKey request: POST $urlString, headers: [Authorization: $authHeader, Content-Type: application/json]")
+        "PolicyApiClient.fetchNodeAuthKey request: method=POST url=$requestUrl Authorization=<redacted>")
     return try {
-      val url = URL(urlString)
+      val url = URL("${baseUrl.trimEnd('/')}$path")
       if (url.protocol != "https" || url.host.isBlank()) {
         val duration = nowMillis() - startTime
         TSLog.w(
-            TAG, "PolicyApiClient.fetchNodeAuthKey invalid URL: $urlString duration=${duration}ms")
+            TAG,
+            "PolicyApiClient.fetchNodeAuthKey response: method=POST url=$requestUrl status=invalid duration=${duration}ms bodyLength=0 result=Failure")
         return Result.failure(IllegalStateException("Invalid Policy API URL"))
       }
       connection =
@@ -131,26 +116,44 @@ class PolicyApiClient(
           }
 
       val statusCode = connection.responseCode
+      val bodyText = readResponseBody(connection, statusCode)
+      val bodyLength = bodyText.toByteArray(Charsets.UTF_8).size
       val duration = nowMillis() - startTime
-      if (statusCode == HttpURLConnection.HTTP_OK) {
-        val bodyText = connection.inputStream.bufferedReader().use { it.readText() }
-        val authKey = JSON.decodeFromString<NodeAuthKeyResponse>(bodyText).authKey
-        TSLog.d(
-            TAG,
-            "PolicyApiClient.fetchNodeAuthKey response: status=$statusCode duration=${duration}ms fields=[authKey] keyLength=${authKey.length}")
-        Result.success(authKey)
-      } else {
-        TSLog.e(
-            TAG,
-            "PolicyApiClient.fetchNodeAuthKey response error: status=$statusCode duration=${duration}ms")
-        Result.failure(IllegalStateException("Policy API returned $statusCode"))
+      when {
+        statusCode == HttpURLConnection.HTTP_UNAUTHORIZED -> {
+          TSLog.d(
+              TAG,
+              "PolicyApiClient.fetchNodeAuthKey response: method=POST url=${sanitizeUrl(url.toString())} status=$statusCode duration=${duration}ms bodyLength=$bodyLength result=Unauthorized")
+          Result.failure(PolicyApiUnauthorizedException())
+        }
+        statusCode == HttpURLConnection.HTTP_OK -> {
+          val parsed = runCatching { JSON.decodeFromString<NodeAuthKeyResponse>(bodyText) }
+          val authKey =
+              parsed
+                  .getOrElse {
+                    TSLog.e(
+                        TAG,
+                        "PolicyApiClient.fetchNodeAuthKey response: method=POST url=${sanitizeUrl(url.toString())} status=$statusCode duration=${duration}ms bodyLength=$bodyLength result=Failure error=${it::class.java.simpleName}")
+                    return Result.failure(it)
+                  }
+                  .authKey
+          TSLog.d(
+              TAG,
+              "PolicyApiClient.fetchNodeAuthKey response: method=POST url=${sanitizeUrl(url.toString())} status=$statusCode duration=${duration}ms bodyLength=$bodyLength result=Success")
+          Result.success(authKey)
+        }
+        else -> {
+          TSLog.e(
+              TAG,
+              "PolicyApiClient.fetchNodeAuthKey response: method=POST url=${sanitizeUrl(url.toString())} status=$statusCode duration=${duration}ms bodyLength=$bodyLength result=Failure")
+          Result.failure(IllegalStateException("Policy API returned $statusCode"))
+        }
       }
     } catch (e: Exception) {
       val duration = nowMillis() - startTime
       TSLog.e(
           TAG,
-          "PolicyApiClient.fetchNodeAuthKey request failed: POST $urlString duration=${duration}ms error=${e.message}",
-          e)
+          "PolicyApiClient.fetchNodeAuthKey request failed: method=POST url=$requestUrl duration=${duration}ms error=${e::class.java.simpleName}")
       Result.failure(e)
     } finally {
       connection?.let {
@@ -159,6 +162,39 @@ class PolicyApiClient(
       }
     }
   }
+
+  private fun readResponseBody(connection: HttpURLConnection, statusCode: Int): String {
+    val stream =
+        if (statusCode >= HttpURLConnection.HTTP_BAD_REQUEST) {
+          connection.errorStream ?: runCatching { connection.inputStream }.getOrNull()
+        } else {
+          runCatching { connection.inputStream }.getOrNull() ?: connection.errorStream
+        }
+    return stream?.bufferedReader().use { it?.readText() ?: "" }
+  }
+
+  private fun sanitizeUrl(value: String): String =
+      runCatching {
+            URL(value).let { url ->
+              buildString {
+                append(url.protocol)
+                append("://")
+                append(url.host)
+                if (url.port != -1) append(":${url.port}")
+                append(url.path)
+              }
+            }
+          }
+          .getOrElse { "<invalid-url>" }
+
+  private fun resultSummary(result: PolicyLoadResult): String =
+      when (result) {
+        is PolicyLoadResult.Active ->
+            "Active policyVersion=${result.policyVersion} allowedExitNodeCount=${result.allowedExitNodeIds.size}"
+        PolicyLoadResult.Disabled -> "Disabled"
+        PolicyLoadResult.Unauthorized -> "Unauthorized"
+        PolicyLoadResult.Unavailable -> "Unavailable"
+      }
 
   private fun parseActiveAccess(bodyText: String): PolicyLoadResult {
     val response = JSON.decodeFromString<MeResponse>(bodyText)
@@ -180,14 +216,6 @@ class PolicyApiClient(
     }
   }
 
-  private fun redactBearerToken(token: String): String {
-    return if (token.isNotEmpty()) {
-      "Bearer provided(len=${token.length})"
-    } else {
-      "Bearer (empty)"
-    }
-  }
-
   @Serializable
   private data class MeResponse(
       val access: String,
@@ -202,8 +230,10 @@ class PolicyApiClient(
 
   private companion object {
     const val TAG = "PolicyApiClient"
-    const val REQUEST_TIMEOUT_MILLIS = 5_000
-    const val DEFAULT_VALID_TTL_MILLIS = 60_000L
+    const val REQUEST_TIMEOUT_MILLIS = 15_000
+    const val DEFAULT_VALID_TTL_MILLIS = 5 * 60 * 1000L
     val JSON = Json { ignoreUnknownKeys = true }
   }
 }
+
+class PolicyApiUnauthorizedException : IllegalStateException("Policy API unauthorized")

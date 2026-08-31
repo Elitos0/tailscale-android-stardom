@@ -13,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -149,6 +150,52 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     assertEquals(1, fixture.runtime.revocations)
     assertEquals(listOf(null), fixture.boundary.mutations)
     assertTrue(fixture.events.indexOf("revoke") < fixture.events.indexOf("clear"))
+  }
+
+  @Test
+  fun failedStopRetryReevaluatesCurrentManualState() = runTest {
+    val authentik = MutableStateFlow(AuthentikState.Authorized)
+    val access = MutableStateFlow<AccessState>(AccessState.Active(setOf("node-a")))
+    val mdm = MutableStateFlow(SettingState<List<String>?>(null, false))
+    val forced = MutableStateFlow(SettingState<String?>(null, false))
+    val prefs =
+        MutableStateFlow<Ipn.Prefs?>(Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"))
+    val netmap = MutableStateFlow<Netmap.NetworkMap?>(networkMap(emptyList()))
+    val runtime = FakeRuntime(VpnRuntimeState.Idle)
+    val boundary = CapturingBoundary(mutableListOf(), prefs)
+    val desired = FakeDesiredExitModeStore(initial = DesiredExitMode.Auto)
+    var stopAttempts = 0
+    val controller =
+        PolicyAwareAutoExitNodeFallbackController(
+            authentikState = authentik,
+            accessState = access,
+            mdmAllowedSuggestedExitNodes = mdm,
+            mdmForcedExitNodeId = forced,
+            prefs = prefs,
+            netmap = netmap,
+            runtimeSnapshot = runtime.snapshot,
+            runtime = runtime,
+            mutationBoundary = boundary,
+            desiredExitModeStore = desired,
+            nativeGrace = Duration.ZERO,
+            stopThenClear = {
+              stopAttempts++
+              Result.failure(IllegalStateException("stop failed"))
+            },
+        )
+
+    controller.start(backgroundScope)
+    runCurrent()
+    assertEquals(1, stopAttempts)
+
+    desired.set(DesiredExitMode.Manual("node-a"))
+    prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a")
+    runCurrent()
+    advanceTimeBy(250)
+    runCurrent()
+
+    assertEquals(1, stopAttempts)
+    assertEquals(emptyList<String?>(), boundary.mutations)
   }
 
   @Test

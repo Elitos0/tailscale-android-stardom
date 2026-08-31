@@ -153,6 +153,20 @@ class PolicyAwareAutoExitNodeFallbackController(
     }
   }
 
+  private fun currentInputs(): Inputs =
+      Inputs(
+          authentik = authentikState.value,
+          access = accessState.value,
+          managed =
+              ManagedSettings(
+                  allowed = mdmAllowedSuggestedExitNodes.value,
+                  forced = mdmForcedExitNodeId.value,
+              ),
+          prefs = prefs.value,
+          netmap = netmap.value,
+          runtime = runtimeSnapshot.value,
+      )
+
   private suspend fun process(scope: CoroutineScope, inputs: Inputs) {
     val decision = evaluate(inputs)
     if (decision is AutoExitNodeFallbackDecision.Keep) {
@@ -200,7 +214,7 @@ class PolicyAwareAutoExitNodeFallbackController(
                 report("stop-clear", it)
                 scope.launch {
                   delay(250)
-                  process(scope, inputs)
+                  process(scope, currentInputs())
                 }
               }
               .onSuccess { TSLog.d("AutoExitFallback", "StopAndClear stopThenClear succeeded") }

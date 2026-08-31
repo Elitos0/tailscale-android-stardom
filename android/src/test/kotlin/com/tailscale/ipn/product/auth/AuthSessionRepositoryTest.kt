@@ -255,7 +255,7 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
-  fun recoveredCallbackRecordsOneShotFixedHeadscaleContinuation() {
+  fun recoveredCallbackRecordsRetryableFixedHeadscaleContinuation() {
     val gateway =
         FakeAppAuthGateway(
             authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
@@ -270,8 +270,10 @@ class AuthSessionRepositoryTest {
 
     repository.handleAuthorizationIntent(context, intent)
 
-    assertTrue(repository.consumeFixedHeadscaleContinuation())
-    assertEquals(false, repository.consumeFixedHeadscaleContinuation())
+    assertTrue(repository.hasFixedHeadscaleContinuation())
+    assertTrue(repository.hasFixedHeadscaleContinuation())
+    repository.ackFixedHeadscaleContinuation()
+    assertEquals(false, repository.hasFixedHeadscaleContinuation())
   }
 
   @Test
@@ -463,7 +465,7 @@ class AuthSessionRepositoryTest {
     assertEquals(1, firstCompletion.size)
     assertEquals("Auth session changed", firstCompletion.single().exceptionOrNull()?.message)
     assertFalse(transactions.consumeIf { true })
-    assertFalse(repository.consumeFixedHeadscaleContinuation())
+    assertFalse(repository.hasFixedHeadscaleContinuation())
 
     gateway.completeDiscovery()
     assertEquals(0, gateway.authorizationStarts)
@@ -511,7 +513,7 @@ class AuthSessionRepositoryTest {
     repository.clearSession()
 
     assertFalse(transactions.consumeIf { true })
-    assertFalse(repository.consumeFixedHeadscaleContinuation())
+    assertFalse(repository.hasFixedHeadscaleContinuation())
   }
 
   @Test
@@ -558,8 +560,7 @@ class AuthSessionRepositoryTest {
 
       val callbackLog = loggedMessages.firstOrNull { it.contains("OIDC callback received") }
       assertNotNull("Expected OIDC callback log", callbackLog)
-      assertTrue(
-          "Expected sanitized URI path", callbackLog!!.contains("data=stardom://auth/callback"))
+      assertTrue("Expected callback operation metadata", callbackLog!!.contains("hasData=true"))
       assertFalse("Log must not contain secret auth code", callbackLog.contains(secretAuthCode))
       assertFalse("Log must not contain query state", callbackLog.contains(secretState))
       assertFalse("Log must not contain fragment", callbackLog.contains("secret-fragment"))
@@ -598,8 +599,7 @@ class AuthSessionRepositoryTest {
       val exchangeLog = loggedMessages.firstOrNull { it.contains("OIDC code exchange succeeded") }
       assertNotNull("Expected code exchange log", exchangeLog)
       assertTrue(
-          "Expected token presence and length",
-          exchangeLog!!.contains("accessToken=provided(len=${secretToken.length})"))
+          "Expected token presence metadata", exchangeLog!!.contains("accessTokenPresent=true"))
       assertFalse("Log must not contain secret token", exchangeLog.contains(secretToken))
       assertFalse("Log must not contain token prefix", exchangeLog.contains("supe"))
       assertFalse("Log must not contain token suffix", exchangeLog.contains("4321"))
@@ -631,8 +631,7 @@ class AuthSessionRepositoryTest {
       val refreshLog = loggedMessages.firstOrNull { it.contains("OIDC token refresh succeeded") }
       assertNotNull("Expected token refresh log", refreshLog)
       assertTrue(
-          "Expected token presence and length",
-          refreshLog!!.contains("accessToken=provided(len=${secretToken.length})"))
+          "Expected token presence metadata", refreshLog!!.contains("accessTokenPresent=true"))
       assertFalse("Log must not contain secret token", refreshLog.contains(secretToken))
       assertFalse("Log must not contain token prefix", refreshLog.contains("xyzsecret"))
       assertFalse("Log must not contain token suffix", refreshLog.contains("3344"))
@@ -798,8 +797,11 @@ private class InMemoryAuthorizationTransactionStorage : AuthorizationTransaction
     fixedHeadscaleContinuation = true
   }
 
-  override fun consumeFixedHeadscaleContinuation(): Boolean =
-      fixedHeadscaleContinuation.also { fixedHeadscaleContinuation = false }
+  override fun hasFixedHeadscaleContinuation(): Boolean = fixedHeadscaleContinuation
+
+  override fun ackFixedHeadscaleContinuation() {
+    fixedHeadscaleContinuation = false
+  }
 
   override fun clear() {
     transaction = null

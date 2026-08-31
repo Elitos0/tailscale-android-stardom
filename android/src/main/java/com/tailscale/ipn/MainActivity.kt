@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -62,6 +63,7 @@ import com.tailscale.ipn.product.StardomProductionRoutes
 import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.policy.PolicyApiClient
+import com.tailscale.ipn.product.policy.PolicyApiUnauthorizedException
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
@@ -117,6 +119,7 @@ class MainActivity : ComponentActivity() {
   private lateinit var appViewModel: AppViewModel
   private lateinit var viewModel: MainViewModel
   private lateinit var stardomSessionController: StardomSessionController
+  private var fixedControlLoginInProgress = false
 
   val permissionsViewModel: PermissionsViewModel by viewModels()
 
@@ -558,29 +561,57 @@ class MainActivity : ComponentActivity() {
   private fun resumeFixedControlLogin() {
     val authSession = stardomSessionController.authSessionRepository
     authSession.withFreshBearerToken(this) { tokenResult ->
-      tokenResult.onSuccess { token ->
-        lifecycleScope.launch(Dispatchers.IO) {
-          val keyResult = PolicyApiClient().fetchNodeAuthKey(token)
-          withContext(Dispatchers.Main) {
-            keyResult.onSuccess { authKey ->
-              viewModel.loginWithAuthKey(authKey) { result ->
-                result.onSuccess {
-                  if (this@MainActivity::navController.isInitialized) {
-                    navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
-                  }
-                }
+      tokenResult
+          .onFailure { error -> finishFixedControlLogin("token refresh", error) }
+          .onSuccess { token ->
+            lifecycleScope.launch(Dispatchers.IO) {
+              val keyResult = PolicyApiClient().fetchNodeAuthKey(token)
+              withContext(Dispatchers.Main) {
+                keyResult
+                    .onFailure { error ->
+                      if (error is PolicyApiUnauthorizedException) {
+                        stardomSessionController.requireReauthentication()
+                      }
+                      finishFixedControlLogin("node auth key", error)
+                    }
+                    .onSuccess { authKey ->
+                      viewModel.loginWithAuthKey(authKey) { result ->
+                        result
+                            .onFailure { error ->
+                              finishFixedControlLogin("Headscale login", error)
+                            }
+                            .onSuccess {
+                              stardomSessionController.ackFixedHeadscaleContinuation()
+                              fixedControlLoginInProgress = false
+                              if (this@MainActivity::navController.isInitialized) {
+                                navController.popBackStack(
+                                    route = StardomRoute.MAIN.path, inclusive = false)
+                              }
+                            }
+                      }
+                    }
               }
             }
           }
-        }
-      }
     }
   }
 
-  private fun resumeFixedControlLoginIfPending() {
-    if (stardomSessionController.consumeFixedHeadscaleContinuation()) {
-      resumeFixedControlLogin()
+  private fun finishFixedControlLogin(stage: String, error: Throwable) {
+    TSLog.e(
+        TAG,
+        "Recovered fixed control login failed: stage=$stage error=${error::class.java.simpleName}")
+    if (error !is PolicyApiUnauthorizedException) {
+      runOnUiThread { Toast.makeText(this, R.string.add_profile_failed, Toast.LENGTH_LONG).show() }
     }
+    fixedControlLoginInProgress = false
+  }
+
+  private fun resumeFixedControlLoginIfPending() {
+    if (fixedControlLoginInProgress || !stardomSessionController.hasFixedHeadscaleContinuation()) {
+      return
+    }
+    fixedControlLoginInProgress = true
+    resumeFixedControlLogin()
   }
 
   private fun login(urlString: String) {
@@ -606,7 +637,7 @@ class MainActivity : ComponentActivity() {
           }
         }
       } catch (e: Exception) {
-        TSLog.e(TAG, "Login: failed to start MainActivity: $e")
+        TSLog.e(TAG, "Login: failed to start MainActivity error=${e::class.java.simpleName}")
       }
     }
     val url = urlString.toUri()
@@ -619,7 +650,7 @@ class MainActivity : ComponentActivity() {
         val fallbackIntent = Intent(Intent.ACTION_VIEW, url)
         startActivity(fallbackIntent)
       } catch (e: Exception) {
-        TSLog.e(TAG, "Login: failed to open browser: $e")
+        TSLog.e(TAG, "Login: failed to open browser error=${e::class.java.simpleName}")
       }
     }
   }

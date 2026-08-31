@@ -343,6 +343,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             mdmForcedExitNodeId = MDMSettings.exitNodeID.flow,
             prefs = Notifier.prefs,
             runtimeSnapshot = vpnRuntimeTracker.snapshot,
+            desiredExitModeStore = desiredExitModeStore,
             notifyPolicyChanged = ::notifyPolicyChanged,
             revokeDisallowedAutoExitNode = {
               vpnEntitlementController.revokeDisallowedAutoExitNode()

@@ -65,7 +65,14 @@ class LoginWithCustomControlURLViewModel(
                       val keyResult = policyApiClient.fetchNodeAuthKey(token)
                       withContext(Dispatchers.Main) {
                         keyResult
-                            .onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
+                            .onFailure { error ->
+                              if (error
+                                  is
+                                  com.tailscale.ipn.product.policy.PolicyApiUnauthorizedException) {
+                                authSessionRepository.requireReauthentication()
+                              }
+                              errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
+                            }
                             .onSuccess { authKey ->
                               loginWithAuthKey(authKey) { loginResult ->
                                 loginResult

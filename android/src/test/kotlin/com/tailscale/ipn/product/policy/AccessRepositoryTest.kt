@@ -341,10 +341,11 @@ class AccessRepositoryTest {
   }
 
   @Test
-  fun fetchNodeAuthKeyReturnsFailureOnNon200() {
-    val client = PolicyApiClient(connectionFactory = { FakeHttpURLConnection(403, "Forbidden") })
+  fun fetchNodeAuthKeyReturnsTypedUnauthorizedOn401() {
+    val client = PolicyApiClient(connectionFactory = { FakeHttpURLConnection(401, "Unauthorized") })
     val result = client.fetchNodeAuthKey("invalid-token")
     assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is PolicyApiUnauthorizedException)
   }
 
   @Test
@@ -381,7 +382,12 @@ class AccessRepositoryTest {
       for (msg in loggedMessages) {
         assertFalse(
             "Log message should not contain plaintext authKey: $msg", msg.contains(secretKey))
+        assertFalse(
+            "Log message should not contain bearer token: $msg",
+            msg.contains("valid-bearer-token-123456789"))
       }
+      val requestLog = loggedMessages.first { it.contains("fetchNodeAuthKey request") }
+      assertTrue(requestLog.contains("Authorization=<redacted>"))
     } finally {
       com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
     }
@@ -415,12 +421,11 @@ class AccessRepositoryTest {
       val requestLog = loggedMessages.firstOrNull { it.contains("PolicyApiClient.load request") }
       assertNotNull("Expected request log", requestLog)
       assertTrue(
-          "Request log should contain token length",
-          requestLog!!.contains("Authorization: Bearer provided(len=${secretBearerToken.length})"))
-      assertFalse(
-          "Request log should not contain secret token", requestLog.contains(secretBearerToken))
-      assertFalse("Request log should not contain token prefix", requestLog.contains("supe"))
-      assertFalse("Request log should not contain token suffix", requestLog.contains("6655"))
+          "Request log should contain a fixed redacted marker",
+          requestLog!!.contains("Authorization=<redacted>"))
+      assertFalse("Request log should contain secret token", requestLog.contains(secretBearerToken))
+      assertFalse("Request log should contain token prefix", requestLog.contains("supe"))
+      assertFalse("Request log should contain token suffix", requestLog.contains("6655"))
 
       val responseLog = loggedMessages.firstOrNull { it.contains("PolicyApiClient.load response") }
       assertNotNull("Expected response log", responseLog)
@@ -429,8 +434,12 @@ class AccessRepositoryTest {
           responseLog!!.contains("secret_internal_data"))
       assertFalse("Response log should not contain raw JSON", responseLog.contains("confidential"))
       assertTrue(
-          "Response log should retain status and result",
-          responseLog.contains("status=200") && responseLog.contains("result="))
+          "Response log should retain safe metadata",
+          responseLog.contains("status=200") &&
+              responseLog.contains("duration=") &&
+              responseLog.contains("bodyLength=${secretResponseBody.toByteArray().size}") &&
+              responseLog.contains("policyVersion=unknown") &&
+              responseLog.contains("allowedExitNodeCount=0"))
     } finally {
       com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
     }

@@ -10,6 +10,7 @@ import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.policy.DesiredExitModeStore
 import com.tailscale.ipn.product.policy.ExitNodeMutation
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
@@ -36,6 +37,9 @@ open class IpnViewModel(
     private val clientProvider: (CoroutineScope) -> Client = { Client(it) },
     private val foregroundServiceLauncher: () -> Unit = {
       runCatching { UninitializedApp.get().startForegroundForLogin() }
+    },
+    private val desiredExitModeStoreProvider: () -> DesiredExitModeStore? = {
+      runCatching { App.get().desiredExitModeStore }.getOrNull()
     },
 ) : ViewModel() {
   protected val TAG = this::class.simpleName
@@ -193,8 +197,9 @@ open class IpnViewModel(
       authKey: String? = null,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
-    val authKeyLog = if (authKey != null) "provided(len=${authKey.length})" else "null"
-    TSLog.d(TAG, "login() starting: authKey=$authKeyLog maskedPrefs=$maskedPrefs")
+    TSLog.d(
+        TAG,
+        "login() starting: authKeyProvided=${authKey != null}, maskedPrefsProvided=${maskedPrefs != null}")
     // Start the IPNService foreground notification so that Android
     // does not freeze the process or cut network access while the user is in the browser
     // completing auth. The foreground service transitions to a full VPN service later when
@@ -217,7 +222,7 @@ open class IpnViewModel(
     client.editPrefs(finalMaskedPrefs) { editResult ->
       editResult
           .onFailure {
-            TSLog.e(TAG, "login: editPrefs() failed: ${it.message}", it)
+            TSLog.e(TAG, "login: editPrefs() failed (${it::class.simpleName})")
             completionHandler(Result.failure(it))
           }
           .onSuccess {
@@ -227,28 +232,23 @@ open class IpnViewModel(
             client.start(opts) { startResult ->
               startResult
                   .onFailure {
-                    TSLog.e(TAG, "login: start() failed: ${it.message}", it)
+                    TSLog.e(TAG, "login: start() failed (${it::class.simpleName})")
                     completionHandler(Result.failure(it))
                   }
                   .onSuccess {
-                    if (authKey == null) {
-                      TSLog.d(TAG, "login: start() succeeded, starting login interactive")
-                      client.startLoginInteractive { loginResult ->
-                        loginResult
-                            .onFailure {
-                              TSLog.e(
-                                  TAG, "login: startLoginInteractive() failed: ${it.message}", it)
-                              completionHandler(Result.failure(it))
-                            }
-                            .onSuccess {
-                              TSLog.d(TAG, "login: startLoginInteractive() succeeded")
-                              completionHandler(Result.success(Unit))
-                            }
-                      }
-                    } else {
-                      TSLog.d(
-                          TAG, "login: start() succeeded with authKey; skipping interactive login")
-                      completionHandler(Result.success(Unit))
+                    TSLog.d(TAG, "login: start() succeeded, starting login interactive")
+                    client.startLoginInteractive { loginResult ->
+                      loginResult
+                          .onFailure {
+                            TSLog.e(
+                                TAG,
+                                "login: startLoginInteractive() failed (${it::class.simpleName})")
+                            completionHandler(Result.failure(it))
+                          }
+                          .onSuccess {
+                            TSLog.d(TAG, "login: startLoginInteractive() succeeded")
+                            completionHandler(Result.success(Unit))
+                          }
                     }
                   }
             }
@@ -261,12 +261,17 @@ open class IpnViewModel(
       controlURL: String? = ProductConfig.headscaleControlUrl,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
-    val authKeyLog = if (authKey.isNotBlank()) "provided(len=${authKey.length})" else "empty"
-    TSLog.d(TAG, "loginWithAuthKey() called: controlURL=$controlURL authKey=$authKeyLog")
+    TSLog.d(
+        TAG,
+        "loginWithAuthKey() called: controlURLProvided=${!controlURL.isNullOrBlank()} authKeyProvided=${authKey.isNotBlank()}")
     val prefs = Ipn.MaskedPrefs()
     prefs.WantRunning = false
     prefs.AutoExitNode = "any"
     prefs.LoggedOut = false
+    // Native prefs and the product-level intent must be persisted together. The fallback may run
+    // as soon as native observes AutoExitNode="any" and must not reinterpret the temporary node
+    // selection as a user-requested Manual mode.
+    desiredExitModeStoreProvider()?.set(DesiredExitMode.Auto)
     if (!controlURL.isNullOrBlank()) {
       prefs.ControlURL = controlURL
     }
@@ -277,7 +282,8 @@ open class IpnViewModel(
       controlURL: String,
       completionHandler: (Result<Unit>) -> Unit = {}
   ) {
-    TSLog.d(TAG, "loginWithCustomControlURL() called: controlURL=$controlURL")
+    TSLog.d(
+        TAG, "loginWithCustomControlURL() called: controlURLProvided=${controlURL.isNotBlank()}")
     val prefs = Ipn.MaskedPrefs()
     prefs.ControlURL = controlURL
     login(prefs, completionHandler = completionHandler)

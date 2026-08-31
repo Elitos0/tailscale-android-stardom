@@ -70,7 +70,9 @@ class AccessRepository(
                     resolve(result)
                   },
                   onFailure = {
-                    TSLog.e("AuthLifecycle", "policy refresh failed: ${it.message}", it)
+                    TSLog.e(
+                        "AuthLifecycle",
+                        "policy refresh failed: error=${it::class.java.simpleName}")
                     // Invalid credentials must drop cache; transport errors keep last-valid.
                     val isAuthRevoked =
                         it.message == "Signed out" ||

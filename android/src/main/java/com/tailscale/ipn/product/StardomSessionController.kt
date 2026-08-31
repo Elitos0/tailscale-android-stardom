@@ -32,8 +32,15 @@ class StardomSessionController(
         context, intent, onRecoveredAuthorization, onFinished)
   }
 
-  fun consumeFixedHeadscaleContinuation(): Boolean =
-      authSessionRepository.consumeFixedHeadscaleContinuation()
+  fun hasFixedHeadscaleContinuation(): Boolean =
+      authSessionRepository.hasFixedHeadscaleContinuation()
+
+  fun ackFixedHeadscaleContinuation() = authSessionRepository.ackFixedHeadscaleContinuation()
+
+  fun requireReauthentication() {
+    authSessionRepository.requireReauthentication()
+    accessRepository.clear()
+  }
 
   suspend fun refreshAccess(context: Context): AccessState =
       accessRepository.refresh(context, authSessionRepository)

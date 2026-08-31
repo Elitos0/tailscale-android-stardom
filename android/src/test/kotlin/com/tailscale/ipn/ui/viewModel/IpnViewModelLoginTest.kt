@@ -4,6 +4,8 @@
 package com.tailscale.ipn.ui.viewModel
 
 import com.tailscale.ipn.product.ProductConfig
+import com.tailscale.ipn.product.policy.DesiredExitMode
+import com.tailscale.ipn.product.policy.DesiredExitModeStore
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.util.TSLog
@@ -11,6 +13,8 @@ import com.tailscale.ipn.util.TSLog.LibtailscaleWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -28,6 +32,19 @@ import org.mockito.Mockito.mock
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class IpnViewModelLoginTest {
+  private class FakeDesiredExitModeStore : DesiredExitModeStore {
+    private val _mode = MutableStateFlow<DesiredExitMode?>(null)
+    override val mode: StateFlow<DesiredExitMode?> = _mode
+
+    override fun set(mode: DesiredExitMode) {
+      _mode.value = mode
+    }
+
+    override fun clear() {
+      _mode.value = null
+    }
+  }
+
   private val dispatcher = StandardTestDispatcher()
   private lateinit var originalLogWrapper: LibtailscaleWrapper
 
@@ -87,11 +104,13 @@ class IpnViewModelLoginTest {
       runTest {
         var foregroundStarted = false
         var fakeClient: FakeClient? = null
+        val desiredExitModeStore = FakeDesiredExitModeStore()
         val viewModel =
             IpnViewModel(
                 observeUserProfiles = false,
                 clientProvider = { scope -> FakeClient(scope).also { fakeClient = it } },
                 foregroundServiceLauncher = { foregroundStarted = true },
+                desiredExitModeStoreProvider = { desiredExitModeStore },
             )
 
         var completionResult: Result<Unit>? = null
@@ -108,6 +127,7 @@ class IpnViewModelLoginTest {
         val editedPrefs = checkNotNull(client.editPrefsMaskedPrefs)
         assertFalse("WantRunning in editPrefs must be false", editedPrefs.WantRunning ?: true)
         assertFalse("LoggedOut in editPrefs must be false", editedPrefs.LoggedOut ?: true)
+        assertEquals(DesiredExitMode.Auto, desiredExitModeStore.mode.value)
         assertEquals("https://headscale.example.com", editedPrefs.ControlURL)
         assertEquals("any", editedPrefs.AutoExitNode)
 
@@ -117,10 +137,9 @@ class IpnViewModelLoginTest {
         assertTrue(
             "UpdatePrefs.WantRunning must be true", startOpts.UpdatePrefs?.WantRunning == true)
 
-        // No second browser / startLoginInteractive call when authKey is provided
-        assertEquals(0, client.startLoginInteractiveCallCount)
-        assertEquals(listOf("editPrefs", "start"), client.invocationOrder)
-
+        // Auth key login completes the full registration contract via startLoginInteractive
+        assertEquals(1, client.startLoginInteractiveCallCount)
+        assertEquals(listOf("editPrefs", "start", "startLoginInteractive"), client.invocationOrder)
         assertTrue("Completion result must be success", completionResult?.isSuccess == true)
       }
 
@@ -245,5 +264,33 @@ class IpnViewModelLoginTest {
     assertEquals(1, client.startLoginInteractiveCallCount)
     assertTrue(completionResult?.isFailure == true)
     assertEquals("interactive login error", completionResult?.exceptionOrNull()?.message)
+  }
+
+  @Test
+  fun loginWithAuthKeyFailsWhenStartLoginInteractiveFails() = runTest {
+    var fakeClient: FakeClient? = null
+    val viewModel =
+        IpnViewModel(
+            observeUserProfiles = false,
+            clientProvider = { scope ->
+              FakeClient(scope)
+                  .apply {
+                    startLoginInteractiveResult =
+                        Result.failure(IllegalStateException("auth key interactive login error"))
+                  }
+                  .also { fakeClient = it }
+            },
+            foregroundServiceLauncher = {},
+        )
+
+    var completionResult: Result<Unit>? = null
+    viewModel.loginWithAuthKey("tskey-auth-fail") { result -> completionResult = result }
+
+    val client = checkNotNull(fakeClient)
+    assertEquals(1, client.editPrefsCallCount)
+    assertEquals(1, client.startCallCount)
+    assertEquals(1, client.startLoginInteractiveCallCount)
+    assertTrue(completionResult?.isFailure == true)
+    assertEquals("auth key interactive login error", completionResult?.exceptionOrNull()?.message)
   }
 }

@@ -196,7 +196,8 @@ def getLocalProperty(key, defaultValue) {
 }
 
 def stardomBuildConfigValue(key, defaultValue) {
-    return quoteBuildConfigValue(providers.gradleProperty(key).orNull ?: defaultValue)
+    def value = providers.gradleProperty(key).orNull ?: defaultValue
+    return quoteBuildConfigValue(value.toString().trim())
 }
 
 def quoteBuildConfigValue(value) {
@@ -210,13 +211,33 @@ gradle.taskGraph.whenReady { taskGraph ->
             "stardom.headscaleControlUrl",
             "stardom.policyApiBaseUrl",
             "stardom.authentikIssuerUrl",
-            "stardom.policyApiOidcClientId",
         ].each { key ->
-            def value = providers.gradleProperty(key).orNull
-            if (value == null || value.trim().isEmpty()) {
-                throw new GradleException("Missing required release Gradle property: " + key)
-            }
+            requireReleaseHttpsUrl(key)
         }
+        def clientId = providers.gradleProperty("stardom.policyApiOidcClientId").orNull?.trim()
+        if (clientId == null || clientId.isEmpty()) {
+            throw new GradleException(
+                    "Missing required release Gradle property after trimming: stardom.policyApiOidcClientId")
+        }
+    }
+}
+
+def requireReleaseHttpsUrl(key) {
+    def rawValue = providers.gradleProperty(key).orNull
+    def value = rawValue?.trim()
+    if (value == null || value.isEmpty()) {
+        throw new GradleException("Missing required release Gradle property: " + key)
+    }
+    try {
+        def uri = new URI(value)
+        if (!uri.isAbsolute() || !"https".equalsIgnoreCase(uri.scheme) ||
+                uri.host == null || uri.host.trim().isEmpty()) {
+            throw new IllegalArgumentException()
+        }
+    } catch (Throwable error) {
+        throw new GradleException(
+                "Invalid release Gradle property ${key}: expected an absolute HTTPS URL with a non-empty host (got '${rawValue}')",
+                error)
     }
 }
 

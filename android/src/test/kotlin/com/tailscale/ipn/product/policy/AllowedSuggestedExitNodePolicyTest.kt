@@ -6,6 +6,8 @@ package com.tailscale.ipn.product.policy
 import com.tailscale.ipn.mdm.SettingState
 import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.ui.model.Ipn
+import com.tailscale.ipn.ui.model.Netmap
+import com.tailscale.ipn.ui.model.Tailcfg
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -13,12 +15,26 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
+
+private class TestDesiredExitModeStore(initial: DesiredExitMode?) : DesiredExitModeStore {
+  private val _mode = MutableStateFlow(initial)
+  override val mode: StateFlow<DesiredExitMode?> = _mode
+
+  override fun set(mode: DesiredExitMode) {
+    _mode.value = mode
+  }
+
+  override fun clear() {
+    _mode.value = null
+  }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AllowedSuggestedExitNodePolicyTest {
@@ -295,6 +311,43 @@ class AllowedSuggestedExitNodePolicyTest {
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "foreign-node")
     assertEquals(false, fixture.controller.isVpnStartAllowed(active))
     fixture.prefs.value = Ipn.Prefs(AutoExitNode = null, ExitNodeID = "node-a")
+    assertEquals(true, fixture.controller.isVpnStartAllowed(active))
+  }
+
+  @Test
+  fun explicitAutoWithoutEligibleOnlineExitDeniesUntilCandidateRecovers() {
+    val fixture =
+        fixture(
+            authentik = AuthentikState.Authorized,
+            access = AccessState.Active(setOf("node-a")),
+            prefs = Ipn.Prefs(AutoExitNode = null, ExitNodeID = null),
+            desiredExitMode = DesiredExitMode.Auto,
+            netmap =
+                Netmap.NetworkMap(
+                    SelfNode = Tailcfg.Node(StableID = "self"),
+                    Peers = emptyList(),
+                    Domain = "example",
+                    UserProfiles = emptyMap(),
+                    TKAEnabled = false,
+                ),
+        )
+    val active = AccessState.Active(setOf("node-a"))
+
+    assertEquals(false, fixture.controller.isVpnStartAllowed(active))
+    fixture.netmap.value =
+        Netmap.NetworkMap(
+            SelfNode = Tailcfg.Node(StableID = "self"),
+            Peers =
+                listOf(
+                    Tailcfg.Node(
+                        StableID = "node-a",
+                        Online = true,
+                        AllowedIPs = listOf("0.0.0.0/0", "::/0"))),
+            Domain = "example",
+            UserProfiles = emptyMap(),
+            TKAEnabled = false,
+        )
+
     assertEquals(true, fixture.controller.isVpnStartAllowed(active))
   }
 
@@ -699,6 +752,8 @@ class AllowedSuggestedExitNodePolicyTest {
       access: AccessState = AccessState.Unavailable,
       prefs: Ipn.Prefs? = null,
       runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
+      netmap: Netmap.NetworkMap? = null,
+      desiredExitMode: DesiredExitMode? = null,
       candidateMapper:
           (AuthentikState, AccessState, ManagedAllowedSuggestedExitNodes) -> List<String> =
           AllowedSuggestedExitNodePolicyMapper::map,
@@ -716,6 +771,7 @@ class AllowedSuggestedExitNodePolicyTest {
     val forcedExitNodeFlow =
         MutableStateFlow(SettingState<String?>(if (canClear) null else "forced-node", !canClear))
     val prefsFlow = MutableStateFlow(prefs)
+    val netmapFlow = MutableStateFlow(netmap)
     val runtimeFlow =
         MutableStateFlow(
             VpnRuntimeSnapshot(
@@ -733,6 +789,8 @@ class AllowedSuggestedExitNodePolicyTest {
             mdmForcedExitNodeId = forcedExitNodeFlow,
             prefs = prefsFlow,
             runtimeSnapshot = runtimeFlow,
+            desiredExitModeStore = desiredExitMode?.let(::TestDesiredExitModeStore),
+            netmap = netmapFlow,
             notifyPolicyChanged = {
               notifications++
               onNotify()
@@ -756,6 +814,7 @@ class AllowedSuggestedExitNodePolicyTest {
         mdmFlow,
         forcedExitNodeFlow,
         prefsFlow,
+        netmapFlow,
         runtimeFlow,
         notificationCount = { notifications },
         revocationCount = { revocations },
@@ -770,6 +829,7 @@ class AllowedSuggestedExitNodePolicyTest {
       val mdm: MutableStateFlow<SettingState<List<String>?>>,
       val forcedExitNode: MutableStateFlow<SettingState<String?>>,
       val prefs: MutableStateFlow<Ipn.Prefs?>,
+      val netmap: MutableStateFlow<Netmap.NetworkMap?>,
       val runtime: MutableStateFlow<VpnRuntimeSnapshot>,
       private val notificationCount: () -> Int,
       private val revocationCount: () -> Int,
