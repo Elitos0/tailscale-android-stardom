@@ -14,6 +14,7 @@ import com.tailscale.ipn.product.policy.DesiredExitModeStore
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
+import com.tailscale.ipn.ui.model.Netmap
 import com.tailscale.ipn.ui.model.UserID
 import com.tailscale.ipn.ui.model.deepCopy
 import com.tailscale.ipn.ui.notifier.Notifier
@@ -42,6 +43,11 @@ open class IpnViewModel(
     },
     private val vpnStarter: () -> Unit = { runCatching { UninitializedApp.get().startVPN() } },
     private val vpnStopper: () -> Unit = { runCatching { UninitializedApp.get().stopVPN() } },
+    vpnActiveFlowProvider: () -> StateFlow<Boolean>? = {
+      runCatching { App.get().getAppScopedViewModel().vpnActive }.getOrNull()
+    },
+    prefsFlow: StateFlow<Ipn.Prefs?> = Notifier.prefs,
+    netmapFlow: StateFlow<Netmap.NetworkMap?> = Notifier.netmap,
 ) : ViewModel() {
   protected val TAG = this::class.simpleName
 
@@ -57,8 +63,9 @@ open class IpnViewModel(
   val isRunningExitNode: StateFlow<Boolean> = MutableStateFlow(false)
   private var lastPrefs: Ipn.Prefs? = null
 
-  val prefs = Notifier.prefs
-  val netmap = Notifier.netmap
+  val prefs: StateFlow<Ipn.Prefs?> = prefsFlow
+  val netmap: StateFlow<Netmap.NetworkMap?> = netmapFlow
+  val vpnActiveFlow: StateFlow<Boolean> = vpnActiveFlowProvider() ?: MutableStateFlow(false)
   private val _nodeState = MutableStateFlow(NodeState.NONE)
   val nodeState: StateFlow<NodeState> = _nodeState
   val managedByOrganization = MDMSettings.managedByOrganizationName.flow
@@ -117,7 +124,11 @@ open class IpnViewModel(
     }
 
     viewModelScope.launch {
-      combine(prefs, netmap, isRunningExitNode) { prefs, netmap, isRunningExitNode ->
+      combine(prefs, netmap, isRunningExitNode, vpnActiveFlow) {
+              prefs,
+              netmap,
+              isRunningExitNode,
+              isVpnActive ->
             // Handle nullability for prefs and netmap
             val validPrefs = prefs ?: return@combine NodeState.NONE
             val validNetmap = netmap ?: return@combine NodeState.NONE
@@ -125,7 +136,7 @@ open class IpnViewModel(
             val autoExitNodeEnabled =
                 validPrefs.AutoExitNode == "any" ||
                     runCatching {
-                          App.get().desiredExitModeStore.mode.value is DesiredExitMode.Auto
+                          desiredExitModeStoreProvider()?.mode?.value is DesiredExitMode.Auto
                         }
                         .getOrDefault(false)
             val chosenExitNodeId =
@@ -147,7 +158,8 @@ open class IpnViewModel(
                   }
                   exitNodePeer != null -> {
                     if (!validPrefs.activeExitNodeID.isNullOrEmpty() &&
-                        validPrefs.activeExitNodeID != "auto:any") {
+                        validPrefs.activeExitNodeID != "auto:any" &&
+                        isVpnActive) {
                       NodeState.ACTIVE_AND_RUNNING
                     } else {
                       NodeState.ACTIVE_NOT_RUNNING
@@ -159,7 +171,7 @@ open class IpnViewModel(
                 }
             TSLog.d(
                 TAG,
-                "nodeState computed: $computedState (active=${validPrefs.activeExitNodeID}, selected=${validPrefs.selectedExitNodeID}, auto=${validPrefs.AutoExitNode}, isRunningExitNode=$isRunningExitNode)")
+                "nodeState computed: $computedState (active=${validPrefs.activeExitNodeID}, selected=${validPrefs.selectedExitNodeID}, auto=${validPrefs.AutoExitNode}, isRunningExitNode=$isRunningExitNode, vpnActive=$isVpnActive)")
             computedState
           }
           .collect { nodeState -> _nodeState.value = nodeState }

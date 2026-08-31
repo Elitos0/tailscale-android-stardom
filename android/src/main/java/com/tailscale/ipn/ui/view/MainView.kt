@@ -394,9 +394,9 @@ fun ExitNodeStatus(navAction: () -> Unit, viewModel: MainViewModel) {
                           imageVector = Icons.Outlined.ArrowDropDown,
                           contentDescription = null,
                           tint =
-                              if (nodeState == NodeState.NONE)
-                                  MaterialTheme.colorScheme.onSurfaceVariant
-                              else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                              if (nodeState == NodeState.ACTIVE_AND_RUNNING)
+                                  MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                              else MaterialTheme.colorScheme.onSurfaceVariant,
                       )
                     }
                   },

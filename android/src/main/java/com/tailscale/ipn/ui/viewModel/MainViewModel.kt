@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tailscale.ipn.App
 import com.tailscale.ipn.R
+import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnStartOrigin
@@ -55,7 +56,20 @@ class MainViewModelFactory(
 class MainViewModel(
     private val appViewModel: AppViewModel,
     private val vpnEntitlementController: VpnEntitlementController,
-) : IpnViewModel() {
+    observeUserProfiles: Boolean = true,
+    clientProvider: (kotlinx.coroutines.CoroutineScope) -> com.tailscale.ipn.ui.localapi.Client = {
+      com.tailscale.ipn.ui.localapi.Client(it)
+    },
+    vpnStarter: () -> Unit = { runCatching { UninitializedApp.get().startVPN() } },
+    vpnStopper: () -> Unit = { runCatching { UninitializedApp.get().stopVPN() } },
+) :
+    IpnViewModel(
+        observeUserProfiles = observeUserProfiles,
+        clientProvider = clientProvider,
+        vpnStarter = vpnStarter,
+        vpnStopper = vpnStopper,
+        vpnActiveFlowProvider = { appViewModel.vpnActive },
+    ) {
   // The user readable state of the system
   val stateRes: StateFlow<Int> = MutableStateFlow(userStringRes(State.NoState, State.NoState, true))
   // The expected state of the VPN toggle
@@ -134,7 +148,6 @@ class MainViewModel(
                 when {
                   active && (currentState == State.Running || currentState == State.Starting) ->
                       true
-                  previousState == State.NoState && currentState == State.Starting -> true
                   else -> false
                 }
             TSLog.d(
@@ -182,7 +195,9 @@ class MainViewModel(
       }
     }
     viewModelScope.launch {
-      App.get().healthNotifier?.currentIcon?.collect { icon -> healthIcon.set(icon) }
+      runCatching { App.get().healthNotifier?.currentIcon }
+          .getOrNull()
+          ?.collect { icon -> healthIcon.set(icon) }
     }
   }
 
@@ -281,15 +296,16 @@ class MainViewModel(
 
 private fun userStringRes(currentState: State?, previousState: State?, vpnActive: Boolean): Int {
   return when {
-    previousState == State.NoState && currentState == State.Starting -> R.string.starting
+    previousState == State.NoState && currentState == State.Starting && vpnActive ->
+        R.string.starting
     currentState == State.NoState -> R.string.placeholder
     currentState == State.InUseOtherUser -> R.string.placeholder
     currentState == State.NeedsLogin ->
         if (vpnActive) R.string.please_login else R.string.connect_to_vpn
     currentState == State.NeedsMachineAuth -> R.string.needs_machine_auth
     currentState == State.Stopped -> R.string.stopped
-    currentState == State.Starting -> R.string.starting
-    currentState == State.Running -> if (vpnActive) R.string.connected else R.string.placeholder
+    currentState == State.Starting -> if (vpnActive) R.string.starting else R.string.stopped
+    currentState == State.Running -> if (vpnActive) R.string.connected else R.string.stopped
     else -> R.string.placeholder
   }
 }
