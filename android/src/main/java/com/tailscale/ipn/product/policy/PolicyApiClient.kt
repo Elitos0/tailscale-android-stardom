@@ -62,23 +62,15 @@ class PolicyApiClient(
       val result =
           when (statusCode) {
             HttpURLConnection.HTTP_UNAUTHORIZED -> {
-              val bodyPreview =
-                  runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }
-                      .getOrNull()
-                      .orEmpty()
               TSLog.d(
                   TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms body=${bodyPreview.take(300)} result=Unauthorized")
+                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Unauthorized")
               PolicyLoadResult.Unauthorized
             }
             HttpURLConnection.HTTP_FORBIDDEN -> {
-              val bodyPreview =
-                  runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }
-                      .getOrNull()
-                      .orEmpty()
               TSLog.d(
                   TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms body=${bodyPreview.take(300)} result=Disabled")
+                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Disabled")
               PolicyLoadResult.Disabled
             }
             HttpURLConnection.HTTP_OK -> {
@@ -86,17 +78,13 @@ class PolicyApiClient(
               val parsed = parseActiveAccess(bodyText)
               TSLog.d(
                   TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms body=${bodyText.take(300)} result=$parsed")
+                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=$parsed")
               parsed
             }
             else -> {
-              val bodyPreview =
-                  runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }
-                      .getOrNull()
-                      .orEmpty()
               TSLog.d(
                   TAG,
-                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms body=${bodyPreview.take(300)} result=Unavailable")
+                  "PolicyApiClient.load response: status=$statusCode duration=${duration}ms result=Unavailable")
               PolicyLoadResult.Unavailable
             }
           }
@@ -193,10 +181,8 @@ class PolicyApiClient(
   }
 
   private fun redactBearerToken(token: String): String {
-    return if (token.length > 8) {
-      "Bearer ${token.take(4)}...${token.takeLast(4)}"
-    } else if (token.isNotEmpty()) {
-      "Bearer ..."
+    return if (token.isNotEmpty()) {
+      "Bearer provided(len=${token.length})"
     } else {
       "Bearer (empty)"
     }

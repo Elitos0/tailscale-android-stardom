@@ -348,8 +348,7 @@ class Request<T>(
                   }
             }
         if (resp.statusCode() >= 400) {
-          throw Exception(
-              "Request failed with status ${resp.statusCode()}: ${respData.toString(Charset.defaultCharset())}")
+          throw Exception("Request failed with status ${resp.statusCode()}")
         }
         // The response handler will invoked internally by the request parser
         scope.launch { responseHandler(response) }

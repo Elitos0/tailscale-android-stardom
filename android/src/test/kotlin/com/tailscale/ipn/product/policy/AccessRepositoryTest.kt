@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import net.openid.appauth.AuthorizationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -381,6 +382,92 @@ class AccessRepositoryTest {
         assertFalse(
             "Log message should not contain plaintext authKey: $msg", msg.contains(secretKey))
       }
+    } finally {
+      com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
+    }
+  }
+
+  @Test
+  fun policyApiClientLoadRedactsBearerTokenAndOmitsRawResponseBody() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = com.tailscale.ipn.util.TSLog.libtailscaleWrapper
+    com.tailscale.ipn.util.TSLog.libtailscaleWrapper =
+        mock<com.tailscale.ipn.util.TSLog.LibtailscaleWrapper>().also {
+          org.mockito.Mockito.`when`(
+                  it.sendLog(
+                      org.mockito.ArgumentMatchers.anyString(),
+                      org.mockito.ArgumentMatchers.anyString()))
+              .thenAnswer { invocation ->
+                val msg = invocation.getArgument<String>(1)
+                loggedMessages.add(msg)
+                null
+              }
+        }
+    try {
+      val secretBearerToken = "super-secret-bearer-token-9988776655"
+      val secretResponseBody =
+          "{\"access\":\"active\",\"allowedExitNodes\":[],\"secret_internal_data\":\"confidential\"}"
+      val client =
+          PolicyApiClient(connectionFactory = { FakeHttpURLConnection(200, secretResponseBody) })
+      val result = client.load(secretBearerToken)
+      assertTrue(result is PolicyLoadResult.Active)
+
+      val requestLog = loggedMessages.firstOrNull { it.contains("PolicyApiClient.load request") }
+      assertNotNull("Expected request log", requestLog)
+      assertTrue(
+          "Request log should contain token length",
+          requestLog!!.contains("Authorization: Bearer provided(len=${secretBearerToken.length})"))
+      assertFalse(
+          "Request log should not contain secret token", requestLog.contains(secretBearerToken))
+      assertFalse("Request log should not contain token prefix", requestLog.contains("supe"))
+      assertFalse("Request log should not contain token suffix", requestLog.contains("6655"))
+
+      val responseLog = loggedMessages.firstOrNull { it.contains("PolicyApiClient.load response") }
+      assertNotNull("Expected response log", responseLog)
+      assertFalse(
+          "Response log should not contain raw response body",
+          responseLog!!.contains("secret_internal_data"))
+      assertFalse("Response log should not contain raw JSON", responseLog.contains("confidential"))
+      assertTrue(
+          "Response log should retain status and result",
+          responseLog.contains("status=200") && responseLog.contains("result="))
+    } finally {
+      com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
+    }
+  }
+
+  @Test
+  fun policyApiClientLoadErrorOmitsResponseBody() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = com.tailscale.ipn.util.TSLog.libtailscaleWrapper
+    com.tailscale.ipn.util.TSLog.libtailscaleWrapper =
+        mock<com.tailscale.ipn.util.TSLog.LibtailscaleWrapper>().also {
+          org.mockito.Mockito.`when`(
+                  it.sendLog(
+                      org.mockito.ArgumentMatchers.anyString(),
+                      org.mockito.ArgumentMatchers.anyString()))
+              .thenAnswer { invocation ->
+                val msg = invocation.getArgument<String>(1)
+                loggedMessages.add(msg)
+                null
+              }
+        }
+    try {
+      val secretErrorBody =
+          "{\"error\":\"invalid_grant\",\"error_description\":\"secret payload details\"}"
+      val client =
+          PolicyApiClient(connectionFactory = { FakeHttpURLConnection(401, secretErrorBody) })
+      val result = client.load("some-token")
+      assertEquals(PolicyLoadResult.Unauthorized, result)
+
+      val responseLog = loggedMessages.firstOrNull { it.contains("PolicyApiClient.load response") }
+      assertNotNull("Expected response log", responseLog)
+      assertFalse(
+          "Response log should not contain error body payload",
+          responseLog!!.contains("secret payload details"))
+      assertTrue(
+          "Response log should retain status and result",
+          responseLog.contains("status=401") && responseLog.contains("result=Unauthorized"))
     } finally {
       com.tailscale.ipn.util.TSLog.libtailscaleWrapper = originalLog
     }

@@ -6,7 +6,10 @@ package com.tailscale.ipn.product.auth
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import com.tailscale.ipn.util.TSLog
+import com.tailscale.ipn.util.TSLog.LibtailscaleWrapper
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -15,9 +18,11 @@ import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.mockito.ArgumentMatchers.anyString
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 
@@ -507,6 +512,133 @@ class AuthSessionRepositoryTest {
 
     assertFalse(transactions.consumeIf { true })
     assertFalse(repository.consumeFixedHeadscaleContinuation())
+  }
+
+  @Test
+  fun callbackUriQueryAndFragmentAreStrippedFromLogs() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = TSLog.libtailscaleWrapper
+    TSLog.libtailscaleWrapper =
+        mock<LibtailscaleWrapper>().also {
+          whenever(it.sendLog(anyString(), anyString())).thenAnswer { invocation ->
+            val msg = invocation.getArgument<String>(1)
+            loggedMessages.add(msg)
+            null
+          }
+        }
+    try {
+      val secretAuthCode = "super-secret-auth-code-12345"
+      val secretState = "secret-state-67890"
+      val mockBuilder = mock<Uri.Builder>()
+      val sanitizedUri = mock<Uri>()
+      whenever(sanitizedUri.toString()).thenReturn("stardom://auth/callback")
+      whenever(mockBuilder.clearQuery()).thenReturn(mockBuilder)
+      whenever(mockBuilder.fragment(null)).thenReturn(mockBuilder)
+      whenever(mockBuilder.build()).thenReturn(sanitizedUri)
+
+      val rawUri = mock<Uri>()
+      whenever(rawUri.toString())
+          .thenReturn(
+              "stardom://auth/callback?code=$secretAuthCode&state=$secretState#secret-fragment")
+      whenever(rawUri.buildUpon()).thenReturn(mockBuilder)
+      whenever(rawUri.scheme).thenReturn("stardom")
+      whenever(rawUri.host).thenReturn("auth")
+      whenever(rawUri.path).thenReturn("/callback")
+
+      val intentWithSecret =
+          mock<Intent>().also {
+            whenever(it.action).thenReturn("com.stardom.vpn.AUTH_CALLBACK")
+            whenever(it.data).thenReturn(rawUri)
+            whenever(it.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA)).thenReturn("state-extra")
+          }
+      val repository =
+          AuthSessionRepository(
+              InMemoryAuthStateStorage(), FakeSessionState(), FakeAppAuthGateway())
+      repository.handleAuthorizationIntent(context, intentWithSecret)
+
+      val callbackLog = loggedMessages.firstOrNull { it.contains("OIDC callback received") }
+      assertNotNull("Expected OIDC callback log", callbackLog)
+      assertTrue(
+          "Expected sanitized URI path", callbackLog!!.contains("data=stardom://auth/callback"))
+      assertFalse("Log must not contain secret auth code", callbackLog.contains(secretAuthCode))
+      assertFalse("Log must not contain query state", callbackLog.contains(secretState))
+      assertFalse("Log must not contain fragment", callbackLog.contains("secret-fragment"))
+    } finally {
+      TSLog.libtailscaleWrapper = originalLog
+    }
+  }
+
+  @Test
+  fun codeExchangeAccessTokenLogsOnlyPresenceAndLength() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = TSLog.libtailscaleWrapper
+    TSLog.libtailscaleWrapper =
+        mock<LibtailscaleWrapper>().also {
+          whenever(it.sendLog(anyString(), anyString())).thenAnswer { invocation ->
+            val msg = invocation.getArgument<String>(1)
+            loggedMessages.add(msg)
+            null
+          }
+        }
+    try {
+      val secretToken = "super-secret-oidc-access-token-987654321"
+      val tokenResponse = mock<TokenResponse>()
+      val field = TokenResponse::class.java.getDeclaredField("accessToken")
+      field.isAccessible = true
+      field.set(tokenResponse, secretToken)
+      val gateway =
+          FakeAppAuthGateway(
+              authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+              tokenResponse = tokenResponse)
+      val repository =
+          AuthSessionRepository(InMemoryAuthStateStorage(), FakeSessionState(), gateway)
+      repository.startAuthorization(context) {}
+      repository.handleAuthorizationIntent(context, intent)
+
+      val exchangeLog = loggedMessages.firstOrNull { it.contains("OIDC code exchange succeeded") }
+      assertNotNull("Expected code exchange log", exchangeLog)
+      assertTrue(
+          "Expected token presence and length",
+          exchangeLog!!.contains("accessToken=provided(len=${secretToken.length})"))
+      assertFalse("Log must not contain secret token", exchangeLog.contains(secretToken))
+      assertFalse("Log must not contain token prefix", exchangeLog.contains("supe"))
+      assertFalse("Log must not contain token suffix", exchangeLog.contains("4321"))
+    } finally {
+      TSLog.libtailscaleWrapper = originalLog
+    }
+  }
+
+  @Test
+  fun tokenRefreshAccessTokenLogsOnlyPresenceAndLength() {
+    val loggedMessages = mutableListOf<String>()
+    val originalLog = TSLog.libtailscaleWrapper
+    TSLog.libtailscaleWrapper =
+        mock<LibtailscaleWrapper>().also {
+          whenever(it.sendLog(anyString(), anyString())).thenAnswer { invocation ->
+            val msg = invocation.getArgument<String>(1)
+            loggedMessages.add(msg)
+            null
+          }
+        }
+    try {
+      val secretToken = "xyzsecret_bearer_token_11223344"
+      val gateway = FakeAppAuthGateway(freshToken = secretToken)
+      val repository =
+          AuthSessionRepository(
+              InMemoryAuthStateStorage("state"), FakeSessionState(isAuthorized = true), gateway)
+      repository.withFreshBearerToken(context) {}
+
+      val refreshLog = loggedMessages.firstOrNull { it.contains("OIDC token refresh succeeded") }
+      assertNotNull("Expected token refresh log", refreshLog)
+      assertTrue(
+          "Expected token presence and length",
+          refreshLog!!.contains("accessToken=provided(len=${secretToken.length})"))
+      assertFalse("Log must not contain secret token", refreshLog.contains(secretToken))
+      assertFalse("Log must not contain token prefix", refreshLog.contains("xyzsecret"))
+      assertFalse("Log must not contain token suffix", refreshLog.contains("3344"))
+    } finally {
+      TSLog.libtailscaleWrapper = originalLog
+    }
   }
 }
 

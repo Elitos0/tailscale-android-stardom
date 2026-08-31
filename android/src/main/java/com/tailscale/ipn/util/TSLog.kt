@@ -3,7 +3,9 @@
 package com.tailscale.ipn.util
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
+import com.tailscale.ipn.BuildConfig
 import libtailscale.Libtailscale
 
 object TSLog {
@@ -11,6 +13,8 @@ object TSLog {
 
   private var appContext: Context? = null
   var libtailscaleWrapper = LibtailscaleWrapper()
+  internal var isDebugProvider: () -> Boolean = { BuildConfig.DEBUG }
+  internal var isXiaomiProvider: () -> Boolean = { isXiaomiDevice() }
 
   fun init(context: Context) {
     appContext = context.applicationContext
@@ -20,7 +24,11 @@ object TSLog {
   @JvmOverloads
   fun d(tag: String? = TAG, message: String) {
     val resolvedTag = tag ?: TAG
-    Log.i(resolvedTag, message)
+    if (isDebugProvider() && isXiaomiProvider()) {
+      Log.i(resolvedTag, message)
+    } else {
+      Log.d(resolvedTag, message)
+    }
     libtailscaleWrapper.sendLog(resolvedTag, message)
   }
 
@@ -44,11 +52,9 @@ object TSLog {
     val resolvedTag = tag ?: TAG
     if (throwable == null) {
       Log.w(resolvedTag, message)
-      Log.i(resolvedTag, message)
       libtailscaleWrapper.sendLog(resolvedTag, message)
     } else {
       Log.w(resolvedTag, message, throwable)
-      Log.i(resolvedTag, "$message: ${throwable.localizedMessage ?: throwable.message}", throwable)
       libtailscaleWrapper.sendLog(
           resolvedTag, "$message ${throwable.localizedMessage ?: throwable.message}")
     }
@@ -58,8 +64,17 @@ object TSLog {
   @JvmOverloads
   fun v(tag: String? = TAG, message: String) {
     val resolvedTag = tag ?: TAG
-    Log.i(resolvedTag, message)
-    libtailscaleWrapper.sendLog(resolvedTag, message)
+    if (isDebugProvider()) {
+      if (isXiaomiProvider()) {
+        Log.i(resolvedTag, message)
+      } else {
+        Log.v(resolvedTag, message)
+      }
+      libtailscaleWrapper.sendLog(resolvedTag, message)
+    } else if (isUnstableRelease()) {
+      Log.v(resolvedTag, message)
+      libtailscaleWrapper.sendLog(resolvedTag, message)
+    }
   }
 
   // Overloaded function without Throwable because Java does not support default parameters
@@ -67,7 +82,6 @@ object TSLog {
   fun e(tag: String?, message: String) {
     val resolvedTag = tag ?: TAG
     Log.e(resolvedTag, message)
-    Log.i(resolvedTag, message)
     libtailscaleWrapper.sendLog(resolvedTag, message)
   }
 
@@ -76,14 +90,23 @@ object TSLog {
     val resolvedTag = tag ?: TAG
     if (throwable == null) {
       Log.e(resolvedTag, message)
-      Log.i(resolvedTag, message)
       libtailscaleWrapper.sendLog(resolvedTag, message)
     } else {
       Log.e(resolvedTag, message, throwable)
-      Log.i(resolvedTag, "$message: ${throwable.localizedMessage ?: throwable.message}", throwable)
       libtailscaleWrapper.sendLog(
           resolvedTag, "$message ${throwable.localizedMessage ?: throwable.message}")
     }
+  }
+
+  private fun isXiaomiDevice(): Boolean {
+    val manufacturer = Build.MANUFACTURER?.lowercase().orEmpty()
+    val brand = Build.BRAND?.lowercase().orEmpty()
+    return manufacturer == "xiaomi" ||
+        manufacturer == "redmi" ||
+        manufacturer == "poco" ||
+        brand == "xiaomi" ||
+        brand == "redmi" ||
+        brand == "poco"
   }
 
   private fun isUnstableRelease(): Boolean {

@@ -185,8 +185,8 @@ class AuthSessionRepository(
         }
         val request = appAuth.createAuthorizationRequest(configuration)
         transactionStorage.write(PendingAuthorizationTransaction(request, nowMillis()))
-        TSLog.d(
-            "AuthLifecycle", "OIDC launch browser: state=${request.state} uri=${request.toUri()}")
+        val sanitizedUri = sanitizeUri(request.toUri())
+        TSLog.d("AuthLifecycle", "OIDC launch browser: state=${request.state} uri=$sanitizedUri")
         appAuth.startAuthorization(context, request)
       }
     }
@@ -199,9 +199,10 @@ class AuthSessionRepository(
       onFinished: () -> Unit = {},
   ) {
     val generation = synchronized(sessionLock) { sessionGeneration }
+    val sanitizedData = sanitizeUri(intent.data)
     TSLog.d(
         "AuthLifecycle",
-        "OIDC callback received: action=${intent.action} data=${intent.data} stateExtra=${intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA)}")
+        "OIDC callback received: action=${intent.action} data=$sanitizedData stateExtra=${intent.getStringExtra(AUTH_TRANSACTION_STATE_EXTRA)}")
     val result =
         appAuth.authorizationResult(intent)
             ?: run {
@@ -277,13 +278,10 @@ class AuthSessionRepository(
                   tokenException ?: IllegalStateException("Unable to exchange OIDC code")),
               authorized = false)
         } else {
-          val redactedAccessToken =
-              tokenResponse.accessToken?.let {
-                if (it.length > 8) "${it.take(4)}...${it.takeLast(4)}" else "***"
-              }
+          val tokenLog = tokenResponse.accessToken?.let { "provided(len=${it.length})" } ?: "null"
           TSLog.d(
               "AuthLifecycle",
-              "OIDC code exchange succeeded: accessToken=$redactedAccessToken idToken=${tokenResponse.idToken != null} refreshToken=${tokenResponse.refreshToken != null}")
+              "OIDC code exchange succeeded: accessToken=$tokenLog idToken=${tokenResponse.idToken != null} refreshToken=${tokenResponse.refreshToken != null}")
           completeAuthorization(
               generation,
               Result.success(Unit),
@@ -332,10 +330,8 @@ class AuthSessionRepository(
               }
               Result.failure(exception ?: IllegalStateException("Unable to refresh token"))
             } else {
-              val redacted =
-                  if (accessToken.length > 8) "${accessToken.take(4)}...${accessToken.takeLast(4)}"
-                  else "***"
-              TSLog.d("AuthLifecycle", "OIDC token refresh succeeded: accessToken=$redacted")
+              val tokenLog = "provided(len=${accessToken.length})"
+              TSLog.d("AuthLifecycle", "OIDC token refresh succeeded: accessToken=$tokenLog")
               persistLocked()
               _authentikState.value = AuthentikState.Authorized
               Result.success(accessToken)
@@ -352,6 +348,22 @@ class AuthSessionRepository(
 
   fun requireReauthentication() {
     clearSession(AuthentikState.ReauthenticationRequired)
+  }
+
+  internal fun sanitizeUri(uri: Uri?): String? {
+    if (uri == null) return null
+    return try {
+      uri.buildUpon().clearQuery().fragment(null).build().toString()
+    } catch (_: Exception) {
+      val scheme = uri.scheme
+      val host = uri.host
+      val path = uri.path.orEmpty()
+      if (scheme != null && host != null) {
+        "$scheme://$host$path"
+      } else {
+        uri.path ?: ""
+      }
+    }
   }
 
   fun consumeFixedHeadscaleContinuation(): Boolean =
