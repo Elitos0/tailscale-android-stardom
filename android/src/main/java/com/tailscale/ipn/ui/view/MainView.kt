@@ -203,6 +203,24 @@ fun resolveStardomVpnState(
   }
 }
 
+internal fun isStardomLoginPresentationLoading(
+    authError: Boolean,
+    isLoginLoading: Boolean,
+    authentikState: AuthentikState?,
+): Boolean = !authError && (isLoginLoading || authentikState == AuthentikState.Authorizing)
+
+internal fun resolveStardomPresentationVpnState(
+    vpnState: VpnState,
+    authError: Boolean,
+    isLoginLoading: Boolean,
+    authentikState: AuthentikState?,
+): VpnState =
+    if (isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState)) {
+      VpnState.RESOLVING_STAR_ROUTE
+    } else {
+      vpnState
+    }
+
 fun resolveStardomStatusText(
     vpnState: VpnState,
     connectionStage: ConnectionStage,
@@ -270,8 +288,9 @@ fun isStardomStatusError(
     showKeyExpiry: Boolean = false,
     authError: Boolean = false,
     isLoginLoading: Boolean = false,
+    authentikState: AuthentikState? = null,
 ): Boolean =
-    !isLoginLoading &&
+    !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState) &&
         (authError ||
             vpnState.isError ||
             showKeyExpiry ||
@@ -284,12 +303,12 @@ internal fun isPowerControlEnabled(connectionStage: ConnectionStage): Boolean =
 
 internal fun isStardomLoginModalVisible(
     connectionStage: ConnectionStage,
+    authError: Boolean = false,
     isLoginLoading: Boolean,
     authentikState: AuthentikState?
 ): Boolean =
     connectionStage == ConnectionStage.SignIn &&
-        !isLoginLoading &&
-        authentikState != AuthentikState.Authorizing
+        (authError || !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -337,6 +356,13 @@ fun MainView(
           isToggleInProgress = isToggleInProgress,
           connectionStage = connectionStage,
           accessState = accessState)
+
+  val presentationVpnState =
+      resolveStardomPresentationVpnState(
+          vpnState = stardomVpnState,
+          authError = authError,
+          isLoginLoading = isLoginLoading,
+          authentikState = authentikState)
 
   val exitNodeViewModel: ExitNodePickerViewModel =
       viewModel(
@@ -423,8 +449,7 @@ fun MainView(
 
   val isPowerControlEnabled =
       isPowerControlEnabled(connectionStage) &&
-          !isLoginLoading &&
-          authentikState != AuthentikState.Authorizing
+          !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState)
   val onPowerToggle: () -> Unit = {
     when {
       state == Ipn.State.NeedsMachineAuth -> {
@@ -475,7 +500,7 @@ fun MainView(
                   Modifier.fillMaxSize()
                       .background(StardomColors.Background)
                       .padding(paddingInsets)) {
-                StardomBackground(vpnState = stardomVpnState)
+                StardomBackground(vpnState = presentationVpnState)
 
                 Column(
                     modifier =
@@ -483,7 +508,7 @@ fun MainView(
                             .padding(horizontal = StardomDimensions.ScreenHorizontal),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                       StardomHeader(
-                          vpnState = stardomVpnState,
+                          vpnState = presentationVpnState,
                           language = selectedLanguage,
                           onProfileClick = { showAccountDialog = true },
                           onSettingsClick = { showSettingsSheet = true })
@@ -491,7 +516,7 @@ fun MainView(
                       Spacer(modifier = Modifier.weight(1f))
 
                       StardomOrbitControl(
-                          vpnState = stardomVpnState,
+                          vpnState = presentationVpnState,
                           onClick = onPowerToggle,
                           enabled = isPowerControlEnabled,
                           language = selectedLanguage,
@@ -501,7 +526,7 @@ fun MainView(
 
                       val statusText =
                           resolveStardomStatusText(
-                              vpnState = stardomVpnState,
+                              vpnState = presentationVpnState,
                               connectionStage = connectionStage,
                               authentikState = authentikState,
                               ipnState = state,
@@ -511,15 +536,16 @@ fun MainView(
                               language = selectedLanguage)
                       val isStatusError =
                           isStardomStatusError(
-                              vpnState = stardomVpnState,
+                              vpnState = presentationVpnState,
                               connectionStage = connectionStage,
                               ipnState = state,
                               showKeyExpiry = showKeyExpiry,
                               authError = authError,
-                              isLoginLoading = isLoginLoading)
+                              isLoginLoading = isLoginLoading,
+                              authentikState = authentikState)
                       StardomStatus(
                           statusText = statusText,
-                          vpnState = stardomVpnState,
+                          vpnState = presentationVpnState,
                           isError = isStatusError,
                           language = selectedLanguage)
                       Spacer(Modifier.height(20.dp))
@@ -584,7 +610,8 @@ fun MainView(
                   }
                 }
 
-                if (isStardomLoginModalVisible(connectionStage, isLoginLoading, authentikState)) {
+                if (isStardomLoginModalVisible(
+                    connectionStage, authError, isLoginLoading, authentikState)) {
                   StardomLoginModal(
                       onSignIn = navigation.onNavigateStardomLogin, language = selectedLanguage)
                 }

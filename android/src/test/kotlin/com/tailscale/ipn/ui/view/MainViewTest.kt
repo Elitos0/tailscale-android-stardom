@@ -11,6 +11,7 @@ import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.ConnectionMode
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.IpnLocal
+import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.model.Tailcfg
 import com.tailscale.ipn.ui.model.VpnProtocol
 import com.tailscale.ipn.ui.model.VpnState
@@ -52,6 +53,49 @@ class MainViewTest {
   fun loadingStatusSuppressesAStaleVpnErrorAccent() {
     assertEquals(
         StardomColors.TextPrimary, StardomColors.stateAccent(VpnState.ERROR, isError = false))
+  }
+
+  @Test
+  fun loginLoadingMapsEveryStaleErrorVisualToNeutralResolvingState() {
+    val presentationState =
+        resolveStardomPresentationVpnState(
+            vpnState = VpnState.ERROR,
+            authError = false,
+            isLoginLoading = true,
+            authentikState = AuthentikState.SignedOut)
+
+    assertEquals(VpnState.RESOLVING_STAR_ROUTE, presentationState)
+    assertFalse(presentationState.isError)
+    assertEquals(
+        "ИНИЦИАЛИЗАЦИЯ...",
+        StardomLocalization.powerButtonAction(presentationState, AppLanguage.RU))
+    assertEquals(StardomColors.TextPrimary, StardomColors.stateAccent(presentationState))
+    assertFalse(
+        isStardomStatusError(
+            vpnState = presentationState,
+            connectionStage = ConnectionStage.AccessUnavailable,
+            isLoginLoading = true,
+            authentikState = AuthentikState.SignedOut))
+  }
+
+  @Test
+  fun loginFailureRestoresActualErrorPresentationAndLoginModal() {
+    val presentationState =
+        resolveStardomPresentationVpnState(
+            vpnState = VpnState.ERROR,
+            authError = true,
+            isLoginLoading = false,
+            authentikState = AuthentikState.SignedOut)
+
+    assertEquals(VpnState.ERROR, presentationState)
+    assertEquals(
+        "ПОВТОРИТЬ", StardomLocalization.powerButtonAction(presentationState, AppLanguage.RU))
+    assertTrue(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            authError = true,
+            isLoginLoading = false,
+            authentikState = AuthentikState.SignedOut))
   }
 
   // --- Stardom VPN State Mapping Tests ---
