@@ -114,6 +114,13 @@ class MainViewModel(
   // Icon displayed in the button to present the health view
   val healthIcon: StateFlow<Int?> = MutableStateFlow(null)
 
+  private val _authError = MutableStateFlow(false)
+  val authError: StateFlow<Boolean> = _authError
+
+  fun setAuthError(error: Boolean) {
+    _authError.value = error
+  }
+
   fun updateSearchTerm(term: String) {
     _searchTerm.value = term
   }

@@ -372,8 +372,8 @@ object StardomLocalization {
 
   fun accountStubNotice(lang: AppLanguage): String =
       when (lang) {
-        AppLanguage.RU -> "ПРОФИЛЬ: ВРЕМЕННЫЙ СТАТУС (HEADSCALE МЕТАДАННЫЕ)"
-        AppLanguage.EN -> "PROFILE: TEMPORARY STUB (HEADSCALE METADATA)"
+        AppLanguage.RU -> "ПРОФИЛЬ: ВРЕМЕННЫЙ СТАТУС (МЕТАДАННЫЕ УЗЛА)"
+        AppLanguage.EN -> "PROFILE: TEMPORARY STUB (NODE METADATA)"
       }
 
   fun logoutBtn(lang: AppLanguage): String =

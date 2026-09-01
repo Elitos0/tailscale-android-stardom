@@ -380,20 +380,51 @@ class MainViewTest {
 
   @Test
   fun directLoginActionNavigatesDirectlyWithoutStartingVpn() {
-    var navigatedToLogin = false
+    var authStarts = 0
+    var navigatedToIntermediate = false
     var vpnStarted = false
     var permissionRequested = false
 
-    val onLoginAction: () -> Unit = { navigatedToLogin = true }
+    val startAuthAction: () -> Unit = { authStarts++ }
+    val navigateIntermediateAction: () -> Unit = { navigatedToIntermediate = true }
     val startVpnAction: () -> Unit = { vpnStarted = true }
     val permissionAction: () -> Unit = { permissionRequested = true }
 
-    // Invoking the direct login action from modal
-    onLoginAction()
+    // Invoking the direct modal login action
+    startAuthAction()
 
-    assertTrue("Login action must trigger direct navigation", navigatedToLogin)
-    assertFalse("Login action must not start VPN", vpnStarted)
-    assertFalse("Login action must not request VPN permission", permissionRequested)
+    assertEquals("Authorization starter must be called exactly once", 1, authStarts)
+    assertFalse("Must not navigate to intermediate screen", navigatedToIntermediate)
+    assertFalse("Must not start VPN", vpnStarted)
+    assertFalse("Must not request VPN permission", permissionRequested)
+  }
+
+  @Test
+  fun discoveryFailureRendersRetryableMainStatus() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            authError = true,
+            language = AppLanguage.EN)
+    assertEquals("AUTH FAILED // RETRY", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            authError = true,
+            language = AppLanguage.RU)
+    assertEquals("СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ", statusRu)
+
+    assertTrue(
+        "Discovery failure must mark status as error",
+        isStardomStatusError(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authError = true))
   }
 
   @Test

@@ -40,18 +40,21 @@ class StardomMainScreenFidelityTest {
 
   @Test
   fun directSignInActionInvokesNavigationDirectlyWithoutVpnSideEffects() {
-    var loginNavigated = false
+    var authStarts = 0
+    var navigatedToIntermediate = false
     var vpnToggled = false
     var permissionRequested = false
 
-    val onNavigateLogin: () -> Unit = { loginNavigated = true }
+    val onStartAuth: () -> Unit = { authStarts++ }
+    val onNavigateIntermediate: () -> Unit = { navigatedToIntermediate = true }
     val onToggleVpn: () -> Unit = { vpnToggled = true }
     val onRequestPermission: () -> Unit = { permissionRequested = true }
 
     // Execute direct login action
-    onNavigateLogin()
+    onStartAuth()
 
-    assertTrue("Direct sign in must invoke navigation", loginNavigated)
+    assertEquals("Direct sign in must start authorization exactly once", 1, authStarts)
+    assertFalse("Direct sign in must not navigate to intermediate screen", navigatedToIntermediate)
     assertFalse("Direct sign in must not toggle VPN", vpnToggled)
     assertFalse("Direct sign in must not request VPN permission", permissionRequested)
   }
@@ -222,6 +225,24 @@ class StardomMainScreenFidelityTest {
         resolveStardomStatusText(
             vpnState = VpnState.DISCONNECTED,
             connectionStage = ConnectionStage.Connect,
+            language = AppLanguage.RU))
+
+    // Discovery failure / Auth error
+    assertEquals(
+        "AUTH FAILED // RETRY",
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            authError = true,
+            language = AppLanguage.EN))
+    assertEquals(
+        "СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ",
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.SignedOut,
+            authError = true,
             language = AppLanguage.RU))
   }
 

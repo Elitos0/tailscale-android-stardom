@@ -20,7 +20,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -313,8 +312,21 @@ class MainActivity : ComponentActivity() {
                             navController.navigate(StardomRoute.SETTINGS.path)
                           },
                           onNavigateStardomLogin = {
-                            stardomSessionController.clearSession()
-                            navController.navigate(StardomRoute.LOGIN_WITH_STARDOM.path)
+                            viewModel.setAuthError(false)
+                            stardomSessionController.startAuthorization(this@MainActivity) {
+                                authResult ->
+                              authResult
+                                  .onFailure { error ->
+                                    TSLog.e(
+                                        "MainActivity",
+                                        "Direct Stardom login failed: ${error::class.java.simpleName}")
+                                    viewModel.setAuthError(true)
+                                  }
+                                  .onSuccess {
+                                    viewModel.setAuthError(false)
+                                    resumeFixedControlLogin()
+                                  }
+                            }
                           },
                           onNavigateToPeerDetails = {
                             navController.navigate(StardomProductionRoutes.peerDetails(it.StableID))
@@ -379,7 +391,23 @@ class MainActivity : ComponentActivity() {
                           onNavigateHome = backTo(StardomRoute.MAIN.path),
                           onReauthenticate = {
                             stardomSessionController.clearSession()
-                            navController.navigate(StardomRoute.LOGIN_WITH_STARDOM.path)
+                            viewModel.setAuthError(false)
+                            navController.popBackStack(
+                                route = StardomRoute.MAIN.path, inclusive = false)
+                            stardomSessionController.startAuthorization(this@MainActivity) {
+                                authResult ->
+                              authResult
+                                  .onFailure { error ->
+                                    TSLog.e(
+                                        "MainActivity",
+                                        "Direct Stardom login failed: ${error::class.java.simpleName}")
+                                    viewModel.setAuthError(true)
+                                  }
+                                  .onSuccess {
+                                    viewModel.setAuthError(false)
+                                    resumeFixedControlLogin()
+                                  }
+                            }
                           },
                           onClearStardomSession = stardomSessionController::clearSession)
 
@@ -600,9 +628,7 @@ class MainActivity : ComponentActivity() {
     TSLog.e(
         TAG,
         "Recovered fixed control login failed: stage=$stage error=${error::class.java.simpleName}")
-    if (error !is PolicyApiUnauthorizedException) {
-      runOnUiThread { Toast.makeText(this, R.string.add_profile_failed, Toast.LENGTH_LONG).show() }
-    }
+    viewModel.setAuthError(true)
     fixedControlLoginInProgress = false
   }
 

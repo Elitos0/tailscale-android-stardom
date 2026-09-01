@@ -239,9 +239,12 @@ fun resolveStardomStatusText(
     authentikState: AuthentikState? = null,
     ipnState: Ipn.State? = null,
     showKeyExpiry: Boolean = false,
+    authError: Boolean = false,
     language: AppLanguage = AppLanguage.RU,
 ): String {
   return when {
+    authError ->
+        if (language == AppLanguage.RU) "СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ" else "AUTH FAILED // RETRY"
     ipnState == Ipn.State.NeedsMachineAuth ->
         if (language == AppLanguage.RU) "ТРЕБУЕТСЯ АВТОРИЗАЦИЯ УСТРОЙСТВА"
         else "MACHINE AUTH REQUIRED"
@@ -283,15 +286,18 @@ fun isStardomStatusError(
         vpnState = vpnState,
         connectionStage = connectionStage,
         ipnState = null,
-        showKeyExpiry = false)
+        showKeyExpiry = false,
+        authError = false)
 
 fun isStardomStatusError(
     vpnState: VpnState,
     connectionStage: ConnectionStage,
     ipnState: Ipn.State? = null,
     showKeyExpiry: Boolean = false,
+    authError: Boolean = false,
 ): Boolean =
-    vpnState.isError ||
+    authError ||
+        vpnState.isError ||
         showKeyExpiry ||
         ipnState == Ipn.State.NeedsMachineAuth ||
         connectionStage == ConnectionStage.AccessUnavailable ||
@@ -321,6 +327,7 @@ fun MainView(
   val isVpnActive by viewModel.isVpnActive.collectAsState(initial = false)
   val peersList by viewModel.peers.collectAsState(initial = emptyList())
 
+  val authError by viewModel.authError.collectAsState()
   val hasHeadscaleProfile = state != Ipn.State.NeedsLogin && user?.let { !it.isEmpty() } == true
   val context = LocalContext.current
   val refreshScope = rememberCoroutineScope()
@@ -511,13 +518,15 @@ fun MainView(
                               authentikState = authentikState,
                               ipnState = state,
                               showKeyExpiry = showKeyExpiry,
+                              authError = authError,
                               language = selectedLanguage)
                       val isStatusError =
                           isStardomStatusError(
                               vpnState = stardomVpnState,
                               connectionStage = connectionStage,
                               ipnState = state,
-                              showKeyExpiry = showKeyExpiry)
+                              showKeyExpiry = showKeyExpiry,
+                              authError = authError)
                       StardomStatus(
                           statusText = statusText,
                           isError = isStatusError,
@@ -554,7 +563,7 @@ fun MainView(
                       onDismiss = { showAccountDialog = false },
                       onLogout = {
                         sessionController.clearSession()
-                        navigation.onNavigateStardomLogin()
+                        viewModel.setAuthError(false)
                       },
                       language = selectedLanguage)
                 }
