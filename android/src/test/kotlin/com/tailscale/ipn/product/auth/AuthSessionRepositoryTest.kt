@@ -84,6 +84,8 @@ class AuthSessionRepositoryTest {
     assertEquals(1, state.tokenUpdates)
     assertEquals(listOf("state", "state"), storage.writes)
     assertTrue(completion.single().isSuccess)
+    assertEquals(AuthentikState.AuthorizedLoading, repository.authentikState.value)
+    repository.markAuthorizationReady()
     assertEquals(AuthentikState.Authorized, repository.authentikState.value)
   }
 

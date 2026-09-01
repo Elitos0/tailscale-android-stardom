@@ -185,6 +185,7 @@ class MainViewModel(
 
       result.fold(
           onSuccess = {
+            sessionController.authSessionRepository.markAuthorizationReady()
             _authError.value = false
             _isLoginLoading.value = false
             onComplete(Result.success(Unit))

@@ -207,7 +207,11 @@ internal fun isStardomLoginPresentationLoading(
     authError: Boolean,
     isLoginLoading: Boolean,
     authentikState: AuthentikState?,
-): Boolean = !authError && (isLoginLoading || authentikState == AuthentikState.Authorizing)
+): Boolean =
+    !authError &&
+        (isLoginLoading ||
+            authentikState == AuthentikState.Authorizing ||
+            authentikState == AuthentikState.AuthorizedLoading)
 
 internal fun resolveStardomPresentationVpnState(
     vpnState: VpnState,
@@ -234,7 +238,9 @@ fun resolveStardomStatusText(
   return when {
     authError ->
         if (language == AppLanguage.RU) "СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ" else "AUTH FAILED // RETRY"
-    isLoginLoading || authentikState == AuthentikState.Authorizing ->
+    isLoginLoading ||
+        authentikState == AuthentikState.Authorizing ||
+        authentikState == AuthentikState.AuthorizedLoading ->
         if (language == AppLanguage.RU) "ВХОД В СИСТЕМУ..." else "SIGNING IN..."
     ipnState == Ipn.State.NeedsMachineAuth ->
         if (language == AppLanguage.RU) "ТРЕБУЕТСЯ АВТОРИЗАЦИЯ УСТРОЙСТВА"

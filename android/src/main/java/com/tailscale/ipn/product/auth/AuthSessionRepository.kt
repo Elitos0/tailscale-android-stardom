@@ -401,7 +401,7 @@ open class AuthSessionRepository(
           callback = completion?.takeIf { it.generation == generation }?.callback
           if (callback != null) completion = null
           _authentikState.value =
-              if (authorized) AuthentikState.Authorized else AuthentikState.SignedOut
+              if (authorized) AuthentikState.AuthorizedLoading else AuthentikState.SignedOut
           if (authorized && callback == null) {
             transactionStorage.markFixedHeadscaleContinuation()
             recovered = true
@@ -413,6 +413,14 @@ open class AuthSessionRepository(
     callback?.invoke(result)
     if (recovered) onRecoveredAuthorization()
     return true
+  }
+
+  fun markAuthorizationReady() {
+    synchronized(sessionLock) {
+      if (_authentikState.value == AuthentikState.AuthorizedLoading) {
+        _authentikState.value = AuthentikState.Authorized
+      }
+    }
   }
 
   private fun persistLocked() {

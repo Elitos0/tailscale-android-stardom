@@ -10,5 +10,7 @@ sealed interface AuthentikState {
 
   data object Authorized : AuthentikState
 
+  data object AuthorizedLoading : AuthentikState
+
   data object ReauthenticationRequired : AuthentikState
 }
