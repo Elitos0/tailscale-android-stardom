@@ -22,11 +22,13 @@ import com.tailscale.ipn.ui.util.AdvertisedRoutesHelper
 import com.tailscale.ipn.ui.util.LoadingIndicator
 import com.tailscale.ipn.ui.util.set
 import com.tailscale.ipn.util.TSLog
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * Base model for most models in this application. Provides common facilities for watching IPN
@@ -325,6 +327,23 @@ open class IpnViewModel(
       result
           .onSuccess { loggedInUser.set(if (it.isEmpty()) null else it) }
           .onFailure { TSLog.e(TAG, "Error loading current profile: ${it.message}") }
+    }
+  }
+
+  suspend fun loadUserProfilesSuspend() {
+    val client = clientProvider(viewModelScope)
+    suspendCancellableCoroutine<Unit> { cont ->
+      client.profiles { pResult ->
+        pResult.onSuccess(loginProfiles::set)
+        client.currentProfile { cResult ->
+          cResult.onSuccess { profile ->
+            loggedInUser.set(if (profile.isEmpty()) null else profile)
+          }
+          if (cont.isActive) {
+            cont.resume(Unit)
+          }
+        }
+      }
     }
   }
 

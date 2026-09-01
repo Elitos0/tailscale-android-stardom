@@ -11,7 +11,7 @@ import com.tailscale.ipn.product.policy.AccessRepository
 import com.tailscale.ipn.product.policy.AccessState
 import kotlinx.coroutines.flow.StateFlow
 
-class StardomSessionController(
+open class StardomSessionController(
     val authSessionRepository: AuthSessionRepository,
     val accessRepository: AccessRepository,
 ) {
@@ -35,14 +35,14 @@ class StardomSessionController(
   fun hasFixedHeadscaleContinuation(): Boolean =
       authSessionRepository.hasFixedHeadscaleContinuation()
 
-  fun ackFixedHeadscaleContinuation() = authSessionRepository.ackFixedHeadscaleContinuation()
+  open fun ackFixedHeadscaleContinuation() = authSessionRepository.ackFixedHeadscaleContinuation()
 
   fun requireReauthentication() {
     authSessionRepository.requireReauthentication()
     accessRepository.clear()
   }
 
-  suspend fun refreshAccess(context: Context, force: Boolean = false): AccessState =
+  open suspend fun refreshAccess(context: Context, force: Boolean = false): AccessState =
       accessRepository.refresh(context, authSessionRepository, force = force)
 
   fun clearSession() {

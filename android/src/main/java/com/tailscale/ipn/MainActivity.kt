@@ -57,12 +57,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.tailscale.ipn.mdm.MDMSettings
-import com.tailscale.ipn.mdm.ShowHide
 import com.tailscale.ipn.product.StardomProductionRoutes
 import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
-import com.tailscale.ipn.product.policy.PolicyApiClient
-import com.tailscale.ipn.product.policy.PolicyApiUnauthorizedException
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
@@ -110,7 +107,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
   private lateinit var navController: NavHostController
@@ -157,9 +153,7 @@ class MainActivity : ComponentActivity() {
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
-    if (MDMSettings.onboardingFlow.flow.value.value == ShowHide.Hide) {
-      setIntroScreenViewed(true)
-    }
+    setIntroScreenViewed(true)
     // (jonathan) TODO: Force the app to be portrait on small screens until we have
     // proper landscape layout support
     if (!isLandscapeCapable()) {
@@ -313,6 +307,7 @@ class MainActivity : ComponentActivity() {
                           },
                           onNavigateStardomLogin = {
                             viewModel.setAuthError(false)
+                            viewModel.setLoginLoading(true)
                             stardomSessionController.startAuthorization(this@MainActivity) {
                                 authResult ->
                               authResult
@@ -320,12 +315,10 @@ class MainActivity : ComponentActivity() {
                                     TSLog.e(
                                         "MainActivity",
                                         "Direct Stardom login failed: ${error::class.java.simpleName}")
+                                    viewModel.setLoginLoading(false)
                                     viewModel.setAuthError(true)
                                   }
-                                  .onSuccess {
-                                    viewModel.setAuthError(false)
-                                    resumeFixedControlLogin()
-                                  }
+                                  .onSuccess { resumeFixedControlLogin() }
                             }
                           },
                           onNavigateToPeerDetails = {
@@ -501,10 +494,6 @@ class MainActivity : ComponentActivity() {
                         backToSettings = backTo(StardomRoute.MAIN.path))
                   }
                 }
-            if (isIntroScreenViewedSet()) {
-              navController.navigate(StardomRoute.INTRO.path)
-              setIntroScreenViewed(true)
-            }
           }
         }
         // Login actions are app wide.  If we are told about a browse-to-url, we should render it
@@ -587,38 +576,19 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun resumeFixedControlLogin() {
-    val authSession = stardomSessionController.authSessionRepository
-    authSession.withFreshBearerToken(this) { tokenResult ->
-      tokenResult
-          .onFailure { error -> finishFixedControlLogin("token refresh", error) }
-          .onSuccess { token ->
-            lifecycleScope.launch(Dispatchers.IO) {
-              val keyResult = PolicyApiClient().fetchNodeAuthKey(token)
-              withContext(Dispatchers.Main) {
-                keyResult
-                    .onFailure { error ->
-                      if (error is PolicyApiUnauthorizedException) {
-                        stardomSessionController.requireReauthentication()
-                      }
-                      finishFixedControlLogin("node auth key", error)
-                    }
-                    .onSuccess { authKey ->
-                      viewModel.loginWithAuthKey(authKey) { result ->
-                        result
-                            .onFailure { error ->
-                              finishFixedControlLogin("Headscale login", error)
-                            }
-                            .onSuccess {
-                              stardomSessionController.ackFixedHeadscaleContinuation()
-                              fixedControlLoginInProgress = false
-                              if (this@MainActivity::navController.isInitialized) {
-                                navController.popBackStack(
-                                    route = StardomRoute.MAIN.path, inclusive = false)
-                              }
-                            }
-                      }
-                    }
-              }
+    viewModel.executeStardomLoginPipeline(
+        context = this@MainActivity,
+        sessionController = stardomSessionController,
+    ) { result ->
+      result
+          .onFailure { error ->
+            TSLog.e(TAG, "Fixed control login pipeline failed: ${error::class.java.simpleName}")
+            fixedControlLoginInProgress = false
+          }
+          .onSuccess {
+            fixedControlLoginInProgress = false
+            if (this@MainActivity::navController.isInitialized) {
+              navController.popBackStack(route = StardomRoute.MAIN.path, inclusive = false)
             }
           }
     }

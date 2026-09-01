@@ -38,24 +38,19 @@ class AuthFirstOnboardingTest {
     scenario = ActivityScenario.launch(MainActivity::class.java)
 
     StardomInstrumentationState.assertForegroundProductUi(device)
-    val getStarted =
-        device.wait(Until.findObject(By.text(context.getString(R.string.getStarted))), 5_000)
-    assertNotNull(getStarted)
-    getStarted.click()
+    // Intro / Get Started is bypassed completely on cold launch
+    assertNull(device.findObject(By.text(context.getString(R.string.getStarted))))
 
-    val login = device.wait(Until.findObject(By.text(context.getString(R.string.log_in))), 5_000)
-    assertNotNull(login)
-    assertNotNull(
-        device.wait(
-            Until.findObject(By.text(context.getString(R.string.welcome_to_tailscale))), 5_000))
+    // Stardom main screen centered sign-in modal is displayed directly
+    val loginButton =
+        device.wait(Until.findObject(By.text("ВОЙТИ В СИСТЕМУ ❯")), 5_000)
+            ?: device.wait(Until.findObject(By.text("SIGN IN ❯")), 5_000)
+    assertNotNull(loginButton)
+
     assertNull(device.findObject(By.text(context.getString(R.string.auth_key_title))))
     assertNull(device.findObject(By.text(context.getString(R.string.mullvad_exit_nodes))))
-    login.click()
-    assertNotNull(
-        device.wait(
-            Until.findObject(By.text(context.getString(R.string.stardom_login_title))), 5_000))
-    assertNull(device.findObject(By.text(context.getString(R.string.add_account))))
-    assertNull(device.findObject(By.text(context.getString(R.string.auth_key_menu))))
+    assertNull(device.findObject(By.text(context.getString(R.string.give_permissions))))
+    assertNull(device.findObject(By.text(context.getString(R.string.vpn_permission_needed))))
     StardomInstrumentationState.assertForegroundProductUi(device)
   }
 

@@ -47,12 +47,12 @@ class MainActivityTest {
 
     scenario = ActivityScenario.launch(callbackShapedIntent)
     StardomInstrumentationState.assertForegroundProductUi(device)
-    val getStarted =
-        device.wait(Until.findObject(By.text(context.getString(R.string.getStarted))), 5_000)
-    assertNotNull(getStarted)
-    getStarted.click()
 
-    assertNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.log_in))), 5_000))
+    assertNull(device.findObject(By.text(context.getString(R.string.getStarted))))
+    val loginButton =
+        device.wait(Until.findObject(By.text("ВОЙТИ В СИСТЕМУ ❯")), 5_000)
+            ?: device.wait(Until.findObject(By.text("SIGN IN ❯")), 5_000)
+    assertNotNull(loginButton)
     assertNull(device.findObject(By.text(context.getString(R.string.auth_key_title))))
     StardomInstrumentationState.assertForegroundProductUi(device)
   }

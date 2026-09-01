@@ -3,11 +3,13 @@
 
 package com.tailscale.ipn.ui.view
 
+import androidx.compose.ui.unit.dp
 import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.VpnState
+import com.tailscale.ipn.ui.theme.StardomDimensions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -60,15 +62,27 @@ class StardomMainScreenFidelityTest {
   }
 
   @Test
-  fun legacyAccessCardAndExitNodeStatusAreAbsentFromMainContent() {
-    // Peer content (including device list) is only shown when Running and in Connect stage
-    assertFalse(shouldRenderPeerContent(Ipn.State.Stopped, ConnectionStage.SignIn))
-    assertFalse(shouldRenderPeerContent(Ipn.State.Starting, ConnectionStage.SignIn))
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.SignIn))
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.AccessUnavailable))
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.AccessDisabled))
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.RequestVpnPermission))
-    assertTrue(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.Connect))
+  fun peerDashboardAndSearchComposablesAreCompletelyRemovedFromMainView() {
+    val mainViewClass = Class.forName("com.tailscale.ipn.ui.view.MainViewKt")
+    val peerListMethods = mainViewClass.declaredMethods.filter { it.name.startsWith("PeerList") }
+    assertTrue(
+        "PeerList composable must be completely removed from MainView", peerListMethods.isEmpty())
+
+    val nodesSectionHeaderMethods =
+        mainViewClass.declaredMethods.filter { it.name.startsWith("NodesSectionHeader") }
+    assertTrue(
+        "NodesSectionHeader composable must be completely removed from MainView",
+        nodesSectionHeaderMethods.isEmpty())
+
+    val searchMethods = mainViewClass.declaredMethods.filter { it.name.startsWith("Search") }
+    assertTrue(
+        "Search composable must be completely removed from MainView", searchMethods.isEmpty())
+
+    val connectViewMethods =
+        mainViewClass.declaredMethods.filter { it.name.startsWith("ConnectView") }
+    assertTrue(
+        "ConnectView composable must be completely removed from MainView",
+        connectViewMethods.isEmpty())
   }
 
   @Test
@@ -338,5 +352,19 @@ class StardomMainScreenFidelityTest {
     assertTrue(
         "ExpiryNotification composable must be completely removed from MainView",
         expiryNotificationMethods.isEmpty())
+  }
+
+  @Test
+  fun mainScreenLayoutDimensionTokensMatchUxSpecification() {
+    assertEquals(30.dp, StardomDimensions.ScreenHorizontal)
+    assertEquals(60.dp, StardomDimensions.TopBarHeight)
+    assertEquals(42.dp, StardomDimensions.HeaderButtonSize)
+    assertEquals(152.dp, StardomDimensions.MainControlSize)
+    assertEquals(15.dp, StardomDimensions.PanelPaddingHorizontal)
+    assertEquals(9.dp, StardomDimensions.PanelPaddingVertical)
+    assertEquals(6.dp, StardomDimensions.SectionSmall)
+    assertEquals(12.dp, StardomDimensions.SectionMedium)
+    assertEquals(18.dp, StardomDimensions.SectionLarge)
+    assertEquals(1.dp, StardomDimensions.Border)
   }
 }

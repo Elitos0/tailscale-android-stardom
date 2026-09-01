@@ -25,7 +25,7 @@ sealed interface PolicyLoadResult {
   data object Unavailable : PolicyLoadResult
 }
 
-class PolicyApiClient(
+open class PolicyApiClient(
     private val baseUrl: String = ProductConfig.policyApiBaseUrl,
     private val connectionFactory: (URL) -> HttpURLConnection = { url ->
       url.openConnection() as HttpURLConnection
@@ -88,7 +88,7 @@ class PolicyApiClient(
     }
   }
 
-  fun fetchNodeAuthKey(token: String): Result<String> {
+  open fun fetchNodeAuthKey(token: String): Result<String> {
     var connection: HttpURLConnection? = null
     val startTime = nowMillis()
     val path = "/v1/node-auth-key"

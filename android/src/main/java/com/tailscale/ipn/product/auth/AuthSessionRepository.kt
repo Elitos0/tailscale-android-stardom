@@ -115,7 +115,7 @@ interface AppAuthGateway {
   fun dispose()
 }
 
-class AuthSessionRepository(
+open class AuthSessionRepository(
     private val storage: AuthStateStorage,
     private var authState: AuthSessionState,
     private val appAuth: AppAuthGateway,
@@ -294,7 +294,7 @@ class AuthSessionRepository(
     }
   }
 
-  fun withFreshBearerToken(context: Context, onResult: (Result<String>) -> Unit) {
+  open fun withFreshBearerToken(context: Context, onResult: (Result<String>) -> Unit) {
     val captured =
         synchronized(sessionLock) {
           if (!authState.isAuthorized) null else sessionGeneration to authState

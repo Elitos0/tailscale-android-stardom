@@ -23,23 +23,12 @@ import org.junit.Test
 
 class MainViewTest {
   @Test
-  fun runningWithoutVpnPermissionRendersConnectionContent() {
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.RequestVpnPermission))
-  }
-
-  @Test
-  fun runningWithUnavailableAccessRendersConnectionContent() {
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.AccessUnavailable))
-  }
-
-  @Test
-  fun runningWithDisabledAccessRendersConnectionContent() {
-    assertFalse(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.AccessDisabled))
-  }
-
-  @Test
-  fun runningWithConnectStageRendersPeerContent() {
-    assertTrue(shouldRenderPeerContent(Ipn.State.Running, ConnectionStage.Connect))
+  fun powerControlStateReflectsConnectionStages() {
+    assertFalse(isPowerControlEnabled(ConnectionStage.SignIn))
+    assertFalse(isPowerControlEnabled(ConnectionStage.AccessDisabled))
+    assertTrue(isPowerControlEnabled(ConnectionStage.Connect))
+    assertTrue(isPowerControlEnabled(ConnectionStage.RequestVpnPermission))
+    assertTrue(isPowerControlEnabled(ConnectionStage.AccessUnavailable))
   }
 
   // --- Stardom VPN State Mapping Tests ---
@@ -428,16 +417,66 @@ class MainViewTest {
   }
 
   @Test
-  fun unauthenticatedStageSuppressesPeerContentAndKeepsPowerDisabled() {
+  fun unauthenticatedStageKeepsPowerDisabled() {
     val unauthenticatedStage = ConnectionStage.SignIn
-    assertFalse(
-        "Peer content must not render while unauthenticated",
-        shouldRenderPeerContent(Ipn.State.Stopped, unauthenticatedStage))
-    assertFalse(
-        "Peer content must not render even if running while unauthenticated",
-        shouldRenderPeerContent(Ipn.State.Running, unauthenticatedStage))
     assertFalse(
         "Power control must be disabled while unauthenticated",
         isPowerControlEnabled(unauthenticatedStage))
+  }
+
+  @Test
+  fun resolveStardomStatusTextMapsLoginLoadingState() {
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.Authorized,
+            isLoginLoading = true,
+            language = AppLanguage.EN)
+    assertEquals("SIGNING IN...", statusEn)
+
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authentikState = AuthentikState.Authorized,
+            isLoginLoading = true,
+            language = AppLanguage.RU)
+    assertEquals("ВХОД В СИСТЕМУ...", statusRu)
+  }
+
+  @Test
+  fun isStardomStatusErrorSuppressedWhileLoginLoading() {
+    assertFalse(
+        isStardomStatusError(
+            vpnState = VpnState.ERROR,
+            connectionStage = ConnectionStage.AccessUnavailable,
+            isLoginLoading = true))
+    assertFalse(
+        isStardomStatusError(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = true))
+  }
+
+  @Test
+  fun authErrorOverridesLoadingAndShowsRetryableStatus() {
+    val statusRu =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authError = true,
+            isLoginLoading = true,
+            language = AppLanguage.RU)
+    assertEquals("СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ", statusRu)
+
+    val statusEn =
+        resolveStardomStatusText(
+            vpnState = VpnState.DISCONNECTED,
+            connectionStage = ConnectionStage.SignIn,
+            authError = true,
+            isLoginLoading = true,
+            language = AppLanguage.EN)
+    assertEquals("AUTH FAILED // RETRY", statusEn)
   }
 }

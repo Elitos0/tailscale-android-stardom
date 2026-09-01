@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 package com.tailscale.ipn.ui.viewModel
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.VpnService
@@ -18,6 +19,10 @@ import com.tailscale.ipn.App
 import com.tailscale.ipn.R
 import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.mdm.MDMSettings
+import com.tailscale.ipn.product.StardomSessionController
+import com.tailscale.ipn.product.policy.AccessState
+import com.tailscale.ipn.product.policy.PolicyApiClient
+import com.tailscale.ipn.product.policy.PolicyApiUnauthorizedException
 import com.tailscale.ipn.product.policy.VpnEntitlementController
 import com.tailscale.ipn.product.policy.VpnStartOrigin
 import com.tailscale.ipn.ui.model.Ipn
@@ -30,6 +35,8 @@ import com.tailscale.ipn.ui.util.TimeUtil
 import com.tailscale.ipn.ui.util.set
 import com.tailscale.ipn.util.TSLog
 import java.time.Duration
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -38,6 +45,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 class MainViewModelFactory(
     private val appViewModel: AppViewModel,
@@ -119,6 +128,77 @@ class MainViewModel(
 
   fun setAuthError(error: Boolean) {
     _authError.value = error
+  }
+
+  private val _isLoginLoading = MutableStateFlow(false)
+  val isLoginLoading: StateFlow<Boolean> = _isLoginLoading
+
+  fun setLoginLoading(loading: Boolean) {
+    _isLoginLoading.value = loading
+  }
+
+  fun executeStardomLoginPipeline(
+      context: Context,
+      sessionController: StardomSessionController,
+      policyApiClient: PolicyApiClient = PolicyApiClient(),
+      onComplete: (Result<Unit>) -> Unit = {},
+  ) {
+    _isLoginLoading.value = true
+    _authError.value = false
+    viewModelScope.launch {
+      val result = runCatching {
+        val token =
+            suspendCancellableCoroutine<String> { continuation ->
+              sessionController.authSessionRepository.withFreshBearerToken(context) { tokenResult ->
+                tokenResult.fold(
+                    onSuccess = { continuation.resume(it) },
+                    onFailure = { continuation.resumeWithException(it) })
+              }
+            }
+
+        val authKeyResult = withContext(Dispatchers.IO) { policyApiClient.fetchNodeAuthKey(token) }
+        val authKey =
+            authKeyResult.getOrElse { error ->
+              if (error is PolicyApiUnauthorizedException) {
+                sessionController.requireReauthentication()
+              }
+              throw error
+            }
+
+        suspendCancellableCoroutine<Unit> { continuation ->
+          loginWithAuthKey(authKey) { loginResult ->
+            loginResult.fold(
+                onSuccess = { continuation.resume(Unit) },
+                onFailure = { continuation.resumeWithException(it) })
+          }
+        }
+
+        loadUserProfilesSuspend()
+
+        val accessState = sessionController.refreshAccess(context, force = true)
+        if (accessState == AccessState.Unavailable) {
+          throw IllegalStateException("Access policy unavailable after login")
+        }
+
+        sessionController.ackFixedHeadscaleContinuation()
+      }
+
+      result.fold(
+          onSuccess = {
+            _authError.value = false
+            _isLoginLoading.value = false
+            onComplete(Result.success(Unit))
+          },
+          onFailure = { error ->
+            TSLog.e(
+                TAG,
+                "Stardom login pipeline failed: ${error::class.java.simpleName}: ${error.message}",
+                error)
+            _authError.value = true
+            _isLoginLoading.value = false
+            onComplete(Result.failure(error))
+          })
+    }
   }
 
   fun updateSearchTerm(term: String) {
