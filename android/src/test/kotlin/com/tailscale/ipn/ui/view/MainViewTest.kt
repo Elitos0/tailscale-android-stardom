@@ -14,6 +14,7 @@ import com.tailscale.ipn.ui.model.IpnLocal
 import com.tailscale.ipn.ui.model.Tailcfg
 import com.tailscale.ipn.ui.model.VpnProtocol
 import com.tailscale.ipn.ui.model.VpnState
+import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
@@ -29,6 +30,28 @@ class MainViewTest {
     assertTrue(isPowerControlEnabled(ConnectionStage.Connect))
     assertTrue(isPowerControlEnabled(ConnectionStage.RequestVpnPermission))
     assertTrue(isPowerControlEnabled(ConnectionStage.AccessUnavailable))
+  }
+
+  @Test
+  fun securedStateUsesBlueAccentWhileErrorsRemainRed() {
+    assertEquals(StardomColors.Secured, StardomColors.stateAccent(VpnState.SECURED))
+    assertEquals(
+        StardomColors.SecuredBorder, StardomColors.stateAccent(VpnState.SECURED, border = true))
+    assertEquals(StardomColors.Error, StardomColors.stateAccent(VpnState.ERROR))
+    assertEquals(
+        StardomColors.ErrorBorder, StardomColors.stateAccent(VpnState.ERROR, border = true))
+    assertEquals(StardomColors.TextPrimary, StardomColors.stateAccent(VpnState.DISCONNECTED))
+  }
+
+  @Test
+  fun statusErrorOverrideKeepsSecureStateRedForErrorStatuses() {
+    assertEquals(StardomColors.Error, StardomColors.stateAccent(VpnState.SECURED, isError = true))
+  }
+
+  @Test
+  fun loadingStatusSuppressesAStaleVpnErrorAccent() {
+    assertEquals(
+        StardomColors.TextPrimary, StardomColors.stateAccent(VpnState.ERROR, isError = false))
   }
 
   // --- Stardom VPN State Mapping Tests ---
@@ -363,6 +386,30 @@ class MainViewTest {
     assertFalse(isStardomStatusError(VpnState.RESOLVING_STAR_ROUTE, ConnectionStage.Connect))
     assertFalse(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.SignIn))
     assertFalse(isStardomStatusError(VpnState.DISCONNECTED, ConnectionStage.RequestVpnPermission))
+  }
+
+  @Test
+  fun loginModalDisappearsImmediatelyWhenAuthorizationStarts() {
+    assertTrue(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = false,
+            authentikState = AuthentikState.SignedOut))
+    assertFalse(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = true,
+            authentikState = AuthentikState.SignedOut))
+    assertFalse(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = false,
+            authentikState = AuthentikState.Authorizing))
+    assertFalse(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.Connect,
+            isLoginLoading = false,
+            authentikState = AuthentikState.SignedOut))
   }
 
   // --- Modal Login & Direct Navigation Contract Tests ---

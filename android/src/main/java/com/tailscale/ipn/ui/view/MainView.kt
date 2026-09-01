@@ -282,6 +282,15 @@ fun isStardomStatusError(
 internal fun isPowerControlEnabled(connectionStage: ConnectionStage): Boolean =
     connectionStage != ConnectionStage.SignIn && connectionStage != ConnectionStage.AccessDisabled
 
+internal fun isStardomLoginModalVisible(
+    connectionStage: ConnectionStage,
+    isLoginLoading: Boolean,
+    authentikState: AuthentikState?
+): Boolean =
+    connectionStage == ConnectionStage.SignIn &&
+        !isLoginLoading &&
+        authentikState != AuthentikState.Authorizing
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainView(
@@ -510,6 +519,7 @@ fun MainView(
                               isLoginLoading = isLoginLoading)
                       StardomStatus(
                           statusText = statusText,
+                          vpnState = stardomVpnState,
                           isError = isStatusError,
                           language = selectedLanguage)
                       Spacer(Modifier.height(20.dp))
@@ -574,9 +584,7 @@ fun MainView(
                   }
                 }
 
-                if (connectionStage == ConnectionStage.SignIn &&
-                    !isLoginLoading &&
-                    authentikState != AuthentikState.Authorizing) {
+                if (isStardomLoginModalVisible(connectionStage, isLoginLoading, authentikState)) {
                   StardomLoginModal(
                       onSignIn = navigation.onNavigateStardomLogin, language = selectedLanguage)
                 }

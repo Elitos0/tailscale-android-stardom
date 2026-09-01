@@ -57,7 +57,6 @@ fun StardomOrbitControl(
 ) {
   val connected = vpnState.isConnected
   val connecting = vpnState.isConnecting
-  val isError = vpnState.isError
 
   // Precision orbital tick rotation
   val tickRotation = remember { Animatable(0f) }
@@ -92,7 +91,7 @@ fun StardomOrbitControl(
        * OUTER ORBIT (pure 1px stroke)
        */
       drawCircle(
-          color = if (isError) StardomColors.ErrorBorder else StardomColors.BorderStrong,
+          color = StardomColors.stateAccent(vpnState, border = true),
           radius = outerRadius,
           center = center,
           style = Stroke(width = 1f))
@@ -101,7 +100,12 @@ fun StardomOrbitControl(
        * SECONDARY ORBIT (pure 1px stroke)
        */
       drawCircle(
-          color = if (isError) StardomColors.ErrorBorder else StardomColors.Border,
+          color =
+              when {
+                vpnState.isError -> StardomColors.ErrorBorder
+                connected -> StardomColors.SecuredBorder
+                else -> StardomColors.Border
+              },
           radius = secondaryRadius,
           center = center,
           style = Stroke(width = 1f))
@@ -125,26 +129,13 @@ fun StardomOrbitControl(
 
       drawPath(
           path = diamondPath,
-          color =
-              when {
-                isError -> StardomColors.Error
-                connected -> StardomColors.BorderStrong
-                else -> StardomColors.Border
-              },
+          color = StardomColors.stateAccent(vpnState),
           style = Stroke(width = 1f))
 
       // Tiny node markers at diamond vertices
       val diamondNodes = listOf(top, right, bottom, left)
       for (node in diamondNodes) {
-        drawCircle(
-            color =
-                when {
-                  isError -> StardomColors.Error
-                  connected -> StardomColors.TextPrimary
-                  else -> StardomColors.BorderStrong
-                },
-            radius = 2.dp.toPx(),
-            center = node)
+        drawCircle(color = StardomColors.stateAccent(vpnState), radius = 2.dp.toPx(), center = node)
       }
 
       /*
@@ -160,12 +151,7 @@ fun StardomOrbitControl(
 
       for (offset in cardinalOffsets) {
         drawRect(
-            color =
-                when {
-                  isError -> StardomColors.Error
-                  connected -> StardomColors.TextPrimary
-                  else -> StardomColors.BorderStrong
-                },
+            color = StardomColors.stateAccent(vpnState),
             topLeft = offset,
             size = Size(sqSize, sqSize))
       }
@@ -188,12 +174,7 @@ fun StardomOrbitControl(
           val y2 = center.y + sin(radians).toFloat() * r2
 
           drawLine(
-              color =
-                  when {
-                    isError -> StardomColors.Error
-                    connected -> StardomColors.TextPrimary
-                    else -> StardomColors.BorderStrong
-                  },
+              color = StardomColors.stateAccent(vpnState),
               start = Offset(x1, y1),
               end = Offset(x2, y2),
               strokeWidth = 1f)
@@ -204,17 +185,11 @@ fun StardomOrbitControl(
     /*
      * PHYSICAL CENTRAL BUTTON (square, 152dp, 1px border)
      */
-    val buttonBorderColor =
-        when {
-          isError -> StardomColors.Error
-          connected -> StardomColors.TextPrimary
-          else -> StardomColors.BorderStrong
-        }
-
+    val buttonBorderColor = StardomColors.stateAccent(vpnState, border = true)
     val buttonContentColor =
         when {
-          isError -> StardomColors.Error
-          connected -> StardomColors.TextPrimary
+          vpnState.isError -> StardomColors.Error
+          connected -> StardomColors.Secured
           else -> StardomColors.TextSecondary
         }
 
@@ -239,7 +214,7 @@ fun StardomOrbitControl(
 
           Text(
               text = label,
-              color = if (isError) StardomColors.Error else StardomColors.TextPrimary,
+              color = StardomColors.stateAccent(vpnState),
               fontFamily = IbmPlexMono,
               fontWeight = FontWeight.Normal,
               fontSize = 11.5.sp,

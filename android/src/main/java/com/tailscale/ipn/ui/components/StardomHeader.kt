@@ -87,7 +87,12 @@ fun StardomHeader(
 
           Text(
               text = subtitleText,
-              color = if (vpnState.isError) StardomColors.Error else StardomColors.TextSecondary,
+              color =
+                  when {
+                    vpnState.isError -> StardomColors.Error
+                    vpnState.isConnected -> StardomColors.Secured
+                    else -> StardomColors.TextSecondary
+                  },
               fontFamily = IbmPlexMono,
               fontSize = 9.sp,
               letterSpacing = 2.sp)

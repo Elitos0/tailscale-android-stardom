@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
@@ -43,6 +44,26 @@ import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.theme.IbmPlexMono
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
+
+internal const val SERVER_SELECTOR_TELEMETRY_COLUMN_WIDTH_DP = 76
+internal const val SERVER_SELECTOR_TELEMETRY_GAP_DP = 12
+internal const val SERVER_SELECTOR_TITLE_MAX_LINES = 2
+internal const val SERVER_SELECTOR_DETAILS_MAX_LINES = 1
+
+internal data class ServerSelectorRowLabels(val title: String, val details: String)
+
+internal fun serverSelectorRowLabels(server: StarServerNode): ServerSelectorRowLabels =
+    ServerSelectorRowLabels(
+        title = "${server.starName} // ${server.city.uppercase()}",
+        details = "[${server.countryCode}] • ${server.constellation} • ${server.coordinates}",
+    )
+
+internal fun serverSelectorTitleColumnWidthDp(itemWidthDp: Int): Int =
+    (itemWidthDp -
+            (14 * 2) -
+            SERVER_SELECTOR_TELEMETRY_GAP_DP -
+            SERVER_SELECTOR_TELEMETRY_COLUMN_WIDTH_DP)
+        .coerceAtLeast(0)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -177,96 +198,104 @@ fun StardomServerSelectorSheet(
                     items(filteredServers, key = { it.id }) { server ->
                       val isSelected = server.id == selectedServer.id
 
-                      Box(
-                          modifier =
-                              Modifier.fillMaxWidth()
-                                  .testTag("server_item_${server.id}")
-                                  .background(
-                                      if (isSelected) StardomColors.PanelSelected
-                                      else StardomColors.Panel)
-                                  .border(
-                                      1.dp,
-                                      if (isSelected) StardomColors.BorderStrong
-                                      else StardomColors.BorderFaint)
-                                  .clickable(onClickLabel = "Select server ${server.starName}") {
-                                    onSelectServer(server)
-                                    onDismiss()
-                                  }
-                                  .padding(14.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()) {
-                                  Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                      // Square Indicator
-                                      Box(
-                                          modifier =
-                                              Modifier.size(10.dp)
-                                                  .border(
-                                                      1.dp,
-                                                      if (isSelected) StardomColors.Selected
-                                                      else StardomColors.TextMuted),
-                                          contentAlignment = Alignment.Center) {
-                                            if (isSelected) {
-                                              Box(
-                                                  modifier =
-                                                      Modifier.size(4.dp)
-                                                          .background(StardomColors.Selected))
-                                            }
-                                          }
-
-                                      Spacer(modifier = Modifier.width(10.dp))
-
-                                      Text(
-                                          text = "${server.starName} // ${server.city.uppercase()}",
-                                          color =
-                                              if (isSelected) StardomColors.TextPrimary
-                                              else StardomColors.TextSecondary,
-                                          fontSize = 13.sp,
-                                          fontWeight = FontWeight.Medium,
-                                          fontFamily = SpaceGrotesk,
-                                          letterSpacing = 1.sp)
-
-                                      Spacer(modifier = Modifier.width(6.dp))
-
-                                      Text(
-                                          text = "[${server.countryCode}]",
-                                          color = StardomColors.TextMuted,
-                                          fontSize = 10.sp,
-                                          fontFamily = IbmPlexMono)
-                                    }
-
-                                    Spacer(modifier = Modifier.height(5.dp))
-
-                                    Text(
-                                        text = "${server.constellation} • ${server.coordinates}",
-                                        color = StardomColors.TextMuted,
-                                        fontSize = 9.sp,
-                                        fontFamily = IbmPlexMono,
-                                        modifier = Modifier.padding(start = 20.dp))
-                                  }
-
-                                  // Right telemetry: Ping & Load
-                                  Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "${server.basePingMs} MS",
-                                        color = StardomColors.TextPrimary,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        fontFamily = IbmPlexMono)
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    Text(
-                                        text =
-                                            "${StardomLocalization.loadLabel(language)} ${server.loadPercent}%",
-                                        color = StardomColors.TextMuted,
-                                        fontSize = 8.sp,
-                                        fontFamily = IbmPlexMono)
-                                  }
-                                }
-                          }
+                      StardomServerSelectorRow(
+                          server = server,
+                          isSelected = isSelected,
+                          language = language,
+                          onSelectServer = onSelectServer,
+                          onDismiss = onDismiss,
+                      )
                     }
                   }
             }
+      }
+}
+
+@Composable
+private fun StardomServerSelectorRow(
+    server: StarServerNode,
+    isSelected: Boolean,
+    language: AppLanguage,
+    onSelectServer: (StarServerNode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+  val labels = serverSelectorRowLabels(server)
+  Box(
+      modifier =
+          Modifier.fillMaxWidth()
+              .testTag("server_item_${server.id}")
+              .background(if (isSelected) StardomColors.PanelSelected else StardomColors.Panel)
+              .border(
+                  1.dp, if (isSelected) StardomColors.BorderStrong else StardomColors.BorderFaint)
+              .clickable(onClickLabel = "Select server ${server.starName}") {
+                onSelectServer(server)
+                onDismiss()
+              }
+              .padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+          Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              // Square Indicator
+              Box(
+                  modifier =
+                      Modifier.size(10.dp)
+                          .border(
+                              1.dp,
+                              if (isSelected) StardomColors.Selected else StardomColors.TextMuted),
+                  contentAlignment = Alignment.Center) {
+                    if (isSelected) {
+                      Box(modifier = Modifier.size(4.dp).background(StardomColors.Selected))
+                    }
+                  }
+
+              Spacer(modifier = Modifier.width(10.dp))
+
+              Text(
+                  text = labels.title,
+                  color =
+                      if (isSelected) StardomColors.TextPrimary else StardomColors.TextSecondary,
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Medium,
+                  fontFamily = SpaceGrotesk,
+                  letterSpacing = 1.sp,
+                  maxLines = SERVER_SELECTOR_TITLE_MAX_LINES,
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.weight(1f).testTag("server_title_${server.id}"))
+            }
+
+            Spacer(modifier = Modifier.height(5.dp))
+
+            Text(
+                text = labels.details,
+                color = StardomColors.TextMuted,
+                fontSize = 9.sp,
+                fontFamily = IbmPlexMono,
+                maxLines = SERVER_SELECTOR_DETAILS_MAX_LINES,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 20.dp).testTag("server_details_${server.id}"))
+          }
+
+          Spacer(modifier = Modifier.width(SERVER_SELECTOR_TELEMETRY_GAP_DP.dp))
+
+          // Keep ping and load in a fixed end column so long labels cannot overlap them.
+          Column(
+              horizontalAlignment = Alignment.End,
+              modifier = Modifier.width(SERVER_SELECTOR_TELEMETRY_COLUMN_WIDTH_DP.dp)) {
+                Text(
+                    text = "${server.basePingMs} MS",
+                    color = StardomColors.TextPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                    fontFamily = IbmPlexMono,
+                    maxLines = 1)
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = "${StardomLocalization.loadLabel(language)} ${server.loadPercent}%",
+                    color = StardomColors.TextMuted,
+                    fontSize = 8.sp,
+                    fontFamily = IbmPlexMono,
+                    maxLines = 1)
+              }
+        }
       }
 }
