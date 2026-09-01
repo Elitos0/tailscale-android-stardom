@@ -34,10 +34,10 @@ class MainViewTest {
   }
 
   @Test
-  fun securedStateUsesBlueAccentWhileErrorsRemainRed() {
-    assertEquals(StardomColors.Secured, StardomColors.stateAccent(VpnState.SECURED))
+  fun securedStateUsesNeutralAccentWhileErrorsRemainRed() {
+    assertEquals(StardomColors.TextPrimary, StardomColors.stateAccent(VpnState.SECURED))
     assertEquals(
-        StardomColors.SecuredBorder, StardomColors.stateAccent(VpnState.SECURED, border = true))
+        StardomColors.BorderStrong, StardomColors.stateAccent(VpnState.SECURED, border = true))
     assertEquals(StardomColors.Error, StardomColors.stateAccent(VpnState.ERROR))
     assertEquals(
         StardomColors.ErrorBorder, StardomColors.stateAccent(VpnState.ERROR, border = true))

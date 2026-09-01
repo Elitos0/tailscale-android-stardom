@@ -90,7 +90,7 @@ fun StardomHeader(
               color =
                   when {
                     vpnState.isError -> StardomColors.Error
-                    vpnState.isConnected -> StardomColors.Secured
+                    vpnState.isConnected -> StardomColors.TextPrimary
                     else -> StardomColors.TextSecondary
                   },
               fontFamily = IbmPlexMono,

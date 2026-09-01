@@ -33,14 +33,9 @@ object StardomColors {
   val Error = Color(0xFFEF5350)
   val ErrorBorder = Color(0xFF940822)
 
-  // Secured state accent: technical blue, deliberately flat and low-saturation.
-  val Secured = Color(0xFF63B8D8)
-  val SecuredBorder = Color(0xFF327A94)
-
   fun stateAccent(vpnState: VpnState, isError: Boolean? = null, border: Boolean = false): Color =
       when {
         isError ?: vpnState.isError -> if (border) ErrorBorder else Error
-        vpnState.isConnected -> if (border) SecuredBorder else Secured
         else -> if (border) BorderStrong else TextPrimary
       }
 }

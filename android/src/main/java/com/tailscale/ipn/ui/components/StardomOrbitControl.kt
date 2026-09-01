@@ -47,6 +47,37 @@ import com.tailscale.ipn.ui.theme.StardomDimensions
 import kotlin.math.cos
 import kotlin.math.sin
 
+private const val orbitTickDegrees = 45f
+private const val orbitExtraSettlingDegrees = 90f
+private const val orbitTickSettlingDurationMillis = 900
+private const val orbitConnectingRotationDurationMillis = 4000
+private const val orbitIdleRotationDurationMillis = 28000
+
+internal data class OrbitSettlingPlan(val targetRotation: Float, val durationMillis: Int)
+
+internal fun orbitRotationDurationMillis(vpnState: VpnState): Int =
+    if (vpnState.isConnecting) {
+      orbitConnectingRotationDurationMillis
+    } else {
+      orbitIdleRotationDurationMillis
+    }
+
+internal fun orbitTargetAlignment(currentRotation: Float): Float {
+  val remainder = currentRotation % orbitTickDegrees
+  return currentRotation + (orbitTickDegrees - remainder)
+}
+
+private fun orbitSettlingDurationMillis(rotationDegrees: Float): Int =
+    (orbitTickSettlingDurationMillis * rotationDegrees.toDouble() / orbitTickDegrees).toInt()
+
+internal fun orbitSettlingPlan(currentRotation: Float): OrbitSettlingPlan {
+  val targetAlignment = orbitTargetAlignment(currentRotation)
+  val rotationDistance = targetAlignment - currentRotation + orbitExtraSettlingDegrees
+  return OrbitSettlingPlan(
+      targetRotation = targetAlignment + orbitExtraSettlingDegrees,
+      durationMillis = orbitSettlingDurationMillis(rotationDistance))
+}
+
 @Composable
 fun StardomOrbitControl(
     vpnState: VpnState,
@@ -60,18 +91,15 @@ fun StardomOrbitControl(
 
   // Precision orbital tick rotation
   val tickRotation = remember { Animatable(0f) }
-
   LaunchedEffect(vpnState) {
     if (connected) {
-      val current = tickRotation.value
-      val remainder = current % 45f
-      val target = current + (45f - remainder)
+      val plan = orbitSettlingPlan(tickRotation.value)
       tickRotation.animateTo(
-          targetValue = target,
-          animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing))
+          targetValue = plan.targetRotation,
+          animationSpec = tween(durationMillis = plan.durationMillis, easing = FastOutSlowInEasing))
     } else {
       while (true) {
-        val duration = if (connecting) 4000 else 28000
+        val duration = orbitRotationDurationMillis(vpnState)
         val current = tickRotation.value
         tickRotation.animateTo(
             targetValue = current + 360f,
@@ -103,7 +131,7 @@ fun StardomOrbitControl(
           color =
               when {
                 vpnState.isError -> StardomColors.ErrorBorder
-                connected -> StardomColors.SecuredBorder
+                connected -> StardomColors.BorderStrong
                 else -> StardomColors.Border
               },
           radius = secondaryRadius,
@@ -189,7 +217,7 @@ fun StardomOrbitControl(
     val buttonContentColor =
         when {
           vpnState.isError -> StardomColors.Error
-          connected -> StardomColors.Secured
+          connected -> StardomColors.TextPrimary
           else -> StardomColors.TextSecondary
         }
 
