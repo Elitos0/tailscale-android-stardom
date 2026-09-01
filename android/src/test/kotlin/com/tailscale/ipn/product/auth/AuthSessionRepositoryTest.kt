@@ -257,6 +257,32 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
+  fun expiredCallbackRestoresSignedOutStateAndCompletesLoginWithFailure() {
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>())
+    val completion = mutableListOf<Result<Unit>>()
+    var nowMillis = 0L
+    val repository =
+        AuthSessionRepository(
+            InMemoryAuthStateStorage(),
+            FakeSessionState(),
+            gateway,
+            InMemoryAuthorizationTransactionStorage()) {
+              nowMillis
+            }
+
+    repository.startAuthorization(context, completion::add)
+    nowMillis = 5 * 60 * 1000L + 1
+    repository.handleAuthorizationIntent(context, intent)
+
+    assertEquals(0, gateway.codeExchanges)
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+    assertTrue(completion.single().isFailure)
+  }
+
+  @Test
   fun recoveredCallbackRecordsRetryableFixedHeadscaleContinuation() {
     val gateway =
         FakeAppAuthGateway(

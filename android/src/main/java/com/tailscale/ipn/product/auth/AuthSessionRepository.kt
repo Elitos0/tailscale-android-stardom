@@ -214,13 +214,28 @@ open class AuthSessionRepository(
               onFinished()
               return
             }
+    var expiredTransaction = false
     if (!transactionStorage.consumeIf { pending ->
-      nowMillis() - pending.createdAtMillis in 0..AUTH_TRANSACTION_MAX_AGE_MILLIS &&
-          callbackMatchesCurrentTransaction(intent, result, pending.request) &&
-          (result.response == null ||
-              appAuth.matchesPendingAuthorization(intent, result.response, pending.request))
+      val isExpired = nowMillis() - pending.createdAtMillis !in 0..AUTH_TRANSACTION_MAX_AGE_MILLIS
+      if (isExpired) {
+        expiredTransaction = true
+        true
+      } else {
+        callbackMatchesCurrentTransaction(intent, result, pending.request) &&
+            (result.response == null ||
+                appAuth.matchesPendingAuthorization(intent, result.response, pending.request))
+      }
     }) {
-      TSLog.w("AuthLifecycle", "OIDC callback ignored: pending transaction not matched or expired")
+      TSLog.w("AuthLifecycle", "OIDC callback ignored: pending transaction not matched")
+      onFinished()
+      return
+    }
+    if (expiredTransaction) {
+      TSLog.w("AuthLifecycle", "OIDC callback rejected: pending transaction expired")
+      completeAuthorization(
+          generation,
+          Result.failure(IllegalStateException("Authorization request expired")),
+          authorized = false)
       onFinished()
       return
     }
