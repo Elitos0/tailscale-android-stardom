@@ -13,7 +13,7 @@ import com.tailscale.ipn.R
 @Composable
 fun StardomLogoView(modifier: Modifier = Modifier) {
   Image(
-      painter = painterResource(R.drawable.stardom_launcher),
+      painter = painterResource(R.drawable.ic_launcher_foreground),
       contentDescription = stringResource(R.string.app_name),
       modifier = modifier)
 }
