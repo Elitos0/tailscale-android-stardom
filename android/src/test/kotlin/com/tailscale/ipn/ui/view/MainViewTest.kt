@@ -20,6 +20,7 @@ import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -244,42 +245,39 @@ class MainViewTest {
     assertEquals("commander@stardom.network", profile.accountId)
   }
 
-  // --- Star Server Node Metadata & Placeholder Tests ---
+  // --- Exit Node Metadata Tests ---
 
   @Test
-  fun mapExitNodeToStarNodeProvidesSafePlaceholdersWhenMetadataMissing() {
-    val emptyMetadataNode =
+  fun mapExitNodeToStarNodePreservesOnlyLiveNetmapMetadata() {
+    val exitNode =
         ExitNodePickerViewModel.ExitNode(
-            id = "node-alpha",
-            label = "exit-alpha",
+            id = "node-germany-1",
+            label = "Germany 1",
             online = MutableStateFlow(true),
             selected = false,
-            city = "",
-            countryCode = "")
+            city = "Frankfurt",
+            countryCode = "DE",
+            country = "Germany")
 
-    val starNode = mapExitNodeToStarNode(emptyMetadataNode, 0)
-    assertEquals("EXIT-ALPHA", starNode.starName)
-    assertEquals("Frankfurt", starNode.city)
-    assertEquals("DE", starNode.countryCode)
-    assertTrue(starNode.constellation.isNotEmpty())
-    assertTrue(starNode.coordinates.isNotEmpty())
-    assertTrue(starNode.basePingMs > 0)
-    assertTrue(starNode.loadPercent in 1..100)
+    val server = checkNotNull(mapExitNodeToStarNode(exitNode))
+
+    assertEquals("node-germany-1", server.id)
+    assertEquals("Germany 1", server.label)
+    assertEquals("Frankfurt", server.city)
+    assertEquals("DE", server.countryCode)
+    assertEquals("Germany", server.country)
   }
 
   @Test
-  fun defaultStarServersListIsPopulatedWithValidPlaceholderNodes() {
-    assertTrue(DefaultStarServers.isNotEmpty())
-    for (server in DefaultStarServers) {
-      assertTrue(server.id.isNotEmpty())
-      assertTrue(server.starName.isNotEmpty())
-      assertTrue(server.constellation.isNotEmpty())
-      assertTrue(server.city.isNotEmpty())
-      assertTrue(server.countryCode.isNotEmpty())
-      assertTrue(server.coordinates.isNotEmpty())
-      assertTrue(server.basePingMs > 0)
-      assertTrue(server.loadPercent in 1..100)
-    }
+  fun mapExitNodeToStarNodeDropsNodeWithoutStableId() {
+    val exitNode =
+        ExitNodePickerViewModel.ExitNode(
+            id = null,
+            label = "Unidentified node",
+            online = MutableStateFlow(true),
+            selected = false)
+
+    assertNull(mapExitNodeToStarNode(exitNode))
   }
 
   // --- Power Control Enabled State Tests ---

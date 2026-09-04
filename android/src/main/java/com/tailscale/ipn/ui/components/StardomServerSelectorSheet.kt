@@ -52,11 +52,14 @@ internal const val SERVER_SELECTOR_DETAILS_MAX_LINES = 1
 
 internal data class ServerSelectorRowLabels(val title: String, val details: String)
 
-internal fun serverSelectorRowLabels(server: StarServerNode): ServerSelectorRowLabels =
-    ServerSelectorRowLabels(
-        title = "${server.starName} // ${server.city.uppercase()}",
-        details = "[${server.countryCode}] • ${server.constellation} • ${server.coordinates}",
-    )
+internal fun serverSelectorRowLabels(server: StarServerNode): ServerSelectorRowLabels {
+  val title =
+      listOf(server.label, server.city.uppercase()).filter { it.isNotBlank() }.joinToString(" // ")
+  val details =
+      listOf(server.countryCode, server.country).filter { it.isNotBlank() }.joinToString(" • ")
+  return ServerSelectorRowLabels(
+      title = title.ifBlank { server.id }, details = details.ifBlank { "—" })
+}
 
 internal fun serverSelectorTitleColumnWidthDp(itemWidthDp: Int): Int =
     (itemWidthDp -
@@ -69,7 +72,7 @@ internal fun serverSelectorTitleColumnWidthDp(itemWidthDp: Int): Int =
 @Composable
 fun StardomServerSelectorSheet(
     servers: List<StarServerNode>,
-    selectedServer: StarServerNode,
+    selectedServer: StarServerNode?,
     sheetState: SheetState,
     onDismiss: () -> Unit,
     onSelectServer: (StarServerNode) -> Unit,
@@ -83,9 +86,9 @@ fun StardomServerSelectorSheet(
           servers
         } else {
           servers.filter {
-            it.starName.contains(searchQuery, ignoreCase = true) ||
+            it.label.contains(searchQuery, ignoreCase = true) ||
                 it.city.contains(searchQuery, ignoreCase = true) ||
-                it.constellation.contains(searchQuery, ignoreCase = true) ||
+                it.country.contains(searchQuery, ignoreCase = true) ||
                 it.countryCode.contains(searchQuery, ignoreCase = true)
           }
         }
@@ -195,16 +198,29 @@ fun StardomServerSelectorSheet(
               LazyColumn(
                   verticalArrangement = Arrangement.spacedBy(8.dp),
                   modifier = Modifier.fillMaxWidth()) {
-                    items(filteredServers, key = { it.id }) { server ->
-                      val isSelected = server.id == selectedServer.id
+                    if (filteredServers.isEmpty()) {
+                      item {
+                        Text(
+                            text = StardomLocalization.noExitNodesAvailable(language),
+                            color = StardomColors.TextMuted,
+                            fontSize = 10.sp,
+                            fontFamily = IbmPlexMono,
+                            letterSpacing = 1.sp,
+                            modifier =
+                                Modifier.padding(vertical = 12.dp).testTag("server_list_empty"))
+                      }
+                    } else {
+                      items(filteredServers, key = { it.id }) { server ->
+                        val isSelected = server.id == selectedServer?.id
 
-                      StardomServerSelectorRow(
-                          server = server,
-                          isSelected = isSelected,
-                          language = language,
-                          onSelectServer = onSelectServer,
-                          onDismiss = onDismiss,
-                      )
+                        StardomServerSelectorRow(
+                            server = server,
+                            isSelected = isSelected,
+                            language = language,
+                            onSelectServer = onSelectServer,
+                            onDismiss = onDismiss,
+                        )
+                      }
                     }
                   }
             }
@@ -227,7 +243,7 @@ private fun StardomServerSelectorRow(
               .background(if (isSelected) StardomColors.PanelSelected else StardomColors.Panel)
               .border(
                   1.dp, if (isSelected) StardomColors.BorderStrong else StardomColors.BorderFaint)
-              .clickable(onClickLabel = "Select server ${server.starName}") {
+              .clickable(onClickLabel = "Select server ${server.label}") {
                 onSelectServer(server)
                 onDismiss()
               }
@@ -277,22 +293,14 @@ private fun StardomServerSelectorRow(
 
           Spacer(modifier = Modifier.width(SERVER_SELECTOR_TELEMETRY_GAP_DP.dp))
 
-          // Keep ping and load in a fixed end column so long labels cannot overlap them.
           Column(
               horizontalAlignment = Alignment.End,
               modifier = Modifier.width(SERVER_SELECTOR_TELEMETRY_COLUMN_WIDTH_DP.dp)) {
                 Text(
-                    text = "${server.basePingMs} MS",
-                    color = StardomColors.TextPrimary,
+                    text = "—",
+                    color = StardomColors.TextMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal,
-                    fontFamily = IbmPlexMono,
-                    maxLines = 1)
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = "${StardomLocalization.loadLabel(language)} ${server.loadPercent}%",
-                    color = StardomColors.TextMuted,
-                    fontSize = 8.sp,
                     fontFamily = IbmPlexMono,
                     maxLines = 1)
               }

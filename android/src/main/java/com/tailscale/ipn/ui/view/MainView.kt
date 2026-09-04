@@ -82,107 +82,14 @@ data class MainViewNavigation(
     val onNavigateToSearch: () -> Unit,
 )
 
-val DefaultStarServers =
-    listOf(
-        StarServerNode(
-            id = "star-fra-01",
-            starName = "POLARIS-01",
-            constellation = "CYGNUS-ALPHA",
-            city = "Frankfurt",
-            countryCode = "DE",
-            coordinates = "50.1109° N, 8.6821° E",
-            basePingMs = 18,
-            loadPercent = 24,
-            ipAddress = "100.64.0.1"),
-        StarServerNode(
-            id = "star-ams-01",
-            starName = "VEGA-PRIME",
-            constellation = "ORION-PRIME",
-            city = "Amsterdam",
-            countryCode = "NL",
-            coordinates = "52.3676° N, 4.9041° E",
-            basePingMs = 22,
-            loadPercent = 38,
-            ipAddress = "100.64.0.2"),
-        StarServerNode(
-            id = "star-sto-01",
-            starName = "SIRIUS-04",
-            constellation = "CASSIOPEIA-IV",
-            city = "Stockholm",
-            countryCode = "SE",
-            coordinates = "59.3293° N, 18.0686° E",
-            basePingMs = 31,
-            loadPercent = 19,
-            ipAddress = "100.64.0.3"),
-        StarServerNode(
-            id = "star-zrh-01",
-            starName = "ALTAIR-02",
-            constellation = "VEGA-SECTOR",
-            city = "Zurich",
-            countryCode = "CH",
-            coordinates = "47.3769° N, 8.5417° E",
-            basePingMs = 26,
-            loadPercent = 42,
-            ipAddress = "100.64.0.4"))
-
-fun mapExitNodeToStarNode(
-    exitNode: ExitNodePickerViewModel.ExitNode,
-    index: Int = 0
-): StarServerNode {
-  val defaultStarNames =
-      listOf(
-          "POLARIS-01",
-          "VEGA-PRIME",
-          "SIRIUS-04",
-          "ALTAIR-02",
-          "DENEB-07",
-          "RIGEL-IX",
-          "ANTARES-03",
-          "BETELGEUSE-V")
-  val defaultConstellations =
-      listOf(
-          "CYGNUS-ALPHA",
-          "ORION-PRIME",
-          "CASSIOPEIA-IV",
-          "VEGA-SECTOR",
-          "ANDROMEDA-IX",
-          "CENTAURI-VII",
-          "URSA-MAJOR",
-          "PEGASUS-III")
-  val defaultCoordinates =
-      listOf(
-          "50.1109° N, 8.6821° E",
-          "52.3676° N, 4.9041° E",
-          "59.3293° N, 18.0686° E",
-          "47.3769° N, 8.5417° E",
-          "51.5074° N, 0.1278° W")
-
-  val starName =
-      if (exitNode.label.isNotBlank() && exitNode.label != "auto:any") {
-        exitNode.label.uppercase()
-      } else {
-        defaultStarNames[index % defaultStarNames.size]
-      }
-
-  val city = if (exitNode.city.isNotBlank()) exitNode.city else "Frankfurt"
-  val countryCode =
-      if (exitNode.countryCode.isNotBlank()) exitNode.countryCode.uppercase() else "DE"
-  val hash = Math.abs((exitNode.id ?: exitNode.label).hashCode())
-  val constellation = defaultConstellations[hash % defaultConstellations.size]
-  val coordinates = defaultCoordinates[hash % defaultCoordinates.size]
-  val ping = if (exitNode.priority > 0) exitNode.priority else (18 + (hash % 25))
-  val load = 15 + (hash % 40)
-
+fun mapExitNodeToStarNode(exitNode: ExitNodePickerViewModel.ExitNode): StarServerNode? {
+  val id = exitNode.id?.takeIf { it.isNotBlank() } ?: return null
   return StarServerNode(
-      id = exitNode.id ?: exitNode.label,
-      starName = starName,
-      constellation = constellation,
-      city = city,
-      countryCode = countryCode,
-      coordinates = coordinates,
-      basePingMs = ping,
-      loadPercent = load,
-      ipAddress = exitNode.id ?: "100.64.0.1")
+      id = id,
+      label = exitNode.label.ifBlank { id },
+      city = exitNode.city,
+      countryCode = exitNode.countryCode.uppercase(),
+      country = exitNode.country)
 }
 
 fun resolveStardomVpnState(
@@ -392,30 +299,15 @@ fun MainView(
       if (autoExitNodeState.selected) ConnectionMode.AUTO else ConnectionMode.MANUAL
 
   val servers =
-      remember(tailnetExitNodesState) {
-        if (tailnetExitNodesState.isNotEmpty()) {
-          tailnetExitNodesState.mapIndexed { index, node -> mapExitNodeToStarNode(node, index) }
-        } else {
-          DefaultStarServers
-        }
-      }
+      remember(tailnetExitNodesState) { tailnetExitNodesState.mapNotNull(::mapExitNodeToStarNode) }
 
   val activeServer =
       remember(connectionMode, autoExitNodeState, tailnetExitNodesState, servers) {
         if (connectionMode == ConnectionMode.AUTO) {
-          val effectiveId = autoExitNodeState.effectiveExitNodeID
-          servers.find { it.id == effectiveId }
-              ?: servers.firstOrNull()
-              ?: DefaultStarServers.first()
+          servers.find { it.id == autoExitNodeState.effectiveExitNodeID }
         } else {
           val selectedExitNode = tailnetExitNodesState.find { it.selected }
-          if (selectedExitNode != null) {
-            servers.find { it.id == selectedExitNode.id }
-                ?: servers.firstOrNull()
-                ?: DefaultStarServers.first()
-          } else {
-            servers.firstOrNull() ?: DefaultStarServers.first()
-          }
+          servers.find { it.id == selectedExitNode?.id }
         }
       }
 

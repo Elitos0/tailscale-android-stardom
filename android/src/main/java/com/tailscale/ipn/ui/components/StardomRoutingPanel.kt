@@ -39,7 +39,7 @@ import com.tailscale.ipn.ui.theme.StardomDimensions
 @Composable
 fun StardomRoutingPanel(
     connectionMode: ConnectionMode,
-    activeServer: StarServerNode,
+    activeServer: StarServerNode?,
     onRoutingModeChange: (ConnectionMode) -> Unit,
     onNodeClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -105,9 +105,6 @@ fun StardomRoutingPanel(
 
         Spacer(Modifier.height(13.dp))
 
-        /*
-         * ACTIVE NODE METADATA & LATENCY
-         */
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -120,7 +117,7 @@ fun StardomRoutingPanel(
                   letterSpacing = 1.8.sp)
 
               Text(
-                  text = "${activeServer.basePingMs} MS",
+                  text = "—",
                   color = StardomColors.TextSecondary,
                   fontFamily = IbmPlexMono,
                   fontSize = 9.sp,
@@ -133,9 +130,6 @@ fun StardomRoutingPanel(
 
         Spacer(Modifier.height(9.dp))
 
-        /*
-         * ACTIVE NODE MAIN ROW & DROPDOWN
-         */
         Row(
             modifier =
                 Modifier.fillMaxWidth().testTag("active_server_card").clickable(
@@ -144,15 +138,8 @@ fun StardomRoutingPanel(
                     },
             verticalAlignment = Alignment.CenterVertically) {
               Column(modifier = Modifier.weight(1f)) {
-                val nodeTitle =
-                    if (connectionMode == ConnectionMode.AUTO) {
-                      "AUTO / ${activeServer.starName}"
-                    } else {
-                      "${activeServer.starName}: ${activeServer.city.uppercase()}"
-                    }
-
                 Text(
-                    text = nodeTitle,
+                    text = routingNodeTitle(connectionMode, activeServer, language),
                     color = StardomColors.TextPrimary,
                     fontFamily = SpaceGrotesk,
                     fontWeight = FontWeight.Medium,
@@ -163,8 +150,7 @@ fun StardomRoutingPanel(
                 Spacer(Modifier.height(3.dp))
 
                 Text(
-                    text =
-                        "${activeServer.city.uppercase()} / ${activeServer.countryCode} • ${activeServer.constellation}",
+                    text = routingNodeDetails(activeServer, language),
                     color = StardomColors.TextSecondary,
                     fontFamily = IbmPlexMono,
                     fontSize = 9.sp,
@@ -185,6 +171,33 @@ fun StardomRoutingPanel(
                         modifier = Modifier.size(18.dp))
                   }
             }
+      }
+}
+
+internal fun routingNodeTitle(
+    connectionMode: ConnectionMode,
+    activeServer: StarServerNode?,
+    language: AppLanguage,
+): String =
+    when {
+      activeServer == null && connectionMode == ConnectionMode.AUTO ->
+          if (language == AppLanguage.RU) "AUTO / ОЖИДАНИЕ УЗЛА" else "AUTO / NODE PENDING"
+      activeServer == null ->
+          if (language == AppLanguage.RU) "УЗЕЛ НЕ ВЫБРАН" else "NO NODE SELECTED"
+      connectionMode == ConnectionMode.AUTO -> "AUTO / ${activeServer.label}"
+      activeServer.city.isNotBlank() -> "${activeServer.label}: ${activeServer.city.uppercase()}"
+      else -> activeServer.label
+    }
+
+internal fun routingNodeDetails(activeServer: StarServerNode?, language: AppLanguage): String {
+  if (activeServer == null) {
+    return if (language == AppLanguage.RU) "ОЖИДАЕМ ДАННЫЕ TAILNET" else "WAITING FOR TAILNET DATA"
+  }
+  return listOf(activeServer.city, activeServer.countryCode, activeServer.country)
+      .filter { it.isNotBlank() }
+      .joinToString(" / ")
+      .ifBlank {
+        if (language == AppLanguage.RU) "МЕТАДАННЫЕ НЕДОСТУПНЫ" else "METADATA UNAVAILABLE"
       }
 }
 

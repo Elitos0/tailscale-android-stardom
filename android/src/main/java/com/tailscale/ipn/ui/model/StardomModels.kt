@@ -54,16 +54,10 @@ enum class DnsProvider(val displayName: String, val address: String) {
 
 data class StarServerNode(
     val id: String,
-    val starName: String,
-    val constellation: String,
+    val label: String,
     val city: String,
     val countryCode: String,
-    val coordinates: String,
-    val basePingMs: Int,
-    val loadPercent: Int,
-    val ipAddress: String,
-    val cipher: String = "ChaCha20-Poly1305",
-    val isStarred: Boolean = false
+    val country: String,
 )
 
 data class AccountProfile(
@@ -411,6 +405,12 @@ object StardomLocalization {
       when (lang) {
         AppLanguage.RU -> "$count АКТИВНЫХ УЗЛОВ ОНЛАЙН"
         AppLanguage.EN -> "$count ACTIVE RELAY NODES ONLINE"
+      }
+
+  fun noExitNodesAvailable(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОСТУПНЫЕ EXIT-УЗЛЫ ЕЩЁ НЕ ПОЛУЧЕНЫ"
+        AppLanguage.EN -> "NO EXIT NODES AVAILABLE YET"
       }
 
   fun searchPrefix(lang: AppLanguage): String =

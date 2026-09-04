@@ -21,24 +21,31 @@ class StardomServerSelectorSheetTest {
   }
 
   @Test
-  fun rowLabelsKeepCountryConstellationAndCoordinatesInEllipsizedDetailsLine() {
+  fun rowLabelsUseOnlyLiveLocationMetadata() {
     val node =
         StarServerNode(
             id = "exit-local-1",
-            starName = "STARDOM-EXIT-LOCAL-1",
-            constellation = "ORION-IV",
+            label = "Germany 1",
             city = "Frankfurt",
             countryCode = "DE",
-            coordinates = "50.1109° N, 8.6821° E",
-            basePingMs = 24,
-            loadPercent = 31,
-            ipAddress = "100.64.0.1",
-        )
+            country = "Germany")
 
     val labels = serverSelectorRowLabels(node)
 
-    assertEquals("STARDOM-EXIT-LOCAL-1 // FRANKFURT", labels.title)
-    assertEquals("[DE] • ORION-IV • 50.1109° N, 8.6821° E", labels.details)
+    assertEquals("Germany 1 // FRANKFURT", labels.title)
+    assertEquals("DE • Germany", labels.details)
+  }
+
+  @Test
+  fun rowLabelsShowNoInventedLocationWhenMetadataIsMissing() {
+    val node =
+        StarServerNode(
+            id = "exit-local-1", label = "Germany 1", city = "", countryCode = "", country = "")
+
+    val labels = serverSelectorRowLabels(node)
+
+    assertEquals("Germany 1", labels.title)
+    assertEquals("—", labels.details)
   }
 
   @Test
