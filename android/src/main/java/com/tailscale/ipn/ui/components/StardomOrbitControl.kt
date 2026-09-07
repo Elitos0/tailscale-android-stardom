@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -78,6 +79,41 @@ internal fun orbitSettlingPlan(currentRotation: Float): OrbitSettlingPlan {
       durationMillis = orbitSettlingDurationMillis(rotationDistance))
 }
 
+internal fun orbitSecondaryCircleColor(vpnState: VpnState): Color =
+    when {
+      vpnState.isError -> StardomColors.ErrorBorder
+      vpnState.isConnected -> StardomColors.BorderStrong
+      else -> StardomColors.Border
+    }
+
+internal fun orbitDiamondColor(vpnState: VpnState): Color =
+    when {
+      vpnState.isError -> StardomColors.Error
+      vpnState.isConnected -> StardomColors.BorderStrong
+      else -> StardomColors.Border
+    }
+
+internal fun orbitOrbitalElementColor(vpnState: VpnState): Color =
+    when {
+      vpnState.isError -> StardomColors.Error
+      vpnState.isConnected -> StardomColors.TextPrimary
+      else -> StardomColors.BorderStrong
+    }
+
+internal fun orbitButtonBorderColor(vpnState: VpnState): Color =
+    when {
+      vpnState.isError -> StardomColors.Error
+      vpnState.isConnected -> StardomColors.TextPrimary
+      else -> StardomColors.BorderStrong
+    }
+
+internal fun orbitButtonContentColor(vpnState: VpnState): Color =
+    when {
+      vpnState.isError -> StardomColors.Error
+      vpnState.isConnected -> StardomColors.TextPrimary
+      else -> StardomColors.TextSecondary
+    }
+
 @Composable
 fun StardomOrbitControl(
     vpnState: VpnState,
@@ -87,7 +123,6 @@ fun StardomOrbitControl(
     language: AppLanguage = AppLanguage.RU
 ) {
   val connected = vpnState.isConnected
-  val connecting = vpnState.isConnecting
 
   // Precision orbital tick rotation
   val tickRotation = remember { Animatable(0f) }
@@ -128,12 +163,7 @@ fun StardomOrbitControl(
        * SECONDARY ORBIT (pure 1px stroke)
        */
       drawCircle(
-          color =
-              when {
-                vpnState.isError -> StardomColors.ErrorBorder
-                connected -> StardomColors.BorderStrong
-                else -> StardomColors.Border
-              },
+          color = orbitSecondaryCircleColor(vpnState),
           radius = secondaryRadius,
           center = center,
           style = Stroke(width = 1f))
@@ -157,13 +187,14 @@ fun StardomOrbitControl(
 
       drawPath(
           path = diamondPath,
-          color = StardomColors.stateAccent(vpnState),
+          color = orbitDiamondColor(vpnState),
           style = Stroke(width = 1f))
 
       // Tiny node markers at diamond vertices
       val diamondNodes = listOf(top, right, bottom, left)
+      val orbitalElementColor = orbitOrbitalElementColor(vpnState)
       for (node in diamondNodes) {
-        drawCircle(color = StardomColors.stateAccent(vpnState), radius = 2.dp.toPx(), center = node)
+        drawCircle(color = orbitalElementColor, radius = 2.dp.toPx(), center = node)
       }
 
       /*
@@ -179,7 +210,7 @@ fun StardomOrbitControl(
 
       for (offset in cardinalOffsets) {
         drawRect(
-            color = StardomColors.stateAccent(vpnState),
+            color = orbitalElementColor,
             topLeft = offset,
             size = Size(sqSize, sqSize))
       }
@@ -202,7 +233,7 @@ fun StardomOrbitControl(
           val y2 = center.y + sin(radians).toFloat() * r2
 
           drawLine(
-              color = StardomColors.stateAccent(vpnState),
+              color = orbitalElementColor,
               start = Offset(x1, y1),
               end = Offset(x2, y2),
               strokeWidth = 1f)
@@ -213,13 +244,8 @@ fun StardomOrbitControl(
     /*
      * PHYSICAL CENTRAL BUTTON (square, 152dp, 1px border)
      */
-    val buttonBorderColor = StardomColors.stateAccent(vpnState, border = true)
-    val buttonContentColor =
-        when {
-          vpnState.isError -> StardomColors.Error
-          connected -> StardomColors.TextPrimary
-          else -> StardomColors.TextSecondary
-        }
+    val buttonBorderColor = orbitButtonBorderColor(vpnState)
+    val buttonContentColor = orbitButtonContentColor(vpnState)
 
     Column(
         modifier =
@@ -242,7 +268,7 @@ fun StardomOrbitControl(
 
           Text(
               text = label,
-              color = StardomColors.stateAccent(vpnState),
+              color = buttonContentColor,
               fontFamily = IbmPlexMono,
               fontWeight = FontWeight.Normal,
               fontSize = 11.5.sp,

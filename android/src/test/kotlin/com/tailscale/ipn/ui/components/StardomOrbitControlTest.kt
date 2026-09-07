@@ -4,6 +4,7 @@
 package com.tailscale.ipn.ui.components
 
 import com.tailscale.ipn.ui.model.VpnState
+import com.tailscale.ipn.ui.theme.StardomColors
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -79,5 +80,42 @@ class StardomOrbitControlTest {
     for (state in VpnState.entries.filterNot { it.isConnecting }) {
       assertEquals(28000, orbitRotationDurationMillis(state))
     }
+  }
+
+  @Test
+  fun illuminationOnlyAppliesWhenConnectedWhileDisconnectedRetainsStaticOutlines() {
+    // Disconnected state: normal static outlines
+    assertEquals(StardomColors.Border, orbitSecondaryCircleColor(VpnState.DISCONNECTED))
+    assertEquals(StardomColors.Border, orbitDiamondColor(VpnState.DISCONNECTED))
+    assertEquals(StardomColors.BorderStrong, orbitOrbitalElementColor(VpnState.DISCONNECTED))
+    assertEquals(StardomColors.BorderStrong, orbitButtonBorderColor(VpnState.DISCONNECTED))
+    assertEquals(StardomColors.TextSecondary, orbitButtonContentColor(VpnState.DISCONNECTED))
+
+    // Connecting states: retain static outlines while rotating
+    for (state in
+        listOf(
+            VpnState.RESOLVING_STAR_ROUTE,
+            VpnState.HANDSHAKING_CIPHER,
+            VpnState.AUTHENTICATING_NODE)) {
+      assertEquals(StardomColors.Border, orbitSecondaryCircleColor(state))
+      assertEquals(StardomColors.Border, orbitDiamondColor(state))
+      assertEquals(StardomColors.BorderStrong, orbitOrbitalElementColor(state))
+      assertEquals(StardomColors.BorderStrong, orbitButtonBorderColor(state))
+      assertEquals(StardomColors.TextSecondary, orbitButtonContentColor(state))
+    }
+
+    // Connected (SECURED) state: visibly luminous elements
+    assertEquals(StardomColors.BorderStrong, orbitSecondaryCircleColor(VpnState.SECURED))
+    assertEquals(StardomColors.BorderStrong, orbitDiamondColor(VpnState.SECURED))
+    assertEquals(StardomColors.TextPrimary, orbitOrbitalElementColor(VpnState.SECURED))
+    assertEquals(StardomColors.TextPrimary, orbitButtonBorderColor(VpnState.SECURED))
+    assertEquals(StardomColors.TextPrimary, orbitButtonContentColor(VpnState.SECURED))
+
+    // Error state: error highlights
+    assertEquals(StardomColors.ErrorBorder, orbitSecondaryCircleColor(VpnState.ERROR))
+    assertEquals(StardomColors.Error, orbitDiamondColor(VpnState.ERROR))
+    assertEquals(StardomColors.Error, orbitOrbitalElementColor(VpnState.ERROR))
+    assertEquals(StardomColors.Error, orbitButtonBorderColor(VpnState.ERROR))
+    assertEquals(StardomColors.Error, orbitButtonContentColor(VpnState.ERROR))
   }
 }
