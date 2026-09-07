@@ -123,7 +123,10 @@ class LoginWithCustomControlURLViewModel(
           .onSuccess {
             authSessionRepository.withFreshBearerToken(context) { tokenResult ->
               tokenResult
-                  .onFailure { errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED) }
+                  .onFailure {
+                    authSessionRepository.clearSession()
+                    errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
+                  }
                   .onSuccess { token ->
                     viewModelScope.launch(ioDispatcher) {
                       val keyResult = policyApiClient.fetchNodeAuthKey(token)
@@ -134,6 +137,8 @@ class LoginWithCustomControlURLViewModel(
                                   is
                                   com.tailscale.ipn.product.policy.PolicyApiUnauthorizedException) {
                                 authSessionRepository.requireReauthentication()
+                              } else {
+                                authSessionRepository.clearSession()
                               }
                               errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
                             }
@@ -141,9 +146,13 @@ class LoginWithCustomControlURLViewModel(
                               loginWithAuthKey(authKey) { loginResult ->
                                 loginResult
                                     .onFailure {
+                                      authSessionRepository.clearSession()
                                       errorDialog.set(ErrorDialogType.ADD_PROFILE_FAILED)
                                     }
-                                    .onSuccess { onSuccess() }
+                                    .onSuccess {
+                                      authSessionRepository.markAuthorizationReady()
+                                      onSuccess()
+                                    }
                               }
                             }
                       }

@@ -114,19 +114,22 @@ internal fun isStardomLoginPresentationLoading(
     authError: Boolean,
     isLoginLoading: Boolean,
     authentikState: AuthentikState?,
+    connectionStage: ConnectionStage? = null,
 ): Boolean =
     !authError &&
         (isLoginLoading ||
             authentikState == AuthentikState.Authorizing ||
-            authentikState == AuthentikState.AuthorizedLoading)
+            authentikState == AuthentikState.AuthorizedLoading ||
+            (authentikState == AuthentikState.Authorized && connectionStage == ConnectionStage.SignIn))
 
 internal fun resolveStardomPresentationVpnState(
     vpnState: VpnState,
     authError: Boolean,
     isLoginLoading: Boolean,
     authentikState: AuthentikState?,
+    connectionStage: ConnectionStage? = null,
 ): VpnState =
-    if (isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState)) {
+    if (isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState, connectionStage)) {
       VpnState.RESOLVING_STAR_ROUTE
     } else {
       vpnState
@@ -145,9 +148,11 @@ fun resolveStardomStatusText(
   return when {
     authError ->
         if (language == AppLanguage.RU) "СБОЙ АВТОРИЗАЦИИ // ПОВТОРИТЕ" else "AUTH FAILED // RETRY"
-    isLoginLoading ||
-        authentikState == AuthentikState.Authorizing ||
-        authentikState == AuthentikState.AuthorizedLoading ->
+    isStardomLoginPresentationLoading(
+        authError = authError,
+        isLoginLoading = isLoginLoading,
+        authentikState = authentikState,
+        connectionStage = connectionStage) ->
         if (language == AppLanguage.RU) "ВХОД В СИСТЕМУ..." else "SIGNING IN..."
     ipnState == Ipn.State.NeedsMachineAuth ->
         if (language == AppLanguage.RU) "ТРЕБУЕТСЯ АВТОРИЗАЦИЯ УСТРОЙСТВА"
@@ -203,7 +208,7 @@ fun isStardomStatusError(
     isLoginLoading: Boolean = false,
     authentikState: AuthentikState? = null,
 ): Boolean =
-    !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState) &&
+    !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState, connectionStage) &&
         (authError ||
             vpnState.isError ||
             showKeyExpiry ||
@@ -221,7 +226,7 @@ internal fun isStardomLoginModalVisible(
     authentikState: AuthentikState?
 ): Boolean =
     connectionStage == ConnectionStage.SignIn &&
-        (authError || !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState))
+        (authError || !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState, connectionStage))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -275,7 +280,8 @@ fun MainView(
           vpnState = stardomVpnState,
           authError = authError,
           isLoginLoading = isLoginLoading,
-          authentikState = authentikState)
+          authentikState = authentikState,
+          connectionStage = connectionStage)
 
   val exitNodeViewModel: ExitNodePickerViewModel =
       viewModel(
@@ -347,7 +353,7 @@ fun MainView(
 
   val isPowerControlEnabled =
       isPowerControlEnabled(connectionStage) &&
-          !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState)
+          !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState, connectionStage)
   val onPowerToggle: () -> Unit = {
     when {
       state == Ipn.State.NeedsMachineAuth -> {

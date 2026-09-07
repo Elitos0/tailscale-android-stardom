@@ -12,6 +12,7 @@ import com.tailscale.ipn.MainActivity
 class AuthCallbackActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    openMainActivity()
     (application as App)
         .stardomSessionController
         .handleAuthorizationIntent(

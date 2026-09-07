@@ -449,9 +449,25 @@ class MainViewTest {
             authentikState = AuthentikState.Authorizing))
     assertFalse(
         isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = false,
+            authentikState = AuthentikState.AuthorizedLoading))
+    assertFalse(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            isLoginLoading = false,
+            authentikState = AuthentikState.Authorized))
+    assertFalse(
+        isStardomLoginModalVisible(
             connectionStage = ConnectionStage.Connect,
             isLoginLoading = false,
             authentikState = AuthentikState.SignedOut))
+    assertTrue(
+        isStardomLoginModalVisible(
+            connectionStage = ConnectionStage.SignIn,
+            authError = true,
+            isLoginLoading = false,
+            authentikState = AuthentikState.Authorized))
   }
 
   // --- Modal Login & Direct Navigation Contract Tests ---

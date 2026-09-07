@@ -88,6 +88,41 @@ class AuthSessionRepositoryTest {
     repository.markAuthorizationReady()
     assertEquals(AuthentikState.Authorized, repository.authentikState.value)
   }
+  @Test
+  fun authorizationCallbackSetsAuthorizingImmediatelyDuringCodeExchangeAndPreservesAuthorizedLoading() {
+    val storage = InMemoryAuthStateStorage()
+    val state = FakeSessionState()
+    val gateway =
+        FakeAppAuthGateway(
+            authorizationResult = AuthorizationResult(mock<AuthorizationResponse>(), null),
+            tokenResponse = mock<TokenResponse>(),
+            deferCodeExchange = true,
+            freshToken = "token-123")
+    val transactions = InMemoryAuthorizationTransactionStorage()
+    transactions.write(PendingAuthorizationTransaction(gateway.authorizationRequest, 0))
+    val repository =
+        AuthSessionRepository(storage, state, gateway, transactions) { 0 }
+
+    assertEquals(AuthentikState.SignedOut, repository.authentikState.value)
+
+    repository.handleAuthorizationIntent(context, intent)
+
+    // Truthful in-progress state is set immediately while code exchange is running
+    assertEquals(AuthentikState.Authorizing, repository.authentikState.value)
+
+    gateway.completeCodeExchange()
+
+    // Successful exchange moves to AuthorizedLoading
+    assertEquals(AuthentikState.AuthorizedLoading, repository.authentikState.value)
+
+    // Token refresh does not prematurely downgrade AuthorizedLoading to Authorized
+    repository.withFreshBearerToken(context) {}
+    assertEquals(AuthentikState.AuthorizedLoading, repository.authentikState.value)
+
+    // Final markAuthorizationReady transitions to Authorized
+    repository.markAuthorizationReady()
+    assertEquals(AuthentikState.Authorized, repository.authentikState.value)
+  }
 
   @Test
   fun recoveredAuthorizationNotifiesCallerWhenOriginalCompletionIsGone() {

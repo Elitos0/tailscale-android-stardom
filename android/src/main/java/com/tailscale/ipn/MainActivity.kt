@@ -653,6 +653,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
+    resumeFixedControlLoginIfPending()
     val restrictionsManager =
         this.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     lifecycleScope.launch(Dispatchers.IO) {

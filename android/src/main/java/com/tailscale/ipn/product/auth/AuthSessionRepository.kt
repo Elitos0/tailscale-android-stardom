@@ -15,6 +15,7 @@ import com.tailscale.ipn.util.TSLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import net.openid.appauth.AppAuthConfiguration
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -250,6 +251,9 @@ open class AuthSessionRepository(
           }
           authState.updateAuthorization(result.response, result.exception)
           persistLocked()
+          if (result.response != null) {
+            _authentikState.value = AuthentikState.Authorizing
+          }
           true
         }
     if (!current) {
@@ -347,7 +351,9 @@ open class AuthSessionRepository(
             } else {
               TSLog.d("AuthLifecycle", "OIDC token refresh succeeded: accessTokenPresent=true")
               persistLocked()
-              _authentikState.value = AuthentikState.Authorized
+              if (_authentikState.value != AuthentikState.AuthorizedLoading) {
+                _authentikState.value = AuthentikState.Authorized
+              }
               Result.success(accessToken)
             }
           }
@@ -566,6 +572,9 @@ private fun responseMatchesPendingRequest(
       request.additionalParameters == pending.additionalParameters
 }
 
+private val tokenEndpointConfiguration: AppAuthConfiguration =
+    AppAuthConfiguration.Builder().setBrowserMatcher { false }.build()
+
 internal class RealAppAuthGateway(
     private val issuerUri: Uri = Uri.parse(ProductConfig.authentikIssuerUrl),
     private val fetchConfiguration:
@@ -630,7 +639,8 @@ internal class RealAppAuthGateway(
       response: AuthorizationResponse,
       callback: (TokenResponse?, AuthorizationException?) -> Unit
   ) {
-    val service = AuthorizationService(context)
+    val service =
+        AuthorizationService(context.applicationContext ?: context, tokenEndpointConfiguration)
     service.performTokenRequest(response.createTokenExchangeRequest()) { tokenResponse, exception ->
       service.dispose()
       callback(tokenResponse, exception)
@@ -642,7 +652,8 @@ internal class RealAppAuthGateway(
       state: AuthSessionState,
       callback: (String?, AuthorizationException?) -> Unit
   ) {
-    val service = AuthorizationService(context)
+    val service =
+        AuthorizationService(context.applicationContext ?: context, tokenEndpointConfiguration)
     state.appAuthState.performActionWithFreshTokens(service) { accessToken, _, exception ->
       service.dispose()
       callback(accessToken, exception)
