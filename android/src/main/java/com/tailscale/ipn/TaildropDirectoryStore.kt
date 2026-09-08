@@ -15,7 +15,7 @@ object TaildropDirectoryStore {
   @Throws(IOException::class, GeneralSecurityException::class)
   fun saveFileDirectory(directoryUri: Uri) {
     val prefs = App.get().getEncryptedPrefs()
-    prefs.edit().putString(PREF_KEY_SAF_URI, directoryUri.toString()).commit()
+    prefs.edit().putString(PREF_KEY_SAF_URI, directoryUri.toString()).apply()
   }
 
   @Throws(IOException::class, GeneralSecurityException::class)

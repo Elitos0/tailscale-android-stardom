@@ -17,7 +17,10 @@ object NetworkChangeCallback {
 
   private const val TAG = "NetworkChangeCallback"
 
-  private data class NetworkInfo(var caps: NetworkCapabilities, var linkProps: LinkProperties)
+  private data class NetworkInfo(
+      var caps: NetworkCapabilities? = null,
+      var linkProps: LinkProperties? = null,
+  )
 
   private val lock = ReentrantLock()
 
@@ -66,7 +69,7 @@ object NetworkChangeCallback {
             TSLog.d(TAG, "onAvailable: network $network")
 
             lock.withLock {
-              activeNetworks[network] = NetworkInfo(NetworkCapabilities(), LinkProperties())
+              activeNetworks[network] = NetworkInfo()
               recomputeDefaultNetworkLocked("onAvailable")
             }
           }
@@ -108,7 +111,7 @@ object NetworkChangeCallback {
   // networks, or the first network if none are non-metered.
   private fun pickNonMetered(networks: Map<Network, NetworkInfo>): Network? {
     for ((network, info) in networks) {
-      if (info.caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) {
+      if (info.caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true) {
         return network
       }
     }
@@ -124,9 +127,13 @@ object NetworkChangeCallback {
     // available.
     val networks =
         activeNetworks.filter { (_, info) ->
-          info.caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-              info.caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
-              info.linkProps.dnsServers.isNotEmpty()
+          val caps = info.caps
+          val linkProps = info.linkProps
+          caps != null &&
+              linkProps != null &&
+              caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+              caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+              linkProps.dnsServers.isNotEmpty()
         }
 
     // If we have one; just return it; otherwise, prefer networks that are also
@@ -142,8 +149,9 @@ object NetworkChangeCallback {
     // strictly better to return an interface + use the DNS fallback servers
     // than to return nothing and not be able to route traffic.
     for ((network, info) in activeNetworks) {
-      if (info.caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-          info.caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
+      val caps = info.caps ?: continue
+      if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+          caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
         Log.w(TAG, "no networks with DNS; falling back to first network $network")
         return network
       }
@@ -179,33 +187,34 @@ object NetworkChangeCallback {
     }
 
     val info = cachedDefaultNetworkInfo
-    if (info == null) {
-      Log.w(TAG, "$why: no info for default network; not updating DNS")
+    val linkProps = info?.linkProps
+    if (linkProps == null) {
+      Log.w(TAG, "$why: no link properties for default network; not updating DNS")
       return
     }
 
     val sb = StringBuilder()
-    for (ip in info.linkProps.dnsServers) {
+    for (ip in linkProps.dnsServers) {
       sb.append(ip.hostAddress).append(" ")
     }
 
-    val searchDomains: String? = info.linkProps.domains
+    val searchDomains: String? = linkProps.domains
     if (searchDomains != null) {
       sb.append("\n")
       sb.append(searchDomains)
     }
 
     if (dns.updateDNSFromNetwork(sb.toString())) {
-      TSLog.d(TAG, "$why: updated DNS config for iface=${info.linkProps.interfaceName}")
+      TSLog.d(TAG, "$why: updated DNS config for iface=${linkProps.interfaceName}")
 
       val gatewayIP =
-          info.linkProps.routes
+          linkProps.routes
               .filter { it.isDefaultRoute && it.gateway != null }
               .sortedBy { if (it.gateway is java.net.Inet4Address) 0 else 1 }
               .firstNotNullOfOrNull { it.gateway?.hostAddress } ?: ""
 
       Libtailscale.onGatewayChanged(gatewayIP)
-      Libtailscale.onDNSConfigChanged(info.linkProps.interfaceName)
+      Libtailscale.onDNSConfigChanged(linkProps.interfaceName)
     }
   }
 }
