@@ -66,6 +66,13 @@ class AuthSessionRepositoryTest {
   }
 
   @Test
+  fun authorizationRequestIncludesGroupsScopeForPolicyApiClaims() {
+    assertEquals(
+        listOf("openid", "profile", "email", "groups", "offline_access"),
+        OIDC_SCOPES.split(" "))
+  }
+
+  @Test
   fun authorizationCodeExchangePersistsStateAndCompletesLogin() {
     val storage = InMemoryAuthStateStorage()
     val state = FakeSessionState()

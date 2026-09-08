@@ -34,7 +34,7 @@ private const val AUTH_CALLBACK_ACTION = "com.stardom.vpn.AUTH_CALLBACK"
 private const val AUTH_CANCEL_ACTION = "com.stardom.vpn.AUTH_CANCELLED"
 internal const val AUTH_TRANSACTION_STATE_EXTRA = "com.stardom.vpn.AUTH_TRANSACTION_STATE"
 private const val AUTH_REDIRECT_URI = "com.stardom.vpn:/oauth2redirect"
-private const val OIDC_SCOPES = "openid profile email offline_access"
+internal const val OIDC_SCOPES = "openid profile email groups offline_access"
 private const val AUTH_TRANSACTION_MAX_AGE_MILLIS = 5 * 60 * 1000L
 
 internal fun callbackPendingIntentFlags(sdkInt: Int = Build.VERSION.SDK_INT): Int =
