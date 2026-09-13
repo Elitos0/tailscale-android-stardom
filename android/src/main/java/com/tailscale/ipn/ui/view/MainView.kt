@@ -43,12 +43,16 @@ import com.tailscale.ipn.product.auth.AuthentikState
 import com.tailscale.ipn.product.policy.AccessState
 import com.tailscale.ipn.product.ui.ConnectionStage
 import com.tailscale.ipn.product.ui.resolveConnectionStage
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.tailscale.ipn.ui.Links
 import com.tailscale.ipn.ui.components.StardomAccountDialog
 import com.tailscale.ipn.ui.components.StardomBackground
 import com.tailscale.ipn.ui.components.StardomHeader
 import com.tailscale.ipn.ui.components.StardomLoginModal
 import com.tailscale.ipn.ui.components.StardomOrbitControl
+import com.tailscale.ipn.ui.components.StardomProfileView
 import com.tailscale.ipn.ui.components.StardomRoutingPanel
 import com.tailscale.ipn.ui.components.StardomServerSelectorSheet
 import com.tailscale.ipn.ui.components.StardomSettingsSheet
@@ -317,6 +321,7 @@ fun MainView(
         }
       }
 
+  var showProfileScreen by remember { mutableStateOf(false) }
   var showAccountDialog by remember { mutableStateOf(false) }
   var showSettingsSheet by remember { mutableStateOf(false) }
   var showServerSheet by remember { mutableStateOf(false) }
@@ -328,12 +333,14 @@ fun MainView(
   val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
   val accountProfile =
-      remember(user, netmap, peersList) {
+      remember(user, netmap, peersList, sessionController.userEmail) {
         val currentUser = user
         val selfKey = netmap?.SelfNode?.Key ?: "ed25519:7a4f89d31ce02b66"
         val keyExpiry = netmap?.SelfNode?.KeyExpiry ?: "2028.12.31"
         val loginName =
-            currentUser?.UserProfile?.LoginName?.ifEmpty { null }
+            sessionController.userEmail?.ifEmpty { null }
+                ?: currentUser?.UserProfile?.DisplayName?.takeIf { it.isNotBlank() && !it.startsWith("stardom-") }
+                ?: currentUser?.UserProfile?.LoginName?.takeIf { it.isNotBlank() && !it.startsWith("stardom-") }
                 ?: currentUser?.NetworkProfile?.DomainName?.ifEmpty { null }
                 ?: "STAR-4096-ALPHA"
         val deviceCount = peersList.sumOf { it.peers.size } + 1
@@ -414,59 +421,74 @@ fun MainView(
                       StardomHeader(
                           vpnState = presentationVpnState,
                           language = selectedLanguage,
-                          onProfileClick = { showAccountDialog = true },
-                          onSettingsClick = { showSettingsSheet = true })
+                          onProfileClick = { showProfileScreen = !showProfileScreen },
+                          onSettingsClick = { showSettingsSheet = true },
+                          isProfileActive = showProfileScreen)
 
-                      Spacer(modifier = Modifier.weight(1f))
-
-                      StardomOrbitControl(
-                          vpnState = presentationVpnState,
-                          onClick = onPowerToggle,
-                          enabled = isPowerControlEnabled,
-                          language = selectedLanguage,
-                          modifier = Modifier.fillMaxWidth())
-
-                      Spacer(Modifier.height(6.dp))
-
-                      val statusText =
-                          resolveStardomStatusText(
-                              vpnState = presentationVpnState,
-                              connectionStage = connectionStage,
-                              authentikState = authentikState,
-                              ipnState = state,
-                              showKeyExpiry = showKeyExpiry,
-                              authError = authError,
-                              isLoginLoading = isLoginLoading,
-                              language = selectedLanguage)
-                      val isStatusError =
-                          isStardomStatusError(
-                              vpnState = presentationVpnState,
-                              connectionStage = connectionStage,
-                              ipnState = state,
-                              showKeyExpiry = showKeyExpiry,
-                              authError = authError,
-                              isLoginLoading = isLoginLoading,
-                              authentikState = authentikState)
-                      StardomStatus(
-                          statusText = statusText,
-                          vpnState = presentationVpnState,
-                          isError = isStatusError,
-                          language = selectedLanguage)
-                      Spacer(Modifier.height(20.dp))
-                      StardomRoutingPanel(
-                          connectionMode = connectionMode,
-                          activeServer = activeServer,
-                          onRoutingModeChange = { mode ->
-                            if (mode == ConnectionMode.AUTO) {
-                              exitNodeViewModel.setAutoExitNode()
-                            } else {
-                              showServerSheet = true
+                      if (showProfileScreen) {
+                        BackHandler { showProfileScreen = false }
+                        Column(
+                            modifier =
+                                Modifier.fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                              Spacer(Modifier.height(16.dp))
+                              StardomProfileView(
+                                  profile = accountProfile,
+                                  onClose = { showProfileScreen = false })
+                              Spacer(Modifier.height(StardomDimensions.SectionMedium))
                             }
-                          },
-                          onNodeClick = { showServerSheet = true },
-                          language = selectedLanguage)
+                      } else {
+                        Spacer(modifier = Modifier.weight(1f))
 
-                      Spacer(Modifier.height(StardomDimensions.SectionMedium))
+                        StardomOrbitControl(
+                            vpnState = presentationVpnState,
+                            onClick = onPowerToggle,
+                            enabled = isPowerControlEnabled,
+                            language = selectedLanguage,
+                            modifier = Modifier.fillMaxWidth())
+
+                        Spacer(Modifier.height(6.dp))
+
+                        val statusText =
+                            resolveStardomStatusText(
+                                vpnState = presentationVpnState,
+                                connectionStage = connectionStage,
+                                authentikState = authentikState,
+                                ipnState = state,
+                                showKeyExpiry = showKeyExpiry,
+                                authError = authError,
+                                isLoginLoading = isLoginLoading,
+                                language = selectedLanguage)
+                        val isStatusError =
+                            isStardomStatusError(
+                                vpnState = presentationVpnState,
+                                connectionStage = connectionStage,
+                                ipnState = state,
+                                showKeyExpiry = showKeyExpiry,
+                                authError = authError,
+                                isLoginLoading = isLoginLoading,
+                                authentikState = authentikState)
+                        StardomStatus(
+                            statusText = statusText,
+                            vpnState = presentationVpnState,
+                            isError = isStatusError,
+                            language = selectedLanguage)
+                        Spacer(Modifier.height(20.dp))
+                        StardomRoutingPanel(
+                            connectionMode = connectionMode,
+                            activeServer = activeServer,
+                            onRoutingModeChange = { mode ->
+                              if (mode == ConnectionMode.AUTO) {
+                                exitNodeViewModel.setAutoExitNode()
+                              } else {
+                                showServerSheet = true
+                              }
+                            },
+                            onNodeClick = { showServerSheet = true },
+                            language = selectedLanguage)
+                        Spacer(Modifier.height(StardomDimensions.SectionMedium))
+                      }
                     }
 
                 // Modals & Bottom Sheets

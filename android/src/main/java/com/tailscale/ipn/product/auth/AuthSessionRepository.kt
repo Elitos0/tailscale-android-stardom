@@ -25,6 +25,10 @@ import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.ResponseTypeValues
 import net.openid.appauth.TokenResponse
 import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 private const val AUTH_STATE_KEY = "auth_state"
 private const val AUTH_PENDING_TRANSACTION_KEY = "pending_authorization_transaction"
@@ -150,6 +154,9 @@ open class AuthSessionRepository(
 
   val isSignedOut: Boolean
     get() = synchronized(sessionLock) { !authState.isAuthorized }
+
+  val userEmail: String?
+    get() = synchronized(sessionLock) { extractUserEmailFromIdToken(authState.appAuthState.idToken) }
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
     val (generation, previous) =
@@ -793,5 +800,28 @@ private class InMemoryAuthorizationTransactionStorage : AuthorizationTransaction
   override fun clear() {
     transaction = null
     fixedHeadscaleContinuation = false
+  }
+}
+
+internal fun extractUserEmailFromIdToken(idToken: String?): String? {
+  if (idToken.isNullOrBlank()) return null
+  return try {
+    val parts = idToken.split(".")
+    if (parts.size >= 2) {
+      val payload = parts[1]
+      val normalized =
+          when (payload.length % 4) {
+            2 -> "$payload=="
+            3 -> "$payload="
+            else -> payload
+          }
+      val decoded = java.util.Base64.getUrlDecoder().decode(normalized)
+      val jsonElement = Json.parseToJsonElement(String(decoded, Charsets.UTF_8)).jsonObject
+      jsonElement["email"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+          ?: jsonElement["preferred_username"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+          ?: jsonElement["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    } else null
+  } catch (_: Exception) {
+    null
   }
 }

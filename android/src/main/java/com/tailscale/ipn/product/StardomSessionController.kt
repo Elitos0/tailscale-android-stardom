@@ -17,6 +17,8 @@ open class StardomSessionController(
 ) {
   val authentikState: StateFlow<AuthentikState> = authSessionRepository.authentikState
   val accessState: StateFlow<AccessState> = accessRepository.state
+  open val userEmail: String?
+    get() = authSessionRepository.userEmail
 
   fun startAuthorization(context: Context, onComplete: (Result<Unit>) -> Unit) {
     authSessionRepository.startAuthorization(context, onComplete)

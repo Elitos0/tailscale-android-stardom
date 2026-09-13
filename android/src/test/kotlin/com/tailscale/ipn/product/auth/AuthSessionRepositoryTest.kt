@@ -853,6 +853,27 @@ class AuthSessionRepositoryTest {
       TSLog.libtailscaleWrapper = originalLog
     }
   }
+
+  @Test
+  fun extractUserEmailFromIdTokenParsesEmailFromJwtPayload() {
+    // {"email": "elik21129555@gmail.com", "sub": "user-123"}
+    val idToken = "header.eyJlbWFpbCI6ICJlbGlrMjExMjk1NTVAZ21haWwuY29tIiwgInN1YiI6ICJ1c2VyLTEyMyJ9.signature"
+    assertEquals("elik21129555@gmail.com", extractUserEmailFromIdToken(idToken))
+  }
+
+  @Test
+  fun extractUserEmailFromIdTokenFallsBackToPreferredUsername() {
+    // {"preferred_username": "elik_user", "sub": "user-123"}
+    val idToken = "header.eyJwcmVmZXJyZWRfdXNlcm5hbWUiOiAiZWxpa191c2VyIiwgInN1YiI6ICJ1c2VyLTEyMyJ9.signature"
+    assertEquals("elik_user", extractUserEmailFromIdToken(idToken))
+  }
+
+  @Test
+  fun extractUserEmailFromIdTokenReturnsNullOnInvalidOrBlankToken() {
+    assertNull(extractUserEmailFromIdToken(null))
+    assertNull(extractUserEmailFromIdToken(""))
+    assertNull(extractUserEmailFromIdToken("invalid-jwt"))
+  }
 }
 
 private fun callbackIntent(action: String): Intent =

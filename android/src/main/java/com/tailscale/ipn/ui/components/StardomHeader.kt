@@ -42,18 +42,22 @@ fun StardomHeader(
     language: AppLanguage,
     onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isProfileActive: Boolean = false
 ) {
   Row(
       modifier = modifier.fillMaxWidth().height(StardomDimensions.TopBarHeight),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween) {
         HeaderButton(
-            onClick = onProfileClick, testTag = "account_button", contentDescription = "Profile") {
+            onClick = onProfileClick,
+            testTag = "account_button",
+            contentDescription = "Profile",
+            isActive = isProfileActive) {
               Icon(
                   imageVector = Icons.Outlined.Person,
                   contentDescription = "Profile",
-                  tint = StardomColors.TextSecondary,
+                  tint = if (isProfileActive) StardomColors.TextPrimary else StardomColors.TextSecondary,
                   modifier = Modifier.size(18.dp))
             }
 
@@ -116,13 +120,16 @@ private fun HeaderButton(
     onClick: () -> Unit,
     testTag: String,
     contentDescription: String,
+    isActive: Boolean = false,
     content: @Composable BoxScope.() -> Unit
 ) {
   Box(
       modifier =
           Modifier.size(StardomDimensions.HeaderButtonSize)
-              .background(StardomColors.Panel)
-              .border(width = 1.dp, color = StardomColors.Border)
+              .background(if (isActive) StardomColors.PanelSelected else StardomColors.Panel)
+              .border(
+                  width = 1.dp,
+                  color = if (isActive) StardomColors.BorderStrong else StardomColors.Border)
               .testTag(testTag)
               .clickable(onClickLabel = contentDescription) { onClick() },
       contentAlignment = Alignment.Center,

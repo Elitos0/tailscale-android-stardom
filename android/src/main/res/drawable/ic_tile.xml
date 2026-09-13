@@ -1,35 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="60"
-    android:viewportHeight="60">
-  <group>
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- STARDOM quick-settings tile icon: monochrome S silhouette -->
     <path
-        android:pathData="M15,30.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#FFFDFA"/>
-    <path
-        android:pathData="M30,30.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#FFFDFA"/>
-    <path
-        android:pathData="M15,45.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#54514D"/>
-    <path
-        android:pathData="M45,45.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#54514D"/>
-    <path
-        android:pathData="M30,45.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#FFFDFA"/>
-    <path
-        android:pathData="M45,30.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#FFFDFA"/>
-    <path
-        android:pathData="M15,15.0002m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#54514D"/>
-    <path
-        android:pathData="M30,14.9999m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#54514D"/>
-    <path
-        android:pathData="M45,14.9999m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
-        android:fillColor="#54514D"/>
-  </group>
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 10.610,2.074
+            L 8.905,2.426
+            L 7.589,2.982
+            L 6.513,3.724
+            L 5.624,4.651
+            L 4.994,5.744
+            L 4.678,6.838
+            L 4.623,8.339
+            L 4.845,9.451
+            L 5.791,11.194
+            L 7.385,12.454
+            L 9.220,13.251
+            L 13.335,14.382
+            L 14.539,14.956
+            L 15.114,15.698
+            L 15.040,16.866
+            L 14.447,17.533
+            L 13.446,17.922
+            L 12.278,18.015
+            L 10.832,17.829
+            L 10.072,17.514
+            L 9.386,16.940
+            L 9.053,16.384
+            L 8.830,15.309
+            L 8.293,14.994
+            L 4.697,15.031
+            L 4.363,15.438
+            L 4.419,16.829
+            L 4.827,18.126
+            L 5.587,19.312
+            L 6.680,20.350
+            L 7.755,21.036
+            L 9.146,21.592
+            L 10.795,21.926
+            L 12.500,22.000
+            L 14.354,21.815
+            L 15.744,21.444
+            L 17.042,20.814
+            L 17.876,20.184
+            L 18.784,19.127
+            L 19.303,18.070
+            L 19.637,16.625
+            L 19.637,15.179
+            L 19.340,13.881
+            L 18.487,12.454
+            L 17.134,11.379
+            L 15.744,10.767
+            L 11.592,9.507
+            L 10.146,8.858
+            L 9.331,8.098
+            L 9.220,7.134
+            L 9.479,6.634
+            L 10.184,6.096
+            L 11.110,5.837
+            L 12.222,5.818
+            L 13.149,6.004
+            L 14.076,6.504
+            L 15.225,8.191
+            L 18.710,8.247
+            L 19.025,8.135
+            L 19.210,7.857
+            L 19.155,6.467
+            L 18.858,5.466
+            L 18.321,4.521
+            L 17.524,3.687
+            L 16.578,3.057
+            L 15.188,2.482
+            L 13.761,2.148
+            L 12.259,2.000
+            Z" />
+
 </vector>
