@@ -331,6 +331,9 @@ class MainActivity : ComponentActivity() {
                           onNavigateToSearch = {
                             viewModel.enableSearchAutoFocus()
                             navController.navigate(StardomRoute.SEARCH.path)
+                          },
+                          onNavigateToSplitTunneling = {
+                            navController.navigate(StardomRoute.SPLIT_TUNNELING.path)
                           })
                   val settingsNav =
                       SettingsNav(
@@ -447,7 +450,7 @@ class MainActivity : ComponentActivity() {
                     DNSSettingsView(backTo(StardomRoute.SETTINGS.path))
                   }
                   composable(StardomRoute.SPLIT_TUNNELING.path) {
-                    SplitTunnelAppPickerView(backTo(StardomRoute.SETTINGS.path))
+                    SplitTunnelAppPickerView(backTo(StardomRoute.MAIN.path))
                   }
                   composable(StardomRoute.TAILNET_LOCK.path) {
                     TailnetLockSetupView(backTo(StardomRoute.SETTINGS.path))

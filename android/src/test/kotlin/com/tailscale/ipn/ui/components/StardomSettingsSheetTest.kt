@@ -63,7 +63,21 @@ class StardomSettingsSheetTest {
               StardomLocalization.obfuscationTitle(lang),
               StardomLocalization.obfuscationDesc(lang),
               StardomLocalization.autoWifiTitle(lang),
-              StardomLocalization.autoWifiDesc(lang))
+              StardomLocalization.autoWifiDesc(lang),
+              StardomLocalization.splitTunnelingSection(lang),
+              StardomLocalization.splitTunnelingTitle(lang),
+              StardomLocalization.splitTunnelingSubtitle(lang),
+              StardomLocalization.splitTunnelModeBypass(lang),
+              StardomLocalization.splitTunnelModeBypassDesc(lang),
+              StardomLocalization.splitTunnelModeOnlySelected(lang),
+              StardomLocalization.splitTunnelModeOnlySelectedDesc(lang),
+              StardomLocalization.splitTunnelSearchPlaceholder(lang),
+              StardomLocalization.splitTunnelAppsCount(lang, 10, 2),
+              StardomLocalization.splitTunnelBypassBadge(lang, 2, false),
+              StardomLocalization.splitTunnelBypassBadge(lang, 0, false),
+              StardomLocalization.splitTunnelBypassBadge(lang, 2, true),
+              StardomLocalization.splitTunnelConfigureBtn(lang),
+              StardomLocalization.splitTunnelBackBtn(lang))
 
       for (str in strings) {
         assertFalse(

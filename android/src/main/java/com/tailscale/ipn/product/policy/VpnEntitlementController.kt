@@ -97,7 +97,9 @@ class ImmediateRevokeStopFence(private val runtime: VpnEntitlementRuntime) : Vpn
 enum class VpnRuntimeState {
   Idle,
   Starting,
-  Running,
+  Running;
+
+  fun isStartingOrRunning(): Boolean = this == Starting || this == Running
 }
 
 data class VpnRuntimeSnapshot(
@@ -855,8 +857,6 @@ class VpnEntitlementController(
     revocationMutex.withLock { revokedForCurrentRun = false }
   }
 
-  private fun VpnRuntimeState.isStartingOrRunning(): Boolean =
-      this == VpnRuntimeState.Starting || this == VpnRuntimeState.Running
 
   /**
    * Stops the VPN (awaiting Idle when a real fence is wired), then clears exit preferences. Use

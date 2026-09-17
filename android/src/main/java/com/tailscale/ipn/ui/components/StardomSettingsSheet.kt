@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.DnsProvider
 import com.tailscale.ipn.ui.model.StardomLocalization
@@ -48,8 +49,24 @@ fun StardomSettingsSheet(
     selectedLanguage: AppLanguage,
     onSelectLanguage: (AppLanguage) -> Unit,
     sheetState: SheetState,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenSplitTunneling: () -> Unit = {}
 ) {
+  val splitTunnelCount =
+      try {
+        UninitializedApp.get().selectedPackageNames().size
+      } catch (_: Throwable) {
+        0
+      }
+  val allowSelected =
+      try {
+        UninitializedApp.get().allowSelectedPackages()
+      } catch (_: Throwable) {
+        false
+      }
+  val badgeText =
+      StardomLocalization.splitTunnelBypassBadge(
+          selectedLanguage, splitTunnelCount, allowSelected)
   ModalBottomSheet(
       onDismissRequest = onDismiss,
       sheetState = sheetState,
@@ -334,6 +351,74 @@ fun StardomSettingsSheet(
                     }
                   }
 
+
+              Spacer(modifier = Modifier.height(18.dp))
+
+              // Section: App Split Tunneling
+              SettingsSectionHeader(
+                  title = StardomLocalization.splitTunnelingSection(selectedLanguage))
+              Box(
+                  modifier =
+                      Modifier.fillMaxWidth()
+                          .testTag("split_tunneling_card")
+                          .background(StardomColors.Panel)
+                          .border(1.dp, StardomColors.Border)
+                          .clickable(onClickLabel = "Open split tunneling") {
+                            onOpenSplitTunneling()
+                          }
+                          .padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()) {
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier =
+                                        Modifier.size(10.dp)
+                                            .border(
+                                                1.dp,
+                                                if (splitTunnelCount > 0)
+                                                    StardomColors.Selected
+                                                else StardomColors.TextMuted),
+                                    contentAlignment = Alignment.Center) {
+                                      if (splitTunnelCount > 0) {
+                                        Box(
+                                            modifier =
+                                                Modifier.size(4.dp)
+                                                    .background(StardomColors.Selected))
+                                      }
+                                    }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                  Text(
+                                      text =
+                                          StardomLocalization.splitTunnelingTitle(
+                                              selectedLanguage),
+                                      color = StardomColors.TextPrimary,
+                                      fontSize = 12.sp,
+                                      fontWeight = FontWeight.Medium,
+                                      fontFamily = SpaceGrotesk)
+                                  Spacer(Modifier.height(2.dp))
+                                  Text(
+                                      text = badgeText,
+                                      color = StardomColors.TextMuted,
+                                      fontSize = 9.sp,
+                                      fontFamily = IbmPlexMono)
+                                }
+                              }
+
+                          Text(
+                              text =
+                                  StardomLocalization.splitTunnelConfigureBtn(
+                                      selectedLanguage),
+                              color = StardomColors.TextPrimary,
+                              fontSize = 9.sp,
+                              fontFamily = IbmPlexMono,
+                              letterSpacing = 1.sp)
+                        }
+                  }
               Spacer(modifier = Modifier.height(18.dp))
 
               // Section: Security Toggles (Coming Soon stubs)

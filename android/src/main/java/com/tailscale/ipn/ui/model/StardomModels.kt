@@ -231,6 +231,85 @@ object StardomLocalization {
         AppLanguage.EN -> "RESOLVER & DNS ZERO-KNOWLEDGE"
       }
 
+  // Split Tunneling
+  fun splitTunnelingSection(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "РАЗДЕЛЬНОЕ ТУННЕЛИРОВАНИЕ"
+        AppLanguage.EN -> "SPLIT TUNNELING"
+      }
+
+  fun splitTunnelingTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "МАРШРУТИЗАЦИЯ ПРИЛОЖЕНИЙ"
+        AppLanguage.EN -> "APP SPLIT TUNNELING"
+      }
+
+  fun splitTunnelingSubtitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЫБОР ПРИЛОЖЕНИЙ ДЛЯ ОБХОДА VPN"
+        AppLanguage.EN -> "SELECT APPS TO BYPASS VPN"
+      }
+
+  fun splitTunnelModeBypass(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБХОД VPN"
+        AppLanguage.EN -> "BYPASS VPN"
+      }
+
+  fun splitTunnelModeBypassDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Выбранные приложения не используют VPN"
+        AppLanguage.EN -> "Selected apps bypass the VPN tunnel"
+      }
+
+  fun splitTunnelModeOnlySelected(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ТОЛЬКО ВЫБРАННЫЕ"
+        AppLanguage.EN -> "ONLY SELECTED"
+      }
+
+  fun splitTunnelModeOnlySelectedDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Только выбранные приложения используют VPN"
+        AppLanguage.EN -> "Only selected apps use the VPN tunnel"
+      }
+
+  fun splitTunnelSearchPlaceholder(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПОИСК ПО НАЗВАНИЮ ИЛИ ПАКЕТУ..."
+        AppLanguage.EN -> "SEARCH BY NAME OR PACKAGE..."
+      }
+
+  fun splitTunnelAppsCount(lang: AppLanguage, total: Int, selected: Int): String =
+      when (lang) {
+        AppLanguage.RU -> "ВСЕГО: $total // ВЫБРАНО: $selected"
+        AppLanguage.EN -> "TOTAL: $total // SELECTED: $selected"
+      }
+
+  fun splitTunnelBypassBadge(lang: AppLanguage, count: Int, allowSelected: Boolean): String =
+      when (lang) {
+        AppLanguage.RU ->
+            if (count == 0) "ОТКЛЮЧЕНО"
+            else if (allowSelected) "В ТУННЕЛЕ: $count"
+            else "ОБХОД: $count"
+        AppLanguage.EN ->
+            if (count == 0) "DISABLED"
+            else if (allowSelected) "TUNNELED: $count"
+            else "BYPASS: $count"
+      }
+
+  fun splitTunnelConfigureBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НАСТРОИТЬ →"
+        AppLanguage.EN -> "CONFIGURE →"
+      }
+
+  fun splitTunnelBackBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "← НАЗАД"
+        AppLanguage.EN -> "← BACK"
+      }
+
   fun securitySection(lang: AppLanguage): String =
       when (lang) {
         AppLanguage.RU -> "ПАРАМЕТРЫ ЗАЩИТЫ"

@@ -84,6 +84,7 @@ data class MainViewNavigation(
     val onNavigateToExitNodes: () -> Unit,
     val onNavigateToHealth: () -> Unit,
     val onNavigateToSearch: () -> Unit,
+    val onNavigateToSplitTunneling: () -> Unit = {},
 )
 
 fun mapExitNodeToStarNode(exitNode: ExitNodePickerViewModel.ExitNode): StarServerNode? {
@@ -513,7 +514,11 @@ fun MainView(
                       selectedLanguage = selectedLanguage,
                       onSelectLanguage = { selectedLanguage = it },
                       sheetState = settingsSheetState,
-                      onDismiss = { showSettingsSheet = false })
+                      onDismiss = { showSettingsSheet = false },
+                      onOpenSplitTunneling = {
+                        showSettingsSheet = false
+                        navigation.onNavigateToSplitTunneling()
+                      })
                 }
 
                 if (showServerSheet) {

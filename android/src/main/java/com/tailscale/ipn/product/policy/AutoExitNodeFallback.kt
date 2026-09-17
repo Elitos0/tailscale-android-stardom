@@ -407,9 +407,6 @@ class PolicyAwareAutoExitNodeFallbackController(
     runCatching { onError(operation, error) }
   }
 
-  private fun VpnRuntimeState.isStartingOrRunning(): Boolean =
-      this == VpnRuntimeState.Starting || this == VpnRuntimeState.Running
-
   private fun SettingState<List<String>?>.toManagedAllowedSuggestedExitNodes():
       ManagedAllowedSuggestedExitNodes =
       if (isSet) ManagedAllowedSuggestedExitNodes.Configured(value?.toList())

@@ -953,7 +953,10 @@ open class UninitializedApp : Application() {
 
     getUnencryptedPrefs().edit().putStringSet(SELECTED_APPS_KEY, packageNames.toSet()).apply()
 
-    this.restartVPN()
+    val initialized = this as? App
+    if (initialized?.vpnRuntimeTracker?.state?.value?.isStartingOrRunning() == true) {
+      this.restartVPN()
+    }
   }
 
   fun switchUserSelectedPackages() {
@@ -963,7 +966,10 @@ open class UninitializedApp : Application() {
         .apply()
     getUnencryptedPrefs().edit().putStringSet(SELECTED_APPS_KEY, setOf()).apply()
 
-    this.restartVPN()
+    val initialized = this as? App
+    if (initialized?.vpnRuntimeTracker?.state?.value?.isStartingOrRunning() == true) {
+      this.restartVPN()
+    }
   }
 
   fun selectedPackageNames(): List<String> {
