@@ -71,6 +71,10 @@ import java.net.NetworkInterface
 import java.security.GeneralSecurityException
 import java.util.Collections
 import java.util.Locale
+import java.time.Duration
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -373,6 +377,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
             mutationBoundary = vpnEntitlementController,
             desiredExitModeStore = desiredExitModeStore,
             stopThenClear = { reason -> vpnEntitlementController.stopThenClearExitNode(reason) },
+            nativeGrace = Duration.ofSeconds(10),
             onError = { operation, error ->
               TSLog.e(
                   "AutoExitFallback", "$operation callback failed; VPN remains fail-closed", error)
@@ -771,20 +776,34 @@ open class UninitializedApp : Application() {
 
   suspend fun startVPNIfAuthorized(origin: VpnStartOrigin): VpnStartDispatchResult {
     val initializedApp = this as? App ?: return VpnStartDispatchResult.Denied
-    return initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
-      val intent =
-          Intent(initializedApp, IPNService::class.java).apply {
-            action = IPNService.ACTION_START_VPN
-          }
-      val pendingIntent =
-          PendingIntent.getForegroundService(
-              initializedApp,
-              0,
-              intent,
-              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-          )
-      pendingIntent.send()
+    if (origin == VpnStartOrigin.QuickSettings || origin == VpnStartOrigin.InternalWorker) {
+      initializedApp.startForegroundForLogin()
     }
+    if (Notifier.prefs.value == null) {
+      withTimeoutOrNull(2000L) {
+        Notifier.prefs.filterNotNull().first()
+      }
+    }
+    val result =
+        initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
+          val intent =
+              Intent(initializedApp, IPNService::class.java).apply {
+                action = IPNService.ACTION_START_VPN
+              }
+          val pendingIntent =
+              PendingIntent.getForegroundService(
+                  initializedApp,
+                  0,
+                  intent,
+                  PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+              )
+          pendingIntent.send()
+        }
+    if (result is VpnStartDispatchResult.Denied &&
+        (origin == VpnStartOrigin.QuickSettings || origin == VpnStartOrigin.InternalWorker)) {
+      initializedApp.stopVPN()
+    }
+    return result
   }
 
   private fun logVpnStartResult(result: VpnStartDispatchResult) {

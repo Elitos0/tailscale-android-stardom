@@ -124,8 +124,9 @@ internal fun isStardomLoginPresentationLoading(
         (isLoginLoading ||
             authentikState == AuthentikState.Authorizing ||
             authentikState == AuthentikState.AuthorizedLoading ||
-            (authentikState == AuthentikState.Authorized && connectionStage == ConnectionStage.SignIn))
-
+            (authentikState == AuthentikState.Authorized &&
+                (connectionStage == ConnectionStage.SignIn ||
+                    connectionStage == ConnectionStage.AccessUnavailable)))
 internal fun resolveStardomPresentationVpnState(
     vpnState: VpnState,
     authError: Boolean,

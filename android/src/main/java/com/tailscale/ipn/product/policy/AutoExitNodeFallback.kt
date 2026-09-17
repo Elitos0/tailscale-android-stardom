@@ -39,6 +39,7 @@ object PolicyAwareAutoExitNodeFallbackSelector {
       currentEffectiveNodeId: String?,
       peers: Collection<Tailcfg.Node>,
       nativeGraceActive: Boolean = false,
+      runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
   ): AutoExitNodeFallbackDecision {
     if (!autoConfigured) {
       TSLog.d("AutoExitFallback", "decide: autoConfigured=false -> Keep")
@@ -68,6 +69,13 @@ object PolicyAwareAutoExitNodeFallbackSelector {
     // During grace, keep native auto blackhole even if still unresolved.
     if (nativeGraceActive && eligible.isNotEmpty()) {
       TSLog.d("AutoExitFallback", "decide: native grace active and eligible peers present -> Keep")
+      return AutoExitNodeFallbackDecision.Keep
+    }
+    // During tunnel startup or startup grace with empty peers, keep tunnel active while discovering peers
+    if ((runtimeState == VpnRuntimeState.Starting || nativeGraceActive) && eligible.isEmpty()) {
+      TSLog.d(
+          "AutoExitFallback",
+          "decide: runtime state is Starting or in grace and eligible peers empty -> Keep")
       return AutoExitNodeFallbackDecision.Keep
     }
     val decision =
@@ -170,7 +178,13 @@ class PolicyAwareAutoExitNodeFallbackController(
   private suspend fun process(scope: CoroutineScope, inputs: Inputs) {
     val decision = evaluate(inputs)
     if (decision is AutoExitNodeFallbackDecision.Keep) {
-      synchronized(lock) { lastActionKey = null }
+      synchronized(lock) {
+        lastActionKey = null
+        if (inputs.runtime.state == VpnRuntimeState.Idle) {
+          graceDeadlineMillis = null
+          graceEligibleSignature = null
+        }
+      }
       return
     }
     TSLog.d(
@@ -204,6 +218,10 @@ class PolicyAwareAutoExitNodeFallbackController(
         }
       }
       AutoExitNodeFallbackDecision.StopAndClear -> {
+        if (inputs.runtime.state == VpnRuntimeState.Starting) {
+          TSLog.d("AutoExitFallback", "StopAndClear skipped while runtime state is Starting")
+          return
+        }
         TSLog.d("AutoExitFallback", "applying fallback action: StopAndClear")
         val clearer = stopThenClear
         if (clearer != null) {
@@ -299,7 +317,7 @@ class PolicyAwareAutoExitNodeFallbackController(
             .distinct()
             .sorted()
 
-    val graceActive = updateGraceWindow(eligible)
+    val graceActive = updateGraceWindow(eligible, inputs.runtime.state)
     TSLog.d(
         "AutoExitFallback",
         "evaluate inputs: peersCount=${peers.size} allowedCount=${allowed.size} eligibleCount=${eligible.size} eligible=$eligible graceActive=$graceActive")
@@ -309,21 +327,34 @@ class PolicyAwareAutoExitNodeFallbackController(
         currentEffectiveNodeId = currentPrefs.activeExitNodeID,
         peers = peers,
         nativeGraceActive = graceActive,
+        runtimeState = inputs.runtime.state,
     )
   }
 
-  private fun updateGraceWindow(eligible: List<String>): Boolean {
+  private fun updateGraceWindow(
+      eligible: List<String>,
+      runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
+  ): Boolean {
     synchronized(lock) {
-      if (eligible.isEmpty()) {
-        graceDeadlineMillis = null
-        graceEligibleSignature = null
-        return false
-      }
       val graceMillis = nativeGrace.toMillis()
       // Zero/negative grace means "no native window" (tests and fail-closed paths).
       if (graceMillis <= 0L) {
         graceDeadlineMillis = null
         graceEligibleSignature = eligible
+        return false
+      }
+      if (eligible.isEmpty()) {
+        if (runtimeState == VpnRuntimeState.Starting || runtimeState == VpnRuntimeState.Running) {
+          if (graceDeadlineMillis == null) {
+            graceDeadlineMillis = nowMillis() + graceMillis
+          }
+          val deadline = graceDeadlineMillis ?: return false
+          if (nowMillis() < deadline) {
+            return true
+          }
+        }
+        graceDeadlineMillis = null
+        graceEligibleSignature = null
         return false
       }
       if (graceEligibleSignature != eligible) {

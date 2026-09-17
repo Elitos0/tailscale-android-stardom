@@ -78,6 +78,29 @@ class MainViewTest {
             isLoginLoading = true,
             authentikState = AuthentikState.SignedOut))
   }
+  @Test
+  fun authorizedSessionWithAccessUnavailableSuppressesErrorFlashDuringBootstrap() {
+    val presentationState =
+        resolveStardomPresentationVpnState(
+            vpnState = VpnState.ERROR,
+            authError = false,
+            isLoginLoading = false,
+            authentikState = AuthentikState.Authorized,
+            connectionStage = ConnectionStage.AccessUnavailable,
+        )
+
+    assertEquals(VpnState.RESOLVING_STAR_ROUTE, presentationState)
+    assertFalse(presentationState.isError)
+    assertFalse(
+        isStardomStatusError(
+            ipnState = Ipn.State.Stopped,
+            vpnState = presentationState,
+            connectionStage = ConnectionStage.AccessUnavailable,
+            authError = false,
+            isLoginLoading = false,
+            authentikState = AuthentikState.Authorized,
+        ))
+  }
 
   @Test
   fun loginFailureRestoresActualErrorPresentationAndLoginModal() {

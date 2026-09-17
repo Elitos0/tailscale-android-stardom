@@ -108,6 +108,33 @@ class AutoExitNodeFallbackSelectorTest {
 
     assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
   }
+  @Test
+  fun startingStateWithEmptyPeersReturnsKeepInsteadOfStopAndClear() {
+    val decision =
+        PolicyAwareAutoExitNodeFallbackSelector.decide(
+            autoConfigured = true,
+            allowedNodeIds = setOf("node-a"),
+            currentEffectiveNodeId = "auto:any",
+            peers = emptyList(),
+            runtimeState = VpnRuntimeState.Starting,
+        )
+
+    assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
+  }
+
+  @Test
+  fun nativeGraceWithEmptyPeersReturnsKeepInsteadOfStopAndClear() {
+    val decision =
+        PolicyAwareAutoExitNodeFallbackSelector.decide(
+            autoConfigured = true,
+            allowedNodeIds = setOf("node-a"),
+            currentEffectiveNodeId = "auto:any",
+            peers = emptyList(),
+            nativeGraceActive = true,
+        )
+
+    assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
+  }
 
   private fun exitPeer(
       id: String,
@@ -134,6 +161,20 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     fixture.netmap.value = fixture.netmap.value
     runCurrent()
     assertEquals(listOf("node-a"), fixture.boundary.mutations)
+  }
+  @Test
+  fun startingRuntimeWithEmptyPeersDoesNotStopAndClear() = runTest {
+    val fixture =
+        fixture(
+            prefs = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
+            peers = emptyList(),
+            runtimeState = VpnRuntimeState.Starting,
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(0, fixture.runtime.revocations)
+    assertEquals(emptyList<String?>(), fixture.boundary.mutations)
   }
 
   @Test
