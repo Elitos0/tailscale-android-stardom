@@ -12,6 +12,7 @@ import com.tailscale.ipn.util.TSLog
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -64,11 +65,6 @@ object PolicyAwareAutoExitNodeFallbackSelector {
       TSLog.d(
           "AutoExitFallback",
           "decide: current effective node ($current) is in eligible set -> Keep")
-      return AutoExitNodeFallbackDecision.Keep
-    }
-    // During grace, keep native auto blackhole even if still unresolved.
-    if (nativeGraceActive && eligible.isNotEmpty()) {
-      TSLog.d("AutoExitFallback", "decide: native grace active and eligible peers present -> Keep")
       return AutoExitNodeFallbackDecision.Keep
     }
     // During tunnel startup or startup grace with empty peers, keep tunnel active while discovering peers
@@ -124,6 +120,7 @@ class PolicyAwareAutoExitNodeFallbackController(
       val runtimeGeneration: Long,
   )
 
+  private var graceTimerJob: Job? = null
   private val started = AtomicBoolean(false)
   private val lock = Any()
   private var lastActionKey: ActionKey? = null
@@ -183,9 +180,18 @@ class PolicyAwareAutoExitNodeFallbackController(
         if (inputs.runtime.state == VpnRuntimeState.Idle) {
           graceDeadlineMillis = null
           graceEligibleSignature = null
+          graceTimerJob?.cancel()
+          graceTimerJob = null
         }
       }
+      if (inputs.runtime.state.isStartingOrRunning() && graceDeadlineMillis != null) {
+        scheduleGraceExpiryTimer(scope)
+      }
       return
+    }
+    synchronized(lock) {
+      graceTimerJob?.cancel()
+      graceTimerJob = null
     }
     TSLog.d(
         "AutoExitFallback",
@@ -363,6 +369,19 @@ class PolicyAwareAutoExitNodeFallbackController(
       }
       val deadline = graceDeadlineMillis ?: return false
       return nowMillis() < deadline
+    }
+  }
+
+  private fun scheduleGraceExpiryTimer(scope: CoroutineScope) {
+    synchronized(lock) {
+      val deadline = graceDeadlineMillis ?: return
+      if (graceTimerJob?.isActive == true) return
+      val delayMillis = (deadline - nowMillis()).coerceAtLeast(0L)
+      graceTimerJob =
+          scope.launch {
+            delay(delayMillis + 50L)
+            process(scope, currentInputs())
+          }
     }
   }
 

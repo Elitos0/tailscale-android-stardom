@@ -69,7 +69,7 @@ class AutoExitNodeFallbackSelectorTest {
   }
 
   @Test
-  fun nativeGraceKeepsUnresolvedAuto() {
+  fun nativeGraceWithEligiblePeersSelectsImmediately() {
     val decision =
         PolicyAwareAutoExitNodeFallbackSelector.decide(
             autoConfigured = true,
@@ -79,7 +79,7 @@ class AutoExitNodeFallbackSelectorTest {
             nativeGraceActive = true,
         )
 
-    assertEquals(AutoExitNodeFallbackDecision.Keep, decision)
+    assertEquals(AutoExitNodeFallbackDecision.Select("node-a"), decision)
   }
 
   @Test
@@ -332,12 +332,39 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
     assertEquals(listOf("node-a"), boundary.mutations)
   }
 
+  @Test
+  fun graceTimeoutWithEmptyPeersTriggersStopAndClear() = runTest {
+    var now = 1000L
+    val fixture =
+        fixture(
+            prefs = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
+            peers = emptyList(),
+            runtimeState = VpnRuntimeState.Running,
+            nativeGrace = Duration.ofSeconds(10),
+            nowMillis = { now },
+        )
+    fixture.controller.start(backgroundScope)
+    runCurrent()
+
+    assertEquals(0, fixture.runtime.revocations)
+    assertEquals(emptyList<String?>(), fixture.boundary.mutations)
+
+    now += 10_100L
+    advanceTimeBy(10_100L)
+    runCurrent()
+
+    assertEquals(1, fixture.runtime.revocations)
+    assertEquals(listOf(null), fixture.boundary.mutations)
+  }
+
   private fun kotlinx.coroutines.test.TestScope.fixture(
       allowed: Set<String> = setOf("node-a"),
       prefs: Ipn.Prefs? = Ipn.Prefs(AutoExitNode = "any", ExitNodeID = "auto:any"),
       peers: List<Tailcfg.Node>? = listOf(exitPeer("node-a")),
       runtimeState: VpnRuntimeState = VpnRuntimeState.Idle,
       desiredExitModeStore: DesiredExitModeStore? = FakeDesiredExitModeStore(initial = null),
+      nativeGrace: Duration = Duration.ZERO,
+      nowMillis: () -> Long = System::currentTimeMillis,
   ): Fixture {
     val authentik = MutableStateFlow(AuthentikState.Authorized)
     val access = MutableStateFlow<AccessState>(AccessState.Active(allowed))
@@ -360,8 +387,8 @@ class PolicyAwareAutoExitNodeFallbackControllerTest {
             runtime = runtime,
             mutationBoundary = boundary,
             desiredExitModeStore = desiredExitModeStore,
-            // Unit tests assert post-grace behavior; grace itself is covered separately.
-            nativeGrace = Duration.ZERO,
+            nativeGrace = nativeGrace,
+            nowMillis = nowMillis,
             stopThenClear = { _ ->
               if (runtime.state.value == VpnRuntimeState.Starting ||
                   runtime.state.value == VpnRuntimeState.Running) {
