@@ -27,7 +27,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.mdm.MDMSettingsChangedReceiver
+import com.tailscale.ipn.product.ProductConfig
 import com.tailscale.ipn.product.StardomAccessBootstrap
+import com.tailscale.ipn.product.update.UpdateRepository
 import com.tailscale.ipn.product.StardomProcessStartVpnFence
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.auth.AuthSessionRepository
@@ -95,6 +97,13 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     StardomSessionController(
         AuthSessionRepository(applicationContext),
         AccessRepository(cacheStore = EncryptedAccessPolicyCacheStore(applicationContext)),
+    )
+  }
+  val updateRepository: UpdateRepository by lazy {
+    UpdateRepository(
+        context = applicationContext,
+        scope = applicationScope,
+        dashboardBaseUrl = ProductConfig.dashboardBaseUrl,
     )
   }
   val vpnStopCommandDispatcher: VpnStopCommandDispatcher by lazy {

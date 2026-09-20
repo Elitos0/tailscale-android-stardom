@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.UninitializedApp
+import com.tailscale.ipn.product.update.UpdateState
+import com.tailscale.ipn.ui.util.AppVersion
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.DnsProvider
 import com.tailscale.ipn.ui.model.StardomLocalization
@@ -50,7 +52,10 @@ fun StardomSettingsSheet(
     onSelectLanguage: (AppLanguage) -> Unit,
     sheetState: SheetState,
     onDismiss: () -> Unit,
-    onOpenSplitTunneling: () -> Unit = {}
+    onOpenSplitTunneling: () -> Unit = {},
+    updateState: UpdateState = UpdateState.Idle,
+    onCheckForUpdate: () -> Unit = {},
+    onOpenUpdateDialog: () -> Unit = {},
 ) {
   val splitTunnelCount =
       try {
@@ -451,6 +456,126 @@ fun StardomSettingsSheet(
                         testTag = "security_toggle_auto_wifi")
                   }
 
+              Spacer(modifier = Modifier.height(18.dp))
+
+              // Section: Client Update
+              SettingsSectionHeader(title = StardomLocalization.clientUpdateSection(selectedLanguage))
+              Box(
+                  modifier =
+                      Modifier.fillMaxWidth()
+                          .testTag("client_update_card")
+                          .background(StardomColors.Panel)
+                          .border(1.dp, StardomColors.Border)
+                          .padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()) {
+                          Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                              Text(
+                                  text = StardomLocalization.clientUpdateSection(selectedLanguage),
+                                  color = StardomColors.TextPrimary,
+                                  fontSize = 12.sp,
+                                  fontWeight = FontWeight.Medium,
+                                  fontFamily = SpaceGrotesk)
+
+                              Spacer(Modifier.width(8.dp))
+
+                              Text(
+                                  text = "v${AppVersion.Short()}",
+                                  color = StardomColors.TextSecondary,
+                                  fontSize = 9.sp,
+                                  fontFamily = IbmPlexMono)
+                            }
+
+                            Spacer(Modifier.height(3.dp))
+
+                            val statusText =
+                                when (updateState) {
+                                  is UpdateState.Checking ->
+                                      StardomLocalization.clientUpdateChecking(selectedLanguage)
+                                  is UpdateState.UpdateAvailable ->
+                                      "${StardomLocalization.clientUpdateAvailable(selectedLanguage)}: v${updateState.manifest.versionName}"
+                                  is UpdateState.Downloaded ->
+                                      "${StardomLocalization.clientUpdateAvailable(selectedLanguage)}: v${updateState.manifest.versionName}"
+                                  is UpdateState.Downloading ->
+                                      StardomLocalization.updateProgressText(
+                                          selectedLanguage,
+                                          "%.1f".format(updateState.bytesDownloaded.toDouble() / (1024 * 1024)),
+                                          "%.1f".format(updateState.totalBytes.toDouble() / (1024 * 1024)),
+                                          (updateState.progress * 100).toInt())
+                                  is UpdateState.UpToDate ->
+                                      StardomLocalization.clientUpdateUpToDate(selectedLanguage)
+                                  is UpdateState.Error ->
+                                      StardomLocalization.clientUpdateError(selectedLanguage)
+                                  else ->
+                                      StardomLocalization.clientUpdateUpToDate(selectedLanguage)
+                                }
+
+                            Text(
+                                text = statusText,
+                                color =
+                                    when (updateState) {
+                                      is UpdateState.UpdateAvailable, is UpdateState.Downloaded ->
+                                          StardomColors.TextPrimary
+                                      is UpdateState.Error -> StardomColors.Error
+                                      else -> StardomColors.TextMuted
+                                    },
+                                fontSize = 9.sp,
+                                 fontFamily = IbmPlexMono)
+                           }
+
+                          Spacer(Modifier.width(10.dp))
+
+                          if (updateState is UpdateState.UpdateAvailable || updateState is UpdateState.Downloaded) {
+                            Box(
+                                modifier =
+                                    Modifier.testTag("client_update_view_btn")
+                                        .background(StardomColors.Selected)
+                                        .border(1.dp, StardomColors.BorderStrong)
+                                        .clickable(onClickLabel = "View Update") {
+                                          onOpenUpdateDialog()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                  Text(
+                                      text = StardomLocalization.updateNowBtn(selectedLanguage),
+                                      color = StardomColors.Background,
+                                      fontSize = 9.sp,
+                                      fontFamily = IbmPlexMono,
+                                      fontWeight = FontWeight.Bold,
+                                      letterSpacing = 0.5.sp)
+                                }
+                          } else {
+                            Box(
+                                modifier =
+                                    Modifier.testTag("client_update_check_btn")
+                                        .background(StardomColors.PanelSelected)
+                                        .border(1.dp, StardomColors.Border)
+                                        .clickable(
+                                            enabled = updateState !is UpdateState.Checking,
+                                            onClickLabel = "Check for Update") {
+                                          onCheckForUpdate()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                  Text(
+                                      text =
+                                          if (updateState is UpdateState.Checking)
+                                              StardomLocalization.clientUpdateChecking(selectedLanguage)
+                                          else
+                                              StardomLocalization.clientUpdateCheckBtn(selectedLanguage),
+                                      color =
+                                          if (updateState is UpdateState.Checking)
+                                              StardomColors.TextMuted
+                                          else
+                                              StardomColors.TextPrimary,
+                                      fontSize = 9.sp,
+                                      fontFamily = IbmPlexMono,
+                                      letterSpacing = 0.5.sp)
+                                }
+                          }
+                        }
+                  }
               Spacer(modifier = Modifier.height(20.dp))
             }
       }

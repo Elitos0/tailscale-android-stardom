@@ -27,7 +27,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -51,6 +53,12 @@ class MainViewModelTest {
         mock<LibtailscaleWrapper>().also {
           doNothing().`when`(it).sendLog(anyString(), anyString())
         }
+  }
+
+  @After
+  fun tearDown() {
+    Dispatchers.resetMain()
+    TSLog.libtailscaleWrapper = originalLogWrapper
   }
 
   private fun createAppViewModelMock(): AppViewModel {
@@ -343,7 +351,7 @@ class MainViewModelTest {
   }
 
   @Test
-  fun executeStardomLoginPipelineFailsWhenBearerTokenRefreshFails() = runTest {
+  fun executeStardomLoginPipelineFailsWhenBearerTokenRefreshFails() = runTest(dispatcher) {
     val context = mock<Context>()
     val authRepo =
         FakeAuthSessionRepo(tokenResult = Result.failure(IllegalStateException("No bearer token")))
@@ -358,6 +366,7 @@ class MainViewModelTest {
             appViewModel = appViewModel,
             vpnEntitlementController = vpnEntitlementController,
             observeUserProfiles = false,
+            ioDispatcher = dispatcher,
         )
 
     var completionResult: Result<Unit>? = null
@@ -377,7 +386,7 @@ class MainViewModelTest {
   }
 
   @Test
-  fun executeStardomLoginPipelineFailsWhenNodeAuthKeyFetchFails() = runTest {
+  fun executeStardomLoginPipelineFailsWhenNodeAuthKeyFetchFails() = runTest(dispatcher) {
     val context = mock<Context>()
     val authRepo = FakeAuthSessionRepo(tokenResult = Result.success("token-123"))
     val sessionController = FakeStardomSessionController(authRepo)
@@ -395,6 +404,7 @@ class MainViewModelTest {
             appViewModel = appViewModel,
             vpnEntitlementController = vpnEntitlementController,
             observeUserProfiles = false,
+            ioDispatcher = dispatcher,
         )
 
     var completionResult: Result<Unit>? = null
@@ -414,7 +424,7 @@ class MainViewModelTest {
   }
 
   @Test
-  fun executeStardomLoginPipelineFailsWhenHeadscaleLoginFails() = runTest {
+  fun executeStardomLoginPipelineFailsWhenHeadscaleLoginFails() = runTest(dispatcher) {
     val context = mock<Context>()
     val authRepo = FakeAuthSessionRepo(tokenResult = Result.success("token-123"))
     val sessionController = FakeStardomSessionController(authRepo)
@@ -428,6 +438,7 @@ class MainViewModelTest {
             appViewModel = appViewModel,
             vpnEntitlementController = vpnEntitlementController,
             observeUserProfiles = false,
+            ioDispatcher = dispatcher,
             clientProvider = { scope ->
               TestFakeClient(scope).also {
                 it.startLoginInteractiveResult =
@@ -453,7 +464,7 @@ class MainViewModelTest {
   }
 
   @Test
-  fun executeStardomLoginPipelineFailsWhenPolicyRefreshUnavailable() = runTest {
+  fun executeStardomLoginPipelineFailsWhenPolicyRefreshUnavailable() = runTest(dispatcher) {
     val context = mock<Context>()
     val authRepo = FakeAuthSessionRepo(tokenResult = Result.success("token-123"))
     val sessionController =
@@ -470,6 +481,7 @@ class MainViewModelTest {
             appViewModel = appViewModel,
             vpnEntitlementController = vpnEntitlementController,
             observeUserProfiles = false,
+            ioDispatcher = dispatcher,
             clientProvider = { scope -> TestFakeClient(scope) },
         )
 

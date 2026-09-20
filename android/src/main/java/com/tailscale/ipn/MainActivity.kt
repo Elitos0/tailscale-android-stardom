@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
                 ))
             .get(MainViewModel::class.java)
     resumeFixedControlLoginIfPending()
+    (application as App).updateRepository.checkOnForeground()
 
     val rm = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     MDMSettings.update(App.get(), rm)
@@ -663,6 +664,7 @@ class MainActivity : ComponentActivity() {
       MDMSettings.update(App.get(), restrictionsManager)
       (application as App).vpnEntitlementController.refreshRuntimeEntitlement()
     }
+    (application as App).updateRepository.onActivityResume(this)
   }
 
   override fun onStop() {

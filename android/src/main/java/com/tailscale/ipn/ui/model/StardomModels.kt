@@ -509,4 +509,148 @@ object StardomLocalization {
         AppLanguage.RU -> "ЗАКРЫТЬ ✕"
         AppLanguage.EN -> "CLOSE ✕"
       }
+
+  // Client Updates
+  fun clientUpdateSection(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБНОВЛЕНИЕ КЛИЕНТА"
+        AppLanguage.EN -> "CLIENT UPDATE"
+      }
+
+  fun clientUpdateCheckBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПРОВЕРИТЬ"
+        AppLanguage.EN -> "CHECK"
+      }
+
+  fun clientUpdateChecking(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПРОВЕРКА..."
+        AppLanguage.EN -> "CHECKING..."
+      }
+
+  fun clientUpdateUpToDate(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "АКТУАЛЬНАЯ ВЕРСИЯ"
+        AppLanguage.EN -> "UP TO DATE"
+      }
+
+  fun clientUpdateAvailable(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОСТУПНО ОБНОВЛЕНИЕ"
+        AppLanguage.EN -> "UPDATE AVAILABLE"
+      }
+
+  fun clientUpdateError(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СБОЙ ПРОВЕРКИ"
+        AppLanguage.EN -> "CHECK FAILED"
+      }
+
+  fun updateBannerTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОСТУПНО ОБНОВЛЕНИЕ"
+        AppLanguage.EN -> "UPDATE AVAILABLE"
+      }
+
+  fun updateBannerSubtitle(lang: AppLanguage, version: String): String =
+      when (lang) {
+        AppLanguage.RU -> "STARDOM v$version ГОТОВ К УСТАНОВКЕ"
+        AppLanguage.EN -> "STARDOM v$version READY TO INSTALL"
+      }
+
+  fun updateDetailsBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДЕТАЛИ"
+        AppLanguage.EN -> "DETAILS"
+      }
+
+  fun updateNowBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБНОВИТЬ"
+        AppLanguage.EN -> "UPDATE"
+      }
+
+  fun updateDialogTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБНОВЛЕНИЕ СИСТЕМЫ"
+        AppLanguage.EN -> "SYSTEM UPDATE"
+      }
+
+  fun updateDialogMandatoryBadge(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБЯЗАТЕЛЬНОЕ"
+        AppLanguage.EN -> "MANDATORY"
+      }
+
+  fun updateCurrentVersion(lang: AppLanguage, current: String, target: String): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЕРСИЯ: $current → $target"
+        AppLanguage.EN -> "VERSION: $current → $target"
+      }
+
+  fun updateChangelogHeader(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СПИСОК ИЗМЕНЕНИЙ:"
+        AppLanguage.EN -> "CHANGELOG:"
+      }
+
+  fun updateSizeHeader(lang: AppLanguage, sizeMb: String): String =
+      when (lang) {
+        AppLanguage.RU -> "РАЗМЕР: $sizeMb MB"
+        AppLanguage.EN -> "SIZE: $sizeMb MB"
+      }
+
+  fun updateProgressText(
+      lang: AppLanguage,
+      downloadedMb: String,
+      totalMb: String,
+      percent: Int
+  ): String =
+      when (lang) {
+        AppLanguage.RU -> "ЗАГРУЗКА: $downloadedMb / $totalMb MB ($percent%)"
+        AppLanguage.EN -> "DOWNLOADING: $downloadedMb / $totalMb MB ($percent%)"
+      }
+
+  fun updateInstallBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "УСТАНОВИТЬ"
+        AppLanguage.EN -> "INSTALL"
+      }
+
+  fun updateLaterBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПОЗЖЕ"
+        AppLanguage.EN -> "LATER"
+      }
+
+  fun updateCancelBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОТМЕНА"
+        AppLanguage.EN -> "CANCEL"
+      }
+
+  fun updateRetryBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПОВТОРИТЬ"
+        AppLanguage.EN -> "RETRY"
+      }
+
+  fun updatePermissionRequiredTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"
+        AppLanguage.EN -> "PERMISSION REQUIRED"
+      }
+
+  fun updatePermissionRequiredDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Для установки обновления разрешите установку из этого источника в настройках системы."
+        AppLanguage.EN -> "To install the update, allow installing unknown apps from this source in system settings."
+      }
+
+  fun updateSettingsBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НАСТРОЙКИ"
+        AppLanguage.EN -> "SETTINGS"
+      }
 }

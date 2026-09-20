@@ -57,6 +57,12 @@ import com.tailscale.ipn.ui.components.StardomRoutingPanel
 import com.tailscale.ipn.ui.components.StardomServerSelectorSheet
 import com.tailscale.ipn.ui.components.StardomSettingsSheet
 import com.tailscale.ipn.ui.components.StardomStatus
+import com.tailscale.ipn.ui.components.StardomUpdateBanner
+import com.tailscale.ipn.ui.components.StardomUpdateDialog
+import com.tailscale.ipn.ui.util.AppVersion
+import android.app.Activity
+import com.tailscale.ipn.App
+import com.tailscale.ipn.product.update.UpdateState
 import com.tailscale.ipn.ui.model.AccountProfile
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.ConnectionMode
@@ -261,6 +267,19 @@ fun MainView(
   val context = LocalContext.current
   val refreshScope = rememberCoroutineScope()
 
+  val updateRepository = (context.applicationContext as App).updateRepository
+  val updateState by updateRepository.updateState.collectAsState()
+  var showUpdateDialog by remember { mutableStateOf(false) }
+  var isUpdateBannerDismissed by remember { mutableStateOf(false) }
+  val isForcedUpdate =
+      when (val state = updateState) {
+        is UpdateState.UpdateAvailable -> state.isForced
+        is UpdateState.Downloading -> state.isForced
+        is UpdateState.Downloaded -> state.isForced
+        is UpdateState.Installing -> state.isForced
+        is UpdateState.Error -> state.isForced
+        else -> false
+      }
   val connectionStage =
       resolveConnectionStage(
           authentikState = authentikState,
@@ -364,6 +383,9 @@ fun MainView(
       isPowerControlEnabled(connectionStage) &&
           !isStardomLoginPresentationLoading(authError, isLoginLoading, authentikState, connectionStage)
   val onPowerToggle: () -> Unit = {
+    if (isForcedUpdate) {
+      showUpdateDialog = true
+    } else {
     when {
       state == Ipn.State.NeedsMachineAuth -> {
         netmap?.SelfNode?.nodeAdminUrl?.let { url ->
@@ -401,6 +423,7 @@ fun MainView(
           ConnectionStage.Connect -> viewModel.toggleVpn(desiredState = true)
         }
       }
+    }
     }
   }
 
@@ -476,6 +499,22 @@ fun MainView(
                             vpnState = presentationVpnState,
                             isError = isStatusError,
                             language = selectedLanguage)
+                        val availableManifest =
+                            (updateState as? UpdateState.UpdateAvailable)?.manifest
+                                ?: (updateState as? UpdateState.Downloaded)?.manifest
+                        if (availableManifest != null && !isUpdateBannerDismissed && !isForcedUpdate) {
+                          Spacer(Modifier.height(12.dp))
+                          StardomUpdateBanner(
+                              manifest = availableManifest,
+                              language = selectedLanguage,
+                              onDetails = { showUpdateDialog = true },
+                              onUpdate = {
+                                updateRepository.startDownload()
+                                showUpdateDialog = true
+                              },
+                              onDismiss = { isUpdateBannerDismissed = true },
+                              isForced = false)
+                        }
                         Spacer(Modifier.height(20.dp))
                         StardomRoutingPanel(
                             connectionMode = connectionMode,
@@ -518,6 +557,12 @@ fun MainView(
                       onOpenSplitTunneling = {
                         showSettingsSheet = false
                         navigation.onNavigateToSplitTunneling()
+                      },
+                      updateState = updateState,
+                      onCheckForUpdate = { updateRepository.checkForUpdate(isManual = true) },
+                      onOpenUpdateDialog = {
+                        showSettingsSheet = false
+                        showUpdateDialog = true
                       })
                 }
 
@@ -546,6 +591,18 @@ fun MainView(
                     connectionStage, authError, isLoginLoading, authentikState)) {
                   StardomLoginModal(
                       onSignIn = navigation.onNavigateStardomLogin, language = selectedLanguage)
+                }
+                if (showUpdateDialog || isForcedUpdate) {
+                  val activity = context as? Activity
+                  StardomUpdateDialog(
+                      updateState = updateState,
+                      currentVersionName = AppVersion.Short(),
+                      language = selectedLanguage,
+                      onDismiss = { if (!isForcedUpdate) showUpdateDialog = false },
+                      onStartDownload = { updateRepository.startDownload() },
+                      onCancelDownload = { updateRepository.cancelDownload() },
+                      onInstall = { activity?.let { updateRepository.install(it) } },
+                      onRetry = { updateRepository.startDownload() })
                 }
               }
         }

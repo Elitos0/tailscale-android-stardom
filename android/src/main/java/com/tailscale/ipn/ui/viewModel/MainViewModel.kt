@@ -37,6 +37,7 @@ import com.tailscale.ipn.util.TSLog
 import java.time.Duration
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -71,7 +72,8 @@ class MainViewModel(
     },
     vpnStarter: () -> Unit = { runCatching { UninitializedApp.get().startVPN() } },
     vpnStopper: () -> Unit = { runCatching { UninitializedApp.get().stopVPN() } },
-) :
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+):
     IpnViewModel(
         observeUserProfiles = observeUserProfiles,
         clientProvider = clientProvider,
@@ -156,7 +158,7 @@ class MainViewModel(
               }
             }
 
-        val authKeyResult = withContext(Dispatchers.IO) { policyApiClient.fetchNodeAuthKey(token) }
+        val authKeyResult = withContext(ioDispatcher) { policyApiClient.fetchNodeAuthKey(token) }
         val authKey =
             authKeyResult.getOrElse { error ->
               if (error is PolicyApiUnauthorizedException) {

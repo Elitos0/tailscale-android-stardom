@@ -45,8 +45,8 @@ android {
         // (base = major*100000000 + minor*100000 + patch*10). AndroidTV builds
         // increment this by 1 in the Makefile's release-tv target so the two
         // variants are distinguishable in the Play Store.
-        versionCode 110102910
-        versionName getVersionProperty("VERSION_LONG")
+        versionCode resolveVersionCode()
+        versionName resolveVersionName()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // This setting, which defaults to 'true', will cause Tailscale to fall
@@ -60,6 +60,7 @@ android {
         buildConfigField "String", "POLICY_API_BASE_URL", stardomBuildConfigValue("stardom.policyApiBaseUrl", "https://api.elitoswork.ru")
         buildConfigField "String", "AUTHENTIK_ISSUER_URL", stardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.elitoswork.ru/application/o/policy-api-android-mvp/")
         buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", stardomBuildConfigValue("stardom.policyApiOidcClientId", "policy-api-android-mvp")
+        buildConfigField "String", "DASHBOARD_BASE_URL", stardomBuildConfigValue("stardom.dashboardBaseUrl", "https://dashboard.elitoswork.ru")
     }
 
     compileOptions {
@@ -103,6 +104,7 @@ android {
             buildConfigField "String", "POLICY_API_BASE_URL", stardomBuildConfigValue("stardom.policyApiBaseUrl", "https://api.elitoswork.ru")
             buildConfigField "String", "AUTHENTIK_ISSUER_URL", stardomBuildConfigValue("stardom.authentikIssuerUrl", "https://auth.elitoswork.ru/application/o/policy-api-android-mvp/")
             buildConfigField "String", "POLICY_API_OIDC_CLIENT_ID", stardomBuildConfigValue("stardom.policyApiOidcClientId", "policy-api-android-mvp")
+            buildConfigField "String", "DASHBOARD_BASE_URL", stardomBuildConfigValue("stardom.dashboardBaseUrl", "https://dashboard.elitoswork.ru")
 
             minifyEnabled true
 
@@ -204,6 +206,30 @@ def stardomBuildConfigValue(key, defaultValue) {
 def quoteBuildConfigValue(value) {
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
 }
+def resolveVersionCode() {
+    def raw = providers.gradleProperty("stardom.versionCode").orNull?.trim()
+    if (raw != null && !raw.isEmpty()) {
+        try {
+            def parsed = Integer.parseInt(raw)
+            if (parsed <= 0) {
+                throw new GradleException("stardom.versionCode must be a positive integer: ${raw}")
+            }
+            return parsed
+        } catch (NumberFormatException e) {
+            throw new GradleException("stardom.versionCode must be a valid integer: ${raw}", e)
+        }
+    }
+    return 110102910
+}
+
+def resolveVersionName() {
+    def raw = providers.gradleProperty("stardom.versionName").orNull?.trim()
+    if (raw != null && !raw.isEmpty()) {
+        return raw
+    }
+    return getVersionProperty("VERSION_LONG")
+}
+
 
 gradle.taskGraph.whenReady { taskGraph ->
     def releaseArtifactTasks = ["assembleRelease", "bundleRelease", "packageRelease", "signReleaseBundle"]
@@ -212,6 +238,7 @@ gradle.taskGraph.whenReady { taskGraph ->
             "stardom.headscaleControlUrl",
             "stardom.policyApiBaseUrl",
             "stardom.authentikIssuerUrl",
+            "stardom.dashboardBaseUrl",
         ].each { key ->
             requireReleaseHttpsUrl(key)
         }
@@ -219,6 +246,24 @@ gradle.taskGraph.whenReady { taskGraph ->
         if (clientId == null || clientId.isEmpty()) {
             throw new GradleException(
                     "Missing required release Gradle property after trimming: stardom.policyApiOidcClientId")
+        }
+        def vc = providers.gradleProperty("stardom.versionCode").orNull?.trim()
+        if (vc == null || vc.isEmpty()) {
+            throw new GradleException(
+                    "Missing required release Gradle property: stardom.versionCode (must be positive integer, e.g. 110102911)")
+        }
+        try {
+            def parsed = Integer.parseInt(vc)
+            if (parsed <= 0) {
+                throw new GradleException("stardom.versionCode must be a positive integer (got '${vc}')")
+            }
+        } catch (NumberFormatException e) {
+            throw new GradleException("stardom.versionCode must be a valid integer (got '${vc}')", e)
+        }
+        def vn = providers.gradleProperty("stardom.versionName").orNull?.trim()
+        if (vn == null || vn.isEmpty()) {
+            throw new GradleException(
+                    "Missing required release Gradle property: stardom.versionName (e.g. 1.101.291-stardom.1)")
         }
     }
 }
