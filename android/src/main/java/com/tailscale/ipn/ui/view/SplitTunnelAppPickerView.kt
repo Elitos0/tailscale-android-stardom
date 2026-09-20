@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -85,7 +86,9 @@ fun SplitTunnelAppPickerView(
       }
 
   val packageManager = model.installedAppsManager.packageManager
-  val iconCache = remember { mutableMapOf<String, ImageBitmap?>() }
+  val iconSize = 40.dp
+  val iconSizePx = with(LocalDensity.current) { iconSize.roundToPx() }
+  val iconCache = remember(iconSizePx) { mutableMapOf<String, ImageBitmap?>() }
 
   Scaffold(
       containerColor = StardomColors.Background,
@@ -360,12 +363,12 @@ fun SplitTunnelAppPickerView(
                   val isEnabled = !isBuiltIn
 
                   val iconBitmap =
-                      remember(app.packageName) {
+                      remember(app.packageName, iconSizePx) {
                         iconCache.getOrPut(app.packageName) {
                           try {
                             packageManager
                                 .getApplicationIcon(app.packageName)
-                                .toBitmap()
+                                .toBitmap(width = iconSizePx, height = iconSizePx)
                                 .asImageBitmap()
                           } catch (_: Throwable) {
                             null
