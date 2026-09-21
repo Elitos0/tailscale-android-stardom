@@ -25,10 +25,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,12 +40,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tailscale.ipn.NetworkChangeCallback
 import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.product.ondemand.OnDemandAction
@@ -74,6 +85,21 @@ fun StardomOnDemandView(
     )
   }
 
+  val lifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(lifecycleOwner) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_RESUME) {
+        hasLocationPermission =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+      }
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose {
+      lifecycleOwner.lifecycle.removeObserver(observer)
+    }
+  }
+
   val permissionLauncher =
       rememberLauncherForActivityResult(
           contract = ActivityResultContracts.RequestPermission()
@@ -95,6 +121,9 @@ fun StardomOnDemandView(
           null
         }
       }
+
+  var isDropdownExpanded by remember { mutableStateOf(false) }
+  var manualSsidText by remember { mutableStateOf("") }
 
   Scaffold(
       containerColor = StardomColors.Background,
@@ -190,6 +219,7 @@ fun StardomOnDemandView(
                               fontSize = 9.sp,
                               fontFamily = StardomTechnicalFont(language))
                         }
+                        Spacer(Modifier.width(12.dp))
                         Box(
                             modifier =
                                 Modifier.size(18.dp)
@@ -208,381 +238,637 @@ fun StardomOnDemandView(
                       }
                 }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(14.dp))
 
-            // Section Header: Rule 1 (Cellular)
-            SettingsSectionHeader(title = StardomLocalization.onDemandCellularRuleTitle(language))
-            Text(
-                text = StardomLocalization.onDemandCellularRuleDesc(language),
-                color = StardomColors.TextMuted,
-                fontSize = 9.sp,
-                fontFamily = StardomTechnicalFont(language),
-                modifier = Modifier.padding(bottom = 8.dp))
+            // Section 01: Cellular Network Panel
+            Box(
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .background(StardomColors.Panel)
+                        .border(1.dp, StardomColors.Border)
+                        .padding(14.dp)) {
+                  Column {
+                    Text(
+                        text =
+                            if (language == AppLanguage.RU) "01 // МОБИЛЬНАЯ СЕТЬ"
+                            else "01 // CELLULAR NETWORK",
+                        color = StardomColors.TextSecondary,
+                        fontFamily = IbmPlexMono,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.5.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = StardomLocalization.onDemandCellularRuleDesc(language),
+                        color = StardomColors.TextMuted,
+                        fontSize = 9.sp,
+                        fontFamily = StardomTechnicalFont(language))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  listOf(
-                          OnDemandAction.CONNECT,
-                          OnDemandAction.DISCONNECT,
-                          OnDemandAction.DO_NOTHING)
-                      .forEach { action ->
-                        val isSelected = config.cellularAction == action
-                        val actionLabel =
-                            when (action) {
-                              OnDemandAction.CONNECT ->
-                                  StardomLocalization.onDemandActionConnect(language)
-                              OnDemandAction.DISCONNECT ->
-                                  StardomLocalization.onDemandActionDisconnect(language)
-                              OnDemandAction.DO_NOTHING ->
-                                  StardomLocalization.onDemandActionNothing(language)
-                            }
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier =
-                                Modifier.weight(1f)
-                                    .testTag("cellular_action_${action.name.lowercase()}")
-                                    .background(
-                                        if (isSelected) StardomColors.PanelSelected
-                                        else StardomColors.Panel)
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) StardomColors.BorderStrong
-                                        else StardomColors.BorderFaint)
-                                    .clickable(enabled = config.enabled) {
-                                      repo.setCellularAction(action)
+                    Spacer(Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                          listOf(
+                                  OnDemandAction.CONNECT,
+                                  OnDemandAction.DISCONNECT,
+                                  OnDemandAction.DO_NOTHING)
+                              .forEach { action ->
+                                val isSelected = config.cellularAction == action
+                                val actionLabel =
+                                    when (action) {
+                                      OnDemandAction.CONNECT ->
+                                          StardomLocalization.onDemandActionConnect(language)
+                                      OnDemandAction.DISCONNECT ->
+                                          StardomLocalization.onDemandActionDisconnect(language)
+                                      OnDemandAction.DO_NOTHING ->
+                                          StardomLocalization.onDemandActionNothing(language)
                                     }
-                                    .padding(vertical = 10.dp, horizontal = 4.dp)) {
-                              Row(verticalAlignment = Alignment.CenterVertically) {
-                                TechnicalRadioIndicator(selected = isSelected)
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = actionLabel,
-                                    color =
-                                        if (!config.enabled) StardomColors.TextMuted
-                                        else if (isSelected) StardomColors.TextPrimary
-                                        else StardomColors.TextSecondary,
-                                    fontSize = 8.sp,
-                                    fontFamily = StardomTechnicalFont(language),
-                                    letterSpacing = 0.5.sp)
-                              }
-                            }
-                      }
-                }
-
-            Spacer(Modifier.height(20.dp))
-
-            // Section Header: Rule 2 (Wi-Fi)
-            SettingsSectionHeader(title = StardomLocalization.onDemandWifiRuleTitle(language))
-            Text(
-                text = StardomLocalization.onDemandWifiRuleDesc(language),
-                color = StardomColors.TextMuted,
-                fontSize = 9.sp,
-                fontFamily = StardomTechnicalFont(language),
-                modifier = Modifier.padding(bottom = 8.dp))
-
-            // Wi-Fi Action Selector (Connect / Disconnect / Do Nothing)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  listOf(
-                          OnDemandAction.DISCONNECT,
-                          OnDemandAction.CONNECT,
-                          OnDemandAction.DO_NOTHING)
-                      .forEach { action ->
-                        val isSelected = config.wifiAction == action
-                        val actionLabel =
-                            when (action) {
-                              OnDemandAction.CONNECT ->
-                                  StardomLocalization.onDemandActionConnect(language)
-                              OnDemandAction.DISCONNECT ->
-                                  StardomLocalization.onDemandActionDisconnect(language)
-                              OnDemandAction.DO_NOTHING ->
-                                  StardomLocalization.onDemandActionNothing(language)
-                            }
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier =
-                                Modifier.weight(1f)
-                                    .testTag("wifi_action_${action.name.lowercase()}")
-                                    .background(
-                                        if (isSelected) StardomColors.PanelSelected
-                                        else StardomColors.Panel)
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) StardomColors.BorderStrong
-                                        else StardomColors.BorderFaint)
-                                    .clickable(enabled = config.enabled) {
-                                      repo.setWifiAction(action)
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier =
+                                        Modifier.weight(1f)
+                                            .testTag("cellular_action_${action.name.lowercase()}")
+                                            .background(
+                                                if (isSelected) StardomColors.PanelSelected
+                                                else StardomColors.Background)
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) StardomColors.BorderStrong
+                                                else StardomColors.BorderFaint)
+                                            .clickable(enabled = config.enabled) {
+                                              repo.setCellularAction(action)
+                                            }
+                                            .padding(vertical = 10.dp, horizontal = 4.dp)) {
+                                      Row(
+                                          verticalAlignment = Alignment.CenterVertically,
+                                          horizontalArrangement = Arrangement.Center) {
+                                        TechnicalRadioIndicator(selected = isSelected)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = actionLabel,
+                                            color =
+                                                if (!config.enabled) StardomColors.TextMuted
+                                                else if (isSelected) StardomColors.TextPrimary
+                                                else StardomColors.TextSecondary,
+                                            fontSize = 8.sp,
+                                            fontFamily = StardomTechnicalFont(language),
+                                            letterSpacing = 0.5.sp,
+                                            maxLines = 1)
+                                      }
                                     }
-                                    .padding(vertical = 10.dp, horizontal = 4.dp)) {
-                              Row(verticalAlignment = Alignment.CenterVertically) {
-                                TechnicalRadioIndicator(selected = isSelected)
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = actionLabel,
-                                    color =
-                                        if (!config.enabled) StardomColors.TextMuted
-                                        else if (isSelected) StardomColors.TextPrimary
-                                        else StardomColors.TextSecondary,
-                                    fontSize = 8.sp,
-                                    fontFamily = StardomTechnicalFont(language),
-                                    letterSpacing = 0.5.sp)
                               }
-                            }
-                      }
-                }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Wi-Fi Scope Selector (All vs Only Selected)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  listOf(WifiRuleScope.ALL, WifiRuleScope.ONLY_SELECTED).forEach { scope ->
-                    val isSelected = config.wifiScope == scope
-                    val scopeLabel =
-                        when (scope) {
-                          WifiRuleScope.ALL -> StardomLocalization.onDemandWifiScopeAll(language)
-                          WifiRuleScope.ONLY_SELECTED ->
-                              StardomLocalization.onDemandWifiScopeSelected(language)
-                        }
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier =
-                            Modifier.weight(1f)
-                                .testTag("wifi_scope_${scope.name.lowercase()}")
-                                .background(
-                                    if (isSelected) StardomColors.PanelSelected
-                                    else StardomColors.Panel)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) StardomColors.BorderStrong
-                                    else StardomColors.BorderFaint)
-                                .clickable(enabled = config.enabled) {
-                                  repo.setWifiScope(scope)
-                                }
-                                .padding(vertical = 10.dp, horizontal = 6.dp)) {
-                          Row(verticalAlignment = Alignment.CenterVertically) {
-                            TechnicalRadioIndicator(selected = isSelected)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = scopeLabel,
-                                color =
-                                    if (!config.enabled) StardomColors.TextMuted
-                                    else if (isSelected) StardomColors.TextPrimary
-                                    else StardomColors.TextSecondary,
-                                fontSize = 8.sp,
-                                fontFamily = StardomTechnicalFont(language),
-                                letterSpacing = 0.5.sp)
-                          }
                         }
                   }
                 }
 
-            // Scope = ONLY_SELECTED details
-            if (config.wifiScope == WifiRuleScope.ONLY_SELECTED) {
-              Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(14.dp))
 
-              // Permission notice if fine location is missing
-              if (!hasLocationPermission) {
-                Box(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .testTag("location_permission_notice")
-                            .background(StardomColors.Panel)
-                            .border(1.dp, StardomColors.BorderStrong)
-                            .padding(12.dp)) {
-                      Column {
-                        Text(
-                            text = StardomLocalization.onDemandLocationPermissionNotice(language),
-                            color = StardomColors.TextSecondary,
-                            fontSize = 9.sp,
-                            fontFamily = StardomTechnicalFont(language),
-                            lineHeight = 13.sp)
+            // Section 02: Wi-Fi Networks Panel
+            Box(
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .background(StardomColors.Panel)
+                        .border(1.dp, StardomColors.Border)
+                        .padding(14.dp)) {
+                  Column {
+                    Text(
+                        text =
+                            if (language == AppLanguage.RU) "02 // БЕСПРОВОДНАЯ СЕТЬ WI-FI"
+                            else "02 // WI-FI NETWORKS",
+                        color = StardomColors.TextSecondary,
+                        fontFamily = IbmPlexMono,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.5.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = StardomLocalization.onDemandWifiRuleDesc(language),
+                        color = StardomColors.TextMuted,
+                        fontSize = 9.sp,
+                        fontFamily = StardomTechnicalFont(language))
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Wi-Fi Action Selector (Disconnect / Connect / Do Nothing)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                          listOf(
+                                  OnDemandAction.DISCONNECT,
+                                  OnDemandAction.CONNECT,
+                                  OnDemandAction.DO_NOTHING)
+                              .forEach { action ->
+                                val isSelected = config.wifiAction == action
+                                val actionLabel =
+                                    when (action) {
+                                      OnDemandAction.CONNECT ->
+                                          StardomLocalization.onDemandActionConnect(language)
+                                      OnDemandAction.DISCONNECT ->
+                                          StardomLocalization.onDemandActionDisconnect(language)
+                                      OnDemandAction.DO_NOTHING ->
+                                          StardomLocalization.onDemandActionNothing(language)
+                                    }
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier =
+                                        Modifier.weight(1f)
+                                            .testTag("wifi_action_${action.name.lowercase()}")
+                                            .background(
+                                                if (isSelected) StardomColors.PanelSelected
+                                                else StardomColors.Background)
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) StardomColors.BorderStrong
+                                                else StardomColors.BorderFaint)
+                                            .clickable(enabled = config.enabled) {
+                                              repo.setWifiAction(action)
+                                            }
+                                            .padding(vertical = 10.dp, horizontal = 4.dp)) {
+                                      Row(
+                                          verticalAlignment = Alignment.CenterVertically,
+                                          horizontalArrangement = Arrangement.Center) {
+                                        TechnicalRadioIndicator(selected = isSelected)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = actionLabel,
+                                            color =
+                                                if (!config.enabled) StardomColors.TextMuted
+                                                else if (isSelected) StardomColors.TextPrimary
+                                                else StardomColors.TextSecondary,
+                                            fontSize = 8.sp,
+                                            fontFamily = StardomTechnicalFont(language),
+                                            letterSpacing = 0.5.sp,
+                                            maxLines = 1)
+                                      }
+                                    }
+                              }
+                        }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Wi-Fi Scope Selector (All vs Only Selected)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                          listOf(WifiRuleScope.ALL, WifiRuleScope.ONLY_SELECTED).forEach { scope ->
+                            val isSelected = config.wifiScope == scope
+                            val scopeLabel =
+                                when (scope) {
+                                  WifiRuleScope.ALL ->
+                                      StardomLocalization.onDemandWifiScopeAll(language)
+                                  WifiRuleScope.ONLY_SELECTED ->
+                                      StardomLocalization.onDemandWifiScopeSelected(language)
+                                }
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier =
+                                    Modifier.weight(1f)
+                                        .testTag("wifi_scope_${scope.name.lowercase()}")
+                                        .background(
+                                            if (isSelected) StardomColors.PanelSelected
+                                            else StardomColors.Background)
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) StardomColors.BorderStrong
+                                            else StardomColors.BorderFaint)
+                                        .clickable(enabled = config.enabled) {
+                                          repo.setWifiScope(scope)
+                                        }
+                                        .padding(vertical = 10.dp, horizontal = 6.dp)) {
+                                  Row(
+                                      verticalAlignment = Alignment.CenterVertically,
+                                      horizontalArrangement = Arrangement.Center) {
+                                    TechnicalRadioIndicator(selected = isSelected)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = scopeLabel,
+                                        color =
+                                            if (!config.enabled) StardomColors.TextMuted
+                                            else if (isSelected) StardomColors.TextPrimary
+                                            else StardomColors.TextSecondary,
+                                        fontSize = 8.sp,
+                                        fontFamily = StardomTechnicalFont(language),
+                                        letterSpacing = 0.5.sp,
+                                        maxLines = 1)
+                                  }
+                                }
+                          }
+                        }
+
+                    // Scope = ONLY_SELECTED details (Location Notice + Dropdown)
+                    if (config.wifiScope == WifiRuleScope.ONLY_SELECTED) {
+                      // Location Permission Notice (appears only when not granted)
+                      if (!hasLocationPermission) {
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .testTag("location_permission_notice")
+                                    .background(StardomColors.Panel)
+                                    .border(1.dp, StardomColors.BorderStrong)
+                                    .padding(14.dp)) {
+                              Column(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text =
+                                        StardomLocalization.onDemandLocationPermissionNotice(
+                                            language),
+                                    color = StardomColors.TextSecondary,
+                                    fontSize = 9.sp,
+                                    fontFamily = StardomTechnicalFont(language),
+                                    lineHeight = 14.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(10.dp))
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier =
+                                        Modifier.testTag("grant_location_permission_btn")
+                                            .background(StardomColors.Background)
+                                            .border(1.dp, StardomColors.BorderStrong)
+                                            .clickable {
+                                              permissionLauncher.launch(
+                                                  Manifest.permission.ACCESS_FINE_LOCATION)
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                      Text(
+                                          text =
+                                              StardomLocalization.onDemandLocationPermissionGrant(
+                                                  language),
+                                          color = StardomColors.TextPrimary,
+                                          fontSize = 9.sp,
+                                          fontFamily = StardomTechnicalFont(language),
+                                          fontWeight = FontWeight.Bold,
+                                          letterSpacing = 0.5.sp)
+                                    }
+                              }
+                            }
+                      }
+
+                      Spacer(Modifier.height(12.dp))
+
+                      // Wi-Fi Network Selection Dropdown / Expandable Menu
+                      Box(
+                          modifier =
+                              Modifier.fillMaxWidth()
+                                  .testTag("wifi_network_dropdown_trigger")
+                                  .background(StardomColors.PanelSelected)
+                                  .border(1.dp, StardomColors.Border)
+                                  .clickable { isDropdownExpanded = !isDropdownExpanded }
+                                  .padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()) {
+                                  Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text =
+                                            if (language == AppLanguage.RU)
+                                                "ВЫБОР СЕТИ // SSID"
+                                            else "SELECT NETWORK // SSID",
+                                        color = StardomColors.TextPrimary,
+                                        fontSize = 10.sp,
+                                        fontFamily = SpaceGrotesk,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 1.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text =
+                                            if (language == AppLanguage.RU)
+                                                "ВЫБРАНО: ${config.selectedSsids.size}"
+                                            else "SELECTED: ${config.selectedSsids.size}",
+                                        color =
+                                            if (config.selectedSsids.isNotEmpty())
+                                                StardomColors.Selected
+                                            else StardomColors.TextMuted,
+                                        fontSize = 9.sp,
+                                        fontFamily = StardomTechnicalFont(language))
+                                  }
+
+                                  Text(
+                                      text =
+                                          if (isDropdownExpanded)
+                                              if (language == AppLanguage.RU) "[ СВЕРНУТЬ ▲ ]"
+                                              else "[ COLLAPSE ▲ ]"
+                                          else if (language == AppLanguage.RU)
+                                              "[ ВЫБРАТЬ СЕТЬ ▼ ]"
+                                          else "[ SELECT NETWORK ▼ ]",
+                                      color = StardomColors.TextSecondary,
+                                      fontSize = 9.sp,
+                                      fontFamily = StardomTechnicalFont(language),
+                                      letterSpacing = 1.sp)
+                                }
+                          }
+
+                      if (isDropdownExpanded) {
                         Spacer(Modifier.height(8.dp))
                         Box(
                             modifier =
-                                Modifier.testTag("grant_location_permission_btn")
-                                    .background(StardomColors.Selected)
-                                    .border(1.dp, StardomColors.BorderStrong)
-                                    .clickable {
-                                      permissionLauncher.launch(
-                                          Manifest.permission.ACCESS_FINE_LOCATION)
+                                Modifier.fillMaxWidth()
+                                    .background(StardomColors.Background)
+                                    .border(1.dp, StardomColors.Border)
+                                    .padding(12.dp)) {
+                              Column {
+                                // Add current SSID button if detected
+                                if (!currentSsid.isNullOrBlank()) {
+                                  val alreadyAdded = config.selectedSsids.contains(currentSsid)
+                                  Box(
+                                      modifier =
+                                          Modifier.fillMaxWidth()
+                                              .testTag("add_current_ssid_btn")
+                                              .background(
+                                                  if (!alreadyAdded && config.enabled)
+                                                      StardomColors.PanelSelected
+                                                  else StardomColors.Panel)
+                                              .border(
+                                                  1.dp,
+                                                  if (!alreadyAdded && config.enabled)
+                                                      StardomColors.BorderStrong
+                                                  else StardomColors.BorderFaint)
+                                              .clickable(
+                                                  enabled = !alreadyAdded && config.enabled) {
+                                                    repo.addSsid(currentSsid)
+                                                  }
+                                              .padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween) {
+                                              Text(
+                                                  text =
+                                                      if (language == AppLanguage.RU)
+                                                          "+ ТЕКУЩАЯ СЕТЬ: \"$currentSsid\""
+                                                      else "+ CURRENT NETWORK: \"$currentSsid\"",
+                                                  color =
+                                                      if (alreadyAdded) StardomColors.TextMuted
+                                                      else StardomColors.TextPrimary,
+                                                  fontSize = 9.sp,
+                                                  fontFamily = StardomTechnicalFont(language),
+                                                  letterSpacing = 0.5.sp)
+                                              if (alreadyAdded) {
+                                                Text(
+                                                    text =
+                                                        if (language == AppLanguage.RU)
+                                                            "[ ДОБАВЛЕНО ]"
+                                                        else "[ ADDED ]",
+                                                    color = StardomColors.Selected,
+                                                    fontSize = 8.sp,
+                                                    fontFamily = StardomTechnicalFont(language))
+                                              }
+                                            }
+                                      }
+                                  Spacer(Modifier.height(8.dp))
+                                }
+
+                                // Manual SSID Input Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                      Box(
+                                          modifier =
+                                              Modifier.weight(1f)
+                                                  .background(StardomColors.Panel)
+                                                  .border(1.dp, StardomColors.Border)
+                                                  .padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                            BasicTextField(
+                                                value = manualSsidText,
+                                                onValueChange = { manualSsidText = it },
+                                                textStyle =
+                                                    TextStyle(
+                                                        color = StardomColors.TextPrimary,
+                                                        fontSize = 10.sp,
+                                                        fontFamily =
+                                                            StardomTechnicalFont(language)),
+                                                singleLine = true,
+                                                cursorBrush = SolidColor(StardomColors.Selected),
+                                                keyboardOptions =
+                                                    KeyboardOptions(imeAction = ImeAction.Done),
+                                                keyboardActions =
+                                                    KeyboardActions(
+                                                        onDone = {
+                                                          val trimmed = manualSsidText.trim()
+                                                          if (trimmed.isNotEmpty() &&
+                                                              config.enabled) {
+                                                            repo.addSsid(trimmed)
+                                                            manualSsidText = ""
+                                                          }
+                                                        }),
+                                                modifier =
+                                                    Modifier.fillMaxWidth()
+                                                        .testTag("manual_ssid_input"),
+                                                decorationBox = { innerTextField ->
+                                                  if (manualSsidText.isEmpty()) {
+                                                    Text(
+                                                        text =
+                                                            StardomLocalization
+                                                                .onDemandAddSsidManual(language),
+                                                        color = StardomColors.TextMuted,
+                                                        fontSize = 9.sp,
+                                                        fontFamily =
+                                                            StardomTechnicalFont(language))
+                                                  }
+                                                  innerTextField()
+                                                })
+                                          }
+
+                                      Box(
+                                          contentAlignment = Alignment.Center,
+                                          modifier =
+                                              Modifier.background(
+                                                      if (manualSsidText.isNotBlank() &&
+                                                          config.enabled)
+                                                          StardomColors.PanelSelected
+                                                      else StardomColors.Panel)
+                                                  .border(
+                                                      1.dp,
+                                                      if (manualSsidText.isNotBlank() &&
+                                                          config.enabled)
+                                                          StardomColors.BorderStrong
+                                                      else StardomColors.Border)
+                                                  .clickable(
+                                                      enabled =
+                                                          manualSsidText.isNotBlank() &&
+                                                              config.enabled) {
+                                                        val trimmed = manualSsidText.trim()
+                                                        if (trimmed.isNotEmpty()) {
+                                                          repo.addSsid(trimmed)
+                                                          manualSsidText = ""
+                                                        }
+                                                      }
+                                                  .padding(horizontal = 12.dp, vertical = 8.dp)
+                                                  .testTag("add_manual_ssid_btn")) {
+                                            Text(
+                                                text =
+                                                    StardomLocalization.onDemandAddSsidBtn(
+                                                        language),
+                                                color =
+                                                    if (manualSsidText.isNotBlank() &&
+                                                        config.enabled)
+                                                        StardomColors.TextPrimary
+                                                    else StardomColors.TextMuted,
+                                                fontSize = 9.sp,
+                                                fontFamily = StardomTechnicalFont(language),
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 0.5.sp)
+                                          }
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                              Text(
-                                  text =
-                                      StardomLocalization.onDemandLocationPermissionGrant(language),
-                                  color = StardomColors.Background,
-                                  fontSize = 9.sp,
-                                  fontFamily = StardomTechnicalFont(language),
-                                  fontWeight = FontWeight.Bold,
-                                  letterSpacing = 0.5.sp)
+
+                                Spacer(Modifier.height(10.dp))
+
+                                // Selected SSIDs List / Chips
+                                if (config.selectedSsids.isEmpty()) {
+                                  Text(
+                                      text = StardomLocalization.onDemandNoSelectedSsids(language),
+                                      color = StardomColors.TextMuted,
+                                      fontSize = 9.sp,
+                                      fontFamily = StardomTechnicalFont(language),
+                                      modifier = Modifier.padding(vertical = 4.dp))
+                                } else {
+                                  Column(
+                                      verticalArrangement = Arrangement.spacedBy(4.dp),
+                                      modifier = Modifier.padding(top = 2.dp)) {
+                                        config.selectedSsids.forEach { ssid ->
+                                          Row(
+                                              modifier =
+                                                  Modifier.fillMaxWidth()
+                                                      .testTag("selected_ssid_$ssid")
+                                                      .background(StardomColors.Panel)
+                                                      .border(1.dp, StardomColors.BorderFaint)
+                                                      .padding(
+                                                          horizontal = 10.dp, vertical = 6.dp),
+                                              verticalAlignment = Alignment.CenterVertically,
+                                              horizontalArrangement =
+                                                  Arrangement.SpaceBetween) {
+                                                Row(
+                                                    verticalAlignment =
+                                                        Alignment.CenterVertically,
+                                                    modifier = Modifier.weight(1f)) {
+                                                      Text(
+                                                          text = "•",
+                                                          color = StardomColors.Selected,
+                                                          fontSize = 11.sp,
+                                                          fontFamily = IbmPlexMono)
+                                                      Spacer(Modifier.width(6.dp))
+                                                      Text(
+                                                          text = ssid,
+                                                          color = StardomColors.TextPrimary,
+                                                          fontSize = 10.sp,
+                                                          fontFamily = SpaceGrotesk,
+                                                          fontWeight = FontWeight.Medium)
+                                                    }
+                                                Box(
+                                                    modifier =
+                                                        Modifier.clickable(
+                                                                enabled = config.enabled) {
+                                                              repo.removeSsid(ssid)
+                                                            }
+                                                            .padding(
+                                                                horizontal = 6.dp, vertical = 2.dp)) {
+                                                      Text(
+                                                          text = "✕",
+                                                          color = StardomColors.Error,
+                                                          fontSize = 11.sp,
+                                                          fontFamily = IbmPlexMono,
+                                                          fontWeight = FontWeight.Bold)
+                                                    }
+                                              }
+                                        }
+                                      }
+                                }
+                              }
                             }
                       }
                     }
-                Spacer(Modifier.height(10.dp))
-              }
+                  }
+                }
 
-              // Add current SSID button
-              val canAddCurrent =
-                  !currentSsid.isNullOrBlank() && !config.selectedSsids.contains(currentSsid)
+            // Section 03: Unlisted Wi-Fi Rule (shown when wifiScope is ONLY_SELECTED)
+            if (config.wifiScope == WifiRuleScope.ONLY_SELECTED) {
+              Spacer(Modifier.height(14.dp))
+
               Box(
                   modifier =
                       Modifier.fillMaxWidth()
-                          .testTag("add_current_ssid_btn")
-                          .background(
-                              if (canAddCurrent && config.enabled) StardomColors.PanelSelected
-                              else StardomColors.Panel)
-                          .border(
-                              1.dp,
-                              if (canAddCurrent && config.enabled) StardomColors.BorderStrong
-                              else StardomColors.Border)
-                          .clickable(enabled = canAddCurrent && config.enabled) {
-                            currentSsid?.let { repo.addSsid(it) }
-                          }
-                          .padding(12.dp)) {
-                    Text(
-                        text =
-                            if (currentSsid.isNullOrBlank())
-                                StardomLocalization.onDemandNoCurrentSsid(language)
-                            else StardomLocalization.onDemandAddCurrentSsid(language, currentSsid),
-                        color =
-                            if (canAddCurrent && config.enabled) StardomColors.TextPrimary
-                            else StardomColors.TextMuted,
-                        fontSize = 9.sp,
-                        fontFamily = StardomTechnicalFont(language),
-                        letterSpacing = 0.5.sp)
-                  }
-
-              Spacer(Modifier.height(14.dp))
-
-              // Selected SSIDs list
-              Text(
-                  text =
-                      StardomLocalization.onDemandSelectedSsidsHeader(
-                          language, config.selectedSsids.size),
-                  color = StardomColors.TextSecondary,
-                  fontFamily = IbmPlexMono,
-                  fontSize = 9.sp,
-                  letterSpacing = 2.sp,
-                  modifier = Modifier.padding(bottom = 8.dp))
-
-              if (config.selectedSsids.isEmpty()) {
-                Box(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .background(StardomColors.Panel)
-                            .border(1.dp, StardomColors.BorderFaint)
-                            .padding(12.dp)) {
+                          .background(StardomColors.Panel)
+                          .border(1.dp, StardomColors.Border)
+                          .padding(14.dp)) {
+                    Column {
                       Text(
-                          text = StardomLocalization.onDemandNoSelectedSsids(language),
+                          text =
+                              if (language == AppLanguage.RU) "03 // ПРОЧИЕ СЕТИ WI-FI"
+                              else "03 // UNLISTED WI-FI NETWORKS",
+                          color = StardomColors.TextSecondary,
+                          fontFamily = IbmPlexMono,
+                          fontSize = 10.sp,
+                          fontWeight = FontWeight.Medium,
+                          letterSpacing = 1.5.sp)
+                      Spacer(Modifier.height(4.dp))
+                      Text(
+                          text = StardomLocalization.onDemandUnlistedWifiDesc(language),
                           color = StardomColors.TextMuted,
                           fontSize = 9.sp,
                           fontFamily = StardomTechnicalFont(language))
-                    }
-              } else {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                  config.selectedSsids.forEach { ssid ->
-                    Box(
-                        modifier =
-                            Modifier.fillMaxWidth()
-                                .testTag("selected_ssid_$ssid")
-                                .background(StardomColors.Panel)
-                                .border(1.dp, StardomColors.Border)
-                                .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                          Row(
-                              verticalAlignment = Alignment.CenterVertically,
-                              horizontalArrangement = Arrangement.SpaceBetween,
-                              modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = ssid,
-                                    color = StardomColors.TextPrimary,
-                                    fontSize = 11.sp,
-                                    fontFamily = SpaceGrotesk,
-                                    fontWeight = FontWeight.Medium)
 
-                                Box(
-                                    modifier =
-                                        Modifier.clickable(enabled = config.enabled) {
-                                          repo.removeSsid(ssid)
-                                        }
-                                        .padding(4.dp)) {
-                                      Text(
-                                          text = "✕",
-                                          color = StardomColors.Error,
-                                          fontSize = 11.sp,
-                                          fontFamily = IbmPlexMono,
-                                          fontWeight = FontWeight.Bold)
-                                    }
-                              }
-                        }
-                  }
-                }
-              }
+                      Spacer(Modifier.height(12.dp))
 
-              Spacer(Modifier.height(20.dp))
-
-              // Section Header: Rule 3 (Unlisted Wi-Fi)
-              SettingsSectionHeader(
-                  title = StardomLocalization.onDemandUnlistedWifiTitle(language))
-              Text(
-                  text = StardomLocalization.onDemandUnlistedWifiDesc(language),
-                  color = StardomColors.TextMuted,
-                  fontSize = 9.sp,
-                  fontFamily = StardomTechnicalFont(language),
-                  modifier = Modifier.padding(bottom = 8.dp))
-
-              Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                            OnDemandAction.CONNECT,
-                            OnDemandAction.DISCONNECT,
-                            OnDemandAction.DO_NOTHING)
-                        .forEach { action ->
-                          val isSelected = config.unlistedWifiAction == action
-                          val actionLabel =
-                              when (action) {
-                                OnDemandAction.CONNECT ->
-                                    StardomLocalization.onDemandActionConnect(language)
-                                OnDemandAction.DISCONNECT ->
-                                    StardomLocalization.onDemandActionDisconnect(language)
-                                OnDemandAction.DO_NOTHING ->
-                                    StardomLocalization.onDemandActionNothing(language)
-                              }
-                          Box(
-                              contentAlignment = Alignment.Center,
-                              modifier =
-                                  Modifier.weight(1f)
-                                      .testTag("unlisted_wifi_action_${action.name.lowercase()}")
-                                      .background(
-                                          if (isSelected) StardomColors.PanelSelected
-                                          else StardomColors.Panel)
-                                      .border(
-                                          1.dp,
-                                          if (isSelected) StardomColors.BorderStrong
-                                          else StardomColors.BorderFaint)
-                                      .clickable(enabled = config.enabled) {
-                                        repo.setUnlistedWifiAction(action)
+                      Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                    OnDemandAction.CONNECT,
+                                    OnDemandAction.DISCONNECT,
+                                    OnDemandAction.DO_NOTHING)
+                                .forEach { action ->
+                                  val isSelected = config.unlistedWifiAction == action
+                                  val actionLabel =
+                                      when (action) {
+                                        OnDemandAction.CONNECT ->
+                                            StardomLocalization.onDemandActionConnect(language)
+                                        OnDemandAction.DISCONNECT ->
+                                            StardomLocalization.onDemandActionDisconnect(language)
+                                        OnDemandAction.DO_NOTHING ->
+                                            StardomLocalization.onDemandActionNothing(language)
                                       }
-                                      .padding(vertical = 10.dp, horizontal = 4.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                  TechnicalRadioIndicator(selected = isSelected)
-                                  Spacer(Modifier.width(6.dp))
-                                  Text(
-                                      text = actionLabel,
-                                      color =
-                                          if (!config.enabled) StardomColors.TextMuted
-                                          else if (isSelected) StardomColors.TextPrimary
-                                          else StardomColors.TextSecondary,
-                                      fontSize = 8.sp,
-                                      fontFamily = StardomTechnicalFont(language),
-                                      letterSpacing = 0.5.sp)
+                                  Box(
+                                      contentAlignment = Alignment.Center,
+                                      modifier =
+                                          Modifier.weight(1f)
+                                              .testTag(
+                                                  "unlisted_wifi_action_${action.name.lowercase()}")
+                                              .background(
+                                                  if (isSelected) StardomColors.PanelSelected
+                                                  else StardomColors.Background)
+                                              .border(
+                                                  1.dp,
+                                                  if (isSelected) StardomColors.BorderStrong
+                                                  else StardomColors.BorderFaint)
+                                              .clickable(enabled = config.enabled) {
+                                                repo.setUnlistedWifiAction(action)
+                                              }
+                                              .padding(vertical = 10.dp, horizontal = 4.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center) {
+                                          TechnicalRadioIndicator(selected = isSelected)
+                                          Spacer(Modifier.width(6.dp))
+                                          Text(
+                                              text = actionLabel,
+                                              color =
+                                                  if (!config.enabled) StardomColors.TextMuted
+                                                  else if (isSelected) StardomColors.TextPrimary
+                                                  else StardomColors.TextSecondary,
+                                              fontSize = 8.sp,
+                                              fontFamily = StardomTechnicalFont(language),
+                                              letterSpacing = 0.5.sp,
+                                              maxLines = 1)
+                                        }
+                                      }
                                 }
-                              }
-                        }
+                          }
+                    }
                   }
             }
 
@@ -609,15 +895,4 @@ private fun TechnicalRadioIndicator(selected: Boolean) {
                       .background(StardomColors.Selected))
         }
       }
-}
-
-@Composable
-private fun SettingsSectionHeader(title: String) {
-  Text(
-      text = title,
-      color = StardomColors.TextSecondary,
-      fontFamily = IbmPlexMono,
-      fontSize = 9.sp,
-      letterSpacing = 2.sp,
-      modifier = Modifier.padding(bottom = 8.dp))
 }

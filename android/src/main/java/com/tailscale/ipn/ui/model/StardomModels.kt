@@ -759,14 +759,14 @@ object StardomLocalization {
 
   fun onDemandWifiScopeAll(lang: AppLanguage): String =
       when (lang) {
-        AppLanguage.RU -> "ДЛЯ ВСЕХ СЕТЕЙ WI-FI"
-        AppLanguage.EN -> "ALL WI-FI NETWORKS"
+        AppLanguage.RU -> "ДЛЯ ВСЕХ"
+        AppLanguage.EN -> "FOR ALL"
       }
 
   fun onDemandWifiScopeSelected(lang: AppLanguage): String =
       when (lang) {
-        AppLanguage.RU -> "ТОЛЬКО ДЛЯ ВЫБРАННЫХ СЕТЕЙ"
-        AppLanguage.EN -> "ONLY SELECTED NETWORKS"
+        AppLanguage.RU -> "ДЛЯ ВЫБРАННЫХ"
+        AppLanguage.EN -> "FOR SELECTED"
       }
 
   fun onDemandUnlistedWifiTitle(lang: AppLanguage): String =
@@ -833,5 +833,23 @@ object StardomLocalization {
       when (lang) {
         AppLanguage.RU -> "ПРЕДОСТАВИТЬ ДОСТУП"
         AppLanguage.EN -> "GRANT PERMISSION"
+      }
+
+  fun onDemandSelectNetworkDropdown(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЫБОР СЕТИ WI-FI"
+        AppLanguage.EN -> "SELECT WI-FI NETWORK"
+      }
+
+  fun onDemandAddSsidManual(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОБАВИТЬ ВРУЧНУЮ..."
+        AppLanguage.EN -> "ADD MANUALLY..."
+      }
+
+  fun onDemandAddSsidBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОБАВИТЬ"
+        AppLanguage.EN -> "ADD"
       }
 }
