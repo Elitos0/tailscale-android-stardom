@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.model.VpnState
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.theme.StardomDimensions
 import kotlin.math.cos
@@ -269,7 +269,7 @@ fun StardomOrbitControl(
           Text(
               text = label,
               color = buttonContentColor,
-              fontFamily = IbmPlexMono,
+              fontFamily = StardomTechnicalFont(language),
               fontWeight = FontWeight.Normal,
               fontSize = 11.5.sp,
               letterSpacing = 2.sp)

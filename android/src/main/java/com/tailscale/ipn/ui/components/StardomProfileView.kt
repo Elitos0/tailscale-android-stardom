@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AccountProfile
 import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 import java.time.Instant
@@ -50,6 +51,7 @@ import java.time.format.DateTimeFormatter
 fun StardomProfileView(
     profile: AccountProfile,
     onClose: () -> Unit,
+    language: com.tailscale.ipn.ui.model.AppLanguage = com.tailscale.ipn.ui.model.AppLanguage.RU,
     modifier: Modifier = Modifier
 ) {
   val isActive = !profile.isStub
@@ -75,7 +77,7 @@ fun StardomProfileView(
     // Subtitle
     Text(
         text = "АККАУНТ // ДОСТУП // УСТРОЙСТВА",
-        fontFamily = IbmPlexMono,
+        fontFamily = StardomTechnicalFont(language),
         fontSize = 9.sp,
         letterSpacing = 2.sp,
         color = StardomColors.TextMuted,
@@ -101,7 +103,7 @@ fun StardomProfileView(
     ) {
       Text(
           text = "SIGNED IN AS",
-          fontFamily = IbmPlexMono,
+          fontFamily = StardomTechnicalFont(language),
           fontSize = 8.sp,
           letterSpacing = 1.5.sp,
           color = StardomColors.TextMuted
@@ -123,7 +125,7 @@ fun StardomProfileView(
 
       Text(
           text = if (isActive) "ACCOUNT // ACTIVE" else "ACCOUNT // OFFLINE",
-          fontFamily = IbmPlexMono,
+          fontFamily = StardomTechnicalFont(language),
           fontSize = 9.sp,
           letterSpacing = 1.sp,
           color = if (isActive) StardomColors.TextSecondary else StardomColors.TextMuted
@@ -170,7 +172,7 @@ fun StardomProfileView(
           Spacer(modifier = Modifier.width(6.dp))
           Text(
               text = if (isActive) "ACTIVE" else "OFFLINE",
-              fontFamily = IbmPlexMono,
+              fontFamily = StardomTechnicalFont(language),
               fontSize = 10.sp,
               letterSpacing = 1.5.sp,
               color = if (isActive) StardomColors.TextPrimary else StardomColors.TextMuted
@@ -182,7 +184,7 @@ fun StardomProfileView(
 
       Text(
           text = "BETA PLAN",
-          fontFamily = IbmPlexMono,
+          fontFamily = StardomTechnicalFont(language),
           fontSize = 9.sp,
           letterSpacing = 1.5.sp,
           color = StardomColors.TextSecondary
@@ -199,7 +201,7 @@ fun StardomProfileView(
       ) {
         Text(
             text = "VALID UNTIL",
-            fontFamily = IbmPlexMono,
+            fontFamily = StardomTechnicalFont(language),
             fontSize = 9.sp,
             letterSpacing = 1.sp,
             color = StardomColors.TextMuted
@@ -207,7 +209,7 @@ fun StardomProfileView(
 
         Text(
             text = formatValidUntilDate(profile.validUntil),
-            fontFamily = IbmPlexMono,
+            fontFamily = StardomTechnicalFont(language),
             fontSize = 10.sp,
             letterSpacing = 1.sp,
             color = StardomColors.TextPrimary
@@ -236,7 +238,7 @@ fun StardomProfileView(
       ) {
         Text(
             text = "COMING SOON",
-            fontFamily = IbmPlexMono,
+            fontFamily = StardomTechnicalFont(language),
             fontWeight = FontWeight.Medium,
             fontSize = 11.sp,
             letterSpacing = 2.sp,
@@ -248,7 +250,7 @@ fun StardomProfileView(
 
       Text(
           text = "MANAGEMENT // IN DEVELOPMENT",
-          fontFamily = IbmPlexMono,
+          fontFamily = StardomTechnicalFont(language),
           fontSize = 8.sp,
           letterSpacing = 1.sp,
           color = StardomColors.TextMuted

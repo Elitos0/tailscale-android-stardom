@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -20,8 +22,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +78,7 @@ import com.tailscale.ipn.ui.model.VpnState
 import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.theme.StardomDimensions
 import com.tailscale.ipn.ui.util.LoadingIndicator
+import com.tailscale.ipn.ui.util.capitalizeNodeNameForDisplay
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerNav
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModel
 import com.tailscale.ipn.ui.viewModel.ExitNodePickerViewModelFactory
@@ -90,14 +93,14 @@ data class MainViewNavigation(
     val onNavigateToExitNodes: () -> Unit,
     val onNavigateToHealth: () -> Unit,
     val onNavigateToSearch: () -> Unit,
-    val onNavigateToSplitTunneling: () -> Unit = {},
+    val onNavigateToSplitTunneling: (AppLanguage) -> Unit = {},
 )
 
 fun mapExitNodeToStarNode(exitNode: ExitNodePickerViewModel.ExitNode): StarServerNode? {
   val id = exitNode.id?.takeIf { it.isNotBlank() } ?: return null
   return StarServerNode(
       id = id,
-      label = exitNode.label.ifBlank { id },
+      label = exitNode.label.ifBlank { id }.capitalizeNodeNameForDisplay(),
       city = exitNode.city,
       countryCode = exitNode.countryCode.uppercase(),
       country = exitNode.country)
@@ -280,6 +283,10 @@ fun MainView(
         is UpdateState.Error -> state.isForced
         else -> false
       }
+  val availableManifest =
+      (updateState as? UpdateState.UpdateAvailable)?.manifest
+          ?: (updateState as? UpdateState.Downloaded)?.manifest
+
   val connectionStage =
       resolveConnectionStage(
           authentikState = authentikState,
@@ -460,7 +467,8 @@ fun MainView(
                               Spacer(Modifier.height(16.dp))
                               StardomProfileView(
                                   profile = accountProfile,
-                                  onClose = { showProfileScreen = false })
+                                  onClose = { showProfileScreen = false },
+                                  language = selectedLanguage)
                               Spacer(Modifier.height(StardomDimensions.SectionMedium))
                             }
                       } else {
@@ -499,23 +507,8 @@ fun MainView(
                             vpnState = presentationVpnState,
                             isError = isStatusError,
                             language = selectedLanguage)
-                        val availableManifest =
-                            (updateState as? UpdateState.UpdateAvailable)?.manifest
-                                ?: (updateState as? UpdateState.Downloaded)?.manifest
-                        if (availableManifest != null && !isUpdateBannerDismissed && !isForcedUpdate) {
-                          Spacer(Modifier.height(12.dp))
-                          StardomUpdateBanner(
-                              manifest = availableManifest,
-                              language = selectedLanguage,
-                              onDetails = { showUpdateDialog = true },
-                              onUpdate = {
-                                updateRepository.startDownload()
-                                showUpdateDialog = true
-                              },
-                              onDismiss = { isUpdateBannerDismissed = true },
-                              isForced = false)
-                        }
                         Spacer(Modifier.height(20.dp))
+
                         StardomRoutingPanel(
                             connectionMode = connectionMode,
                             activeServer = activeServer,
@@ -531,6 +524,26 @@ fun MainView(
                         Spacer(Modifier.height(StardomDimensions.SectionMedium))
                       }
                     }
+                val bannerManifest = availableManifest
+                if (!showProfileScreen && bannerManifest != null && !isUpdateBannerDismissed && !isForcedUpdate) {
+                  StardomUpdateBanner(
+                      manifest = bannerManifest,
+                      language = selectedLanguage,
+                      modifier =
+                          Modifier.align(Alignment.TopCenter)
+                              .offset(y = StardomDimensions.TopBarHeight + 6.dp)
+                              .padding(horizontal = StardomDimensions.ScreenHorizontal)
+                              .fillMaxWidth()
+                              .wrapContentHeight(),
+                      onDetails = { showUpdateDialog = true },
+                      onUpdate = {
+                        updateRepository.startDownload()
+                        showUpdateDialog = true
+                      },
+                      onDismiss = { isUpdateBannerDismissed = true },
+                      isForced = false)
+                }
+
 
                 // Modals & Bottom Sheets
                 if (showAccountDialog) {
@@ -553,11 +566,11 @@ fun MainView(
                       selectedLanguage = selectedLanguage,
                       onSelectLanguage = { selectedLanguage = it },
                       sheetState = settingsSheetState,
-                      onDismiss = { showSettingsSheet = false },
-                      onOpenSplitTunneling = {
+                      onOpenSplitTunneling = { language ->
                         showSettingsSheet = false
-                        navigation.onNavigateToSplitTunneling()
+                        navigation.onNavigateToSplitTunneling(language)
                       },
+                      onDismiss = { showSettingsSheet = false },
                       updateState = updateState,
                       onCheckForUpdate = { updateRepository.checkForUpdate(isManual = true) },
                       onOpenUpdateDialog = {

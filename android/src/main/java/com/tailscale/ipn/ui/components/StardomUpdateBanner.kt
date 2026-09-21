@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,12 +24,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.product.update.UpdateManifest
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -45,14 +48,16 @@ fun StardomUpdateBanner(
       modifier =
           modifier
               .fillMaxWidth()
+              .wrapContentHeight()
+              .heightIn(min = 44.dp, max = 68.dp)
               .testTag("stardom_update_banner")
               .background(StardomColors.Panel)
               .border(1.dp, StardomColors.BorderStrong)
-              .padding(horizontal = 14.dp, vertical = 10.dp)) {
+              .padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(
+            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()) {
+            horizontalArrangement = Arrangement.SpaceBetween) {
               Row(
                   verticalAlignment = Alignment.CenterVertically,
                   modifier = Modifier.weight(1f)) {
@@ -80,7 +85,7 @@ fun StardomUpdateBanner(
                             text = "v${manifest.versionName}",
                             color = StardomColors.TextSecondary,
                             fontSize = 9.sp,
-                            fontFamily = IbmPlexMono)
+                            fontFamily = StardomTechnicalFont(language))
                       }
 
                       Spacer(Modifier.height(2.dp))
@@ -89,8 +94,9 @@ fun StardomUpdateBanner(
                           text = StardomLocalization.updateBannerSubtitle(language, manifest.versionName),
                           color = StardomColors.TextMuted,
                           fontSize = 8.5.sp,
-                          fontFamily = IbmPlexMono,
-                          maxLines = 1)
+                          fontFamily = StardomTechnicalFont(language),
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis)
                     }
                   }
 
@@ -109,7 +115,7 @@ fun StardomUpdateBanner(
                           text = StardomLocalization.updateDetailsBtn(language),
                           color = StardomColors.TextSecondary,
                           fontSize = 8.5.sp,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(language),
                           letterSpacing = 0.5.sp)
                     }
 
@@ -127,7 +133,7 @@ fun StardomUpdateBanner(
                           text = StardomLocalization.updateNowBtn(language),
                           color = StardomColors.Background,
                           fontSize = 8.5.sp,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(language),
                           fontWeight = FontWeight.Bold,
                           letterSpacing = 0.5.sp)
                     }
@@ -145,7 +151,7 @@ fun StardomUpdateBanner(
                             text = "✕",
                             color = StardomColors.TextMuted,
                             fontSize = 10.sp,
-                            fontFamily = IbmPlexMono)
+                            fontFamily = StardomTechnicalFont(language))
                       }
                 }
               }

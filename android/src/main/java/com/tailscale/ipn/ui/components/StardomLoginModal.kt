@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -89,7 +89,7 @@ fun StardomLoginModal(
                             else
                                 "Sign in to authenticate your node and establish secure orbital routing",
                         color = StardomColors.TextSecondary,
-                        fontFamily = IbmPlexMono,
+                        fontFamily = StardomTechnicalFont(language),
                         fontSize = 11.sp,
                         lineHeight = 16.sp,
                         letterSpacing = 0.5.sp,

@@ -14,6 +14,7 @@ import com.tailscale.ipn.ui.util.ComposableStringFormatter
 import com.tailscale.ipn.ui.util.DisplayAddress
 import com.tailscale.ipn.ui.util.TimeUtil
 import com.tailscale.ipn.ui.util.flag
+import com.tailscale.ipn.ui.util.capitalizeNodeNameForDisplay
 import com.tailscale.ipn.ui.viewModel.PeerSettingInfo
 import java.util.Date
 import kotlinx.serialization.Serializable
@@ -113,8 +114,11 @@ class Tailcfg {
               ComputedName?.trimEnd('.')?.endsWith(".mullvad.ts.net") == true ||
               Hostinfo.Location != null
 
-    val displayName: String
+    val rawDisplayName: String
       get() = ComputedName ?: Name
+
+    val displayName: String
+      get() = rawDisplayName.capitalizeNodeNameForDisplay()
 
     val exitNodeName: String
       get() {
@@ -122,7 +126,7 @@ class Tailcfg {
             Hostinfo.Location?.Country != null &&
             Hostinfo.Location?.City != null &&
             Hostinfo.Location?.CountryCode != null) {
-          return "${Hostinfo.Location!!.CountryCode!!.flag()} ${Hostinfo.Location!!.Country!!}: ${Hostinfo.Location!!.City!!}"
+          return "${Hostinfo.Location!!.CountryCode!!.flag()} ${Hostinfo.Location!!.Country!!.capitalizeNodeNameForDisplay()}: ${Hostinfo.Location!!.City!!.capitalizeNodeNameForDisplay()}"
         }
         return displayName
       }

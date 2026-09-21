@@ -77,7 +77,7 @@ fun PingView(model: PingViewModel = viewModel()) {
         Row {
           Column {
             Text(
-                stringResource(R.string.pinging_node_name, peer?.ComputedName ?: "???"),
+                stringResource(R.string.pinging_node_name, peer?.displayName ?: "???"),
                 fontStyle = MaterialTheme.typography.titleLarge.fontStyle,
                 fontWeight = FontWeight.Bold)
             if (pingValues.isNotEmpty()) {

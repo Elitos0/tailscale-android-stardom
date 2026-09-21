@@ -39,7 +39,7 @@ class UseExitNodeWorker(appContext: Context, workerParams: WorkerParameters) :
                       return@runAndGetResult app.getString(R.string.no_peers_found)
                     }
 
-            val filteredPeers = peers.filter { it.displayName == exitNodeName }.toList()
+            val filteredPeers = peers.filter { it.rawDisplayName == exitNodeName }.toList()
 
             if (filteredPeers.isEmpty()) {
               return app.getString(R.string.no_peers_with_name_found, exitNodeName)

@@ -61,6 +61,7 @@ import com.tailscale.ipn.product.StardomProductionRoutes
 import com.tailscale.ipn.product.StardomRoute
 import com.tailscale.ipn.product.StardomSessionController
 import com.tailscale.ipn.product.policy.VpnStartOrigin
+import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.theme.AppTheme
@@ -333,7 +334,9 @@ class MainActivity : ComponentActivity() {
                             viewModel.enableSearchAutoFocus()
                             navController.navigate(StardomRoute.SEARCH.path)
                           },
-                          onNavigateToSplitTunneling = {
+                          onNavigateToSplitTunneling = { language ->
+                            navController.currentBackStackEntry?.savedStateHandle?.set(
+                                "stardom_language", language)
                             navController.navigate(StardomRoute.SPLIT_TUNNELING.path)
                           })
                   val settingsNav =
@@ -451,7 +454,11 @@ class MainActivity : ComponentActivity() {
                     DNSSettingsView(backTo(StardomRoute.SETTINGS.path))
                   }
                   composable(StardomRoute.SPLIT_TUNNELING.path) {
-                    SplitTunnelAppPickerView(backTo(StardomRoute.MAIN.path))
+                    val language =
+                        navController.previousBackStackEntry?.savedStateHandle?.get<AppLanguage>(
+                            "stardom_language") ?: AppLanguage.RU
+                    SplitTunnelAppPickerView(
+                        backToSettings = backTo(StardomRoute.MAIN.path), language = language)
                   }
                   composable(StardomRoute.TAILNET_LOCK.path) {
                     TailnetLockSetupView(backTo(StardomRoute.SETTINGS.path))

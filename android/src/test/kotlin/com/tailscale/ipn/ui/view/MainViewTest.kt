@@ -290,6 +290,39 @@ class MainViewTest {
     assertEquals("DE", server.countryCode)
     assertEquals("Germany", server.country)
   }
+  @Test
+  fun mapExitNodeToStarNodeCapitalizesLowercaseNodeLabel() {
+    val exitNode =
+        ExitNodePickerViewModel.ExitNode(
+            id = "node-finland-1",
+            label = "finland",
+            online = MutableStateFlow(true),
+            selected = false,
+            city = "helsinki",
+            countryCode = "fi",
+            country = "Finland")
+
+    val server = checkNotNull(mapExitNodeToStarNode(exitNode))
+
+    assertEquals("node-finland-1", server.id)
+    assertEquals("Finland", server.label)
+  }
+
+  @Test
+  fun mapExitNodeToStarNodeCapitalizesFallbackIdWhenLabelIsBlank() {
+    val exitNode =
+        ExitNodePickerViewModel.ExitNode(
+            id = "finland",
+            label = "",
+            online = MutableStateFlow(true),
+            selected = false)
+
+    val server = checkNotNull(mapExitNodeToStarNode(exitNode))
+
+    assertEquals("finland", server.id)
+    assertEquals("Finland", server.label)
+  }
+
 
   @Test
   fun mapExitNodeToStarNodeDropsNodeWithoutStableId() {

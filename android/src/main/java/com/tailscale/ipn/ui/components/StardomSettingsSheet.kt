@@ -38,6 +38,7 @@ import com.tailscale.ipn.ui.model.DnsProvider
 import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.model.VpnProtocol
 import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -52,7 +53,7 @@ fun StardomSettingsSheet(
     onSelectLanguage: (AppLanguage) -> Unit,
     sheetState: SheetState,
     onDismiss: () -> Unit,
-    onOpenSplitTunneling: () -> Unit = {},
+    onOpenSplitTunneling: (AppLanguage) -> Unit = {},
     updateState: UpdateState = UpdateState.Idle,
     onCheckForUpdate: () -> Unit = {},
     onOpenUpdateDialog: () -> Unit = {},
@@ -109,7 +110,7 @@ fun StardomSettingsSheet(
                           text = StardomLocalization.settingsSubtitle(selectedLanguage),
                           color = StardomColors.TextSecondary,
                           fontSize = 9.sp,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(selectedLanguage),
                           letterSpacing = 1.sp)
                     }
 
@@ -123,7 +124,7 @@ fun StardomSettingsSheet(
                               text = StardomLocalization.doneBtn(selectedLanguage),
                               color = StardomColors.TextSecondary,
                               fontSize = 9.sp,
-                              fontFamily = IbmPlexMono,
+                              fontFamily = StardomTechnicalFont(selectedLanguage),
                               letterSpacing = 1.sp)
                         }
                   }
@@ -248,7 +249,7 @@ fun StardomSettingsSheet(
                                           text = "CIPHER: ${proto.cipher} • PORT: ${proto.port}",
                                           color = StardomColors.TextMuted,
                                           fontSize = 9.sp,
-                                          fontFamily = IbmPlexMono)
+                                          fontFamily = StardomTechnicalFont(selectedLanguage))
                                     }
                                   }
 
@@ -257,7 +258,7 @@ fun StardomSettingsSheet(
                                         text = StardomLocalization.activeStatus(selectedLanguage),
                                         color = StardomColors.TextPrimary,
                                         fontSize = 9.sp,
-                                        fontFamily = IbmPlexMono,
+                                        fontFamily = StardomTechnicalFont(selectedLanguage),
                                         letterSpacing = 1.sp)
                                   } else if (!isEnabled) {
                                     Text(
@@ -265,7 +266,7 @@ fun StardomSettingsSheet(
                                             StardomLocalization.comingSoonStatus(selectedLanguage),
                                         color = StardomColors.TextMuted,
                                         fontSize = 9.sp,
-                                        fontFamily = IbmPlexMono,
+                                        fontFamily = StardomTechnicalFont(selectedLanguage),
                                         letterSpacing = 1.sp)
                                   }
                                 }
@@ -330,7 +331,7 @@ fun StardomSettingsSheet(
                                           text = "IP: ${dns.address}",
                                           color = StardomColors.TextMuted,
                                           fontSize = 9.sp,
-                                          fontFamily = IbmPlexMono)
+                                          fontFamily = StardomTechnicalFont(selectedLanguage))
                                     }
                                   }
 
@@ -340,7 +341,7 @@ fun StardomSettingsSheet(
                                             StardomLocalization.dnsManagedStatus(selectedLanguage),
                                         color = StardomColors.TextSecondary,
                                         fontSize = 9.sp,
-                                        fontFamily = IbmPlexMono,
+                                        fontFamily = StardomTechnicalFont(selectedLanguage),
                                         letterSpacing = 1.sp)
                                   } else {
                                     Text(
@@ -348,7 +349,7 @@ fun StardomSettingsSheet(
                                             StardomLocalization.comingSoonStatus(selectedLanguage),
                                         color = StardomColors.TextMuted,
                                         fontSize = 9.sp,
-                                        fontFamily = IbmPlexMono,
+                                        fontFamily = StardomTechnicalFont(selectedLanguage),
                                         letterSpacing = 1.sp)
                                   }
                                 }
@@ -369,7 +370,7 @@ fun StardomSettingsSheet(
                           .background(StardomColors.Panel)
                           .border(1.dp, StardomColors.Border)
                           .clickable(onClickLabel = "Open split tunneling") {
-                            onOpenSplitTunneling()
+                            onOpenSplitTunneling(selectedLanguage)
                           }
                           .padding(12.dp)) {
                     Row(
@@ -410,7 +411,7 @@ fun StardomSettingsSheet(
                                       text = badgeText,
                                       color = StardomColors.TextMuted,
                                       fontSize = 9.sp,
-                                      fontFamily = IbmPlexMono)
+                                      fontFamily = StardomTechnicalFont(selectedLanguage))
                                 }
                               }
 
@@ -420,7 +421,7 @@ fun StardomSettingsSheet(
                                       selectedLanguage),
                               color = StardomColors.TextPrimary,
                               fontSize = 9.sp,
-                              fontFamily = IbmPlexMono,
+                              fontFamily = StardomTechnicalFont(selectedLanguage),
                               letterSpacing = 1.sp)
                         }
                   }
@@ -486,7 +487,7 @@ fun StardomSettingsSheet(
                                   text = "v${AppVersion.Short()}",
                                   color = StardomColors.TextSecondary,
                                   fontSize = 9.sp,
-                                  fontFamily = IbmPlexMono)
+                                  fontFamily = StardomTechnicalFont(selectedLanguage))
                             }
 
                             Spacer(Modifier.height(3.dp))
@@ -523,7 +524,7 @@ fun StardomSettingsSheet(
                                       else -> StardomColors.TextMuted
                                     },
                                 fontSize = 9.sp,
-                                 fontFamily = IbmPlexMono)
+                                 fontFamily = StardomTechnicalFont(selectedLanguage))
                            }
 
                           Spacer(Modifier.width(10.dp))
@@ -542,7 +543,7 @@ fun StardomSettingsSheet(
                                       text = StardomLocalization.updateNowBtn(selectedLanguage),
                                       color = StardomColors.Background,
                                       fontSize = 9.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(selectedLanguage),
                                       fontWeight = FontWeight.Bold,
                                       letterSpacing = 0.5.sp)
                                 }
@@ -570,7 +571,7 @@ fun StardomSettingsSheet(
                                           else
                                               StardomColors.TextPrimary,
                                       fontSize = 9.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(selectedLanguage),
                                       letterSpacing = 0.5.sp)
                                 }
                           }

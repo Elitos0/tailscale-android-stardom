@@ -41,7 +41,8 @@ import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StarServerNode
 import com.tailscale.ipn.ui.model.StardomLocalization
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.util.capitalizeNodeNameForDisplay
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -53,12 +54,13 @@ internal const val SERVER_SELECTOR_DETAILS_MAX_LINES = 1
 internal data class ServerSelectorRowLabels(val title: String, val details: String)
 
 internal fun serverSelectorRowLabels(server: StarServerNode): ServerSelectorRowLabels {
+  val displayLabel = server.label.ifBlank { server.id }.capitalizeNodeNameForDisplay()
   val title =
-      listOf(server.label, server.city.uppercase()).filter { it.isNotBlank() }.joinToString(" // ")
+      listOf(displayLabel, server.city.uppercase()).filter { it.isNotBlank() }.joinToString(" // ")
   val details =
       listOf(server.countryCode, server.country).filter { it.isNotBlank() }.joinToString(" • ")
   return ServerSelectorRowLabels(
-      title = title.ifBlank { server.id }, details = details.ifBlank { "—" })
+      title = title.ifBlank { server.id.capitalizeNodeNameForDisplay() }, details = details.ifBlank { "—" })
 }
 
 internal fun serverSelectorTitleColumnWidthDp(itemWidthDp: Int): Int =
@@ -131,7 +133,7 @@ fun StardomServerSelectorSheet(
                               StardomLocalization.serverDirectorySubtitle(servers.size, language),
                           color = StardomColors.TextSecondary,
                           fontSize = 9.sp,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(language),
                           letterSpacing = 1.sp)
                     }
 
@@ -145,7 +147,7 @@ fun StardomServerSelectorSheet(
                               text = StardomLocalization.closeBtn(language),
                               color = StardomColors.TextSecondary,
                               fontSize = 9.sp,
-                              fontFamily = IbmPlexMono,
+                              fontFamily = StardomTechnicalFont(language),
                               letterSpacing = 1.sp)
                         }
                   }
@@ -165,7 +167,7 @@ fun StardomServerSelectorSheet(
                           color = StardomColors.TextPrimary,
                           fontSize = 12.sp,
                           fontWeight = FontWeight.Bold,
-                          fontFamily = IbmPlexMono)
+                          fontFamily = StardomTechnicalFont(language))
                       Spacer(modifier = Modifier.width(10.dp))
                       BasicTextField(
                           value = searchQuery,
@@ -174,7 +176,7 @@ fun StardomServerSelectorSheet(
                               TextStyle(
                                   color = StardomColors.TextPrimary,
                                   fontSize = 12.sp,
-                                  fontFamily = IbmPlexMono),
+                                  fontFamily = StardomTechnicalFont(language)),
                           cursorBrush = SolidColor(StardomColors.TextPrimary),
                           singleLine = true,
                           modifier = Modifier.fillMaxWidth().testTag("server_search_input"),
@@ -184,7 +186,7 @@ fun StardomServerSelectorSheet(
                                   text = StardomLocalization.searchPlaceholder(language),
                                   color = StardomColors.TextMuted,
                                   fontSize = 11.sp,
-                                  fontFamily = IbmPlexMono,
+                                  fontFamily = StardomTechnicalFont(language),
                                   letterSpacing = 1.sp)
                             }
                             innerTextField()
@@ -204,7 +206,7 @@ fun StardomServerSelectorSheet(
                             text = StardomLocalization.noExitNodesAvailable(language),
                             color = StardomColors.TextMuted,
                             fontSize = 10.sp,
-                            fontFamily = IbmPlexMono,
+                            fontFamily = StardomTechnicalFont(language),
                             letterSpacing = 1.sp,
                             modifier =
                                 Modifier.padding(vertical = 12.dp).testTag("server_list_empty"))
@@ -243,7 +245,7 @@ private fun StardomServerSelectorRow(
               .background(if (isSelected) StardomColors.PanelSelected else StardomColors.Panel)
               .border(
                   1.dp, if (isSelected) StardomColors.BorderStrong else StardomColors.BorderFaint)
-              .clickable(onClickLabel = "Select server ${server.label}") {
+              .clickable(onClickLabel = "Select server ${server.label.capitalizeNodeNameForDisplay()}") {
                 onSelectServer(server)
                 onDismiss()
               }
@@ -285,7 +287,7 @@ private fun StardomServerSelectorRow(
                 text = labels.details,
                 color = StardomColors.TextMuted,
                 fontSize = 9.sp,
-                fontFamily = IbmPlexMono,
+                fontFamily = StardomTechnicalFont(language),
                 maxLines = SERVER_SELECTOR_DETAILS_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 20.dp).testTag("server_details_${server.id}"))
@@ -301,7 +303,7 @@ private fun StardomServerSelectorRow(
                     color = StardomColors.TextMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal,
-                    fontFamily = IbmPlexMono,
+                    fontFamily = StardomTechnicalFont(language),
                     maxLines = 1)
               }
         }

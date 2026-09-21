@@ -49,6 +49,33 @@ class StardomServerSelectorSheetTest {
   }
 
   @Test
+  fun rowLabelsCapitalizeNodeName() {
+    val node =
+        StarServerNode(
+            id = "finland",
+            label = "finland",
+            city = "helsinki",
+            countryCode = "FI",
+            country = "Finland")
+
+    val labels = serverSelectorRowLabels(node)
+
+    assertEquals("Finland // HELSINKI", labels.title)
+    assertEquals("FI • Finland", labels.details)
+  }
+
+  @Test
+  fun rowLabelsCapitalizeFallbackIdWhenLabelIsBlank() {
+    val node =
+        StarServerNode(
+            id = "finland", label = "", city = "", countryCode = "", country = "")
+
+    val labels = serverSelectorRowLabels(node)
+
+    assertEquals("Finland", labels.title)
+  }
+
+  @Test
   fun titleColumnNeverBecomesNegativeForNarrowConstraints() {
     assertEquals(0, serverSelectorTitleColumnWidthDp(100))
   }

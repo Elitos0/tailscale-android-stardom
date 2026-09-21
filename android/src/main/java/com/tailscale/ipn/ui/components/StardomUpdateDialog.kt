@@ -32,7 +32,7 @@ import com.tailscale.ipn.product.update.UpdateManifest
 import com.tailscale.ipn.product.update.UpdateState
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -118,7 +118,7 @@ fun StardomUpdateDialog(
                                       text = StardomLocalization.updateDialogMandatoryBadge(language),
                                       color = StardomColors.Error,
                                       fontSize = 8.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(language),
                                       letterSpacing = 0.5.sp)
                                 }
                           }
@@ -133,7 +133,7 @@ fun StardomUpdateDialog(
                                     language, currentVersionName, targetVersion),
                             color = StardomColors.TextSecondary,
                             fontSize = 9.sp,
-                            fontFamily = IbmPlexMono,
+                            fontFamily = StardomTechnicalFont(language),
                             letterSpacing = 0.5.sp)
                       }
 
@@ -146,7 +146,7 @@ fun StardomUpdateDialog(
                                   text = "✕",
                                   color = StardomColors.TextSecondary,
                                   fontSize = 12.sp,
-                                  fontFamily = IbmPlexMono)
+                                  fontFamily = StardomTechnicalFont(language))
                             }
                       }
                     }
@@ -159,7 +159,7 @@ fun StardomUpdateDialog(
                       text = StardomLocalization.updateChangelogHeader(language),
                       color = StardomColors.TextSecondary,
                       fontSize = 9.sp,
-                      fontFamily = IbmPlexMono,
+                      fontFamily = StardomTechnicalFont(language),
                       letterSpacing = 1.sp)
 
                   Spacer(Modifier.height(6.dp))
@@ -177,7 +177,7 @@ fun StardomUpdateDialog(
                               text = changelogText,
                               color = StardomColors.TextPrimary,
                               fontSize = 10.sp,
-                              fontFamily = IbmPlexMono,
+                              fontFamily = StardomTechnicalFont(language),
                               lineHeight = 15.sp)
                         }
                       }
@@ -189,7 +189,7 @@ fun StardomUpdateDialog(
                       text = "${StardomLocalization.updateSizeHeader(language, sizeMb)} • SHA-256: ${manifest.sha256.take(8)}...${manifest.sha256.takeLast(8)}",
                       color = StardomColors.TextMuted,
                       fontSize = 8.5.sp,
-                      fontFamily = IbmPlexMono)
+                      fontFamily = StardomTechnicalFont(language))
 
                   Spacer(Modifier.height(16.dp))
                 }
@@ -209,7 +209,7 @@ fun StardomUpdateDialog(
                                 language, downloadedMb, totalMb, percent),
                         color = StardomColors.TextPrimary,
                         fontSize = 9.sp,
-                        fontFamily = IbmPlexMono)
+                        fontFamily = StardomTechnicalFont(language))
 
                     Spacer(Modifier.height(8.dp))
 
@@ -239,7 +239,7 @@ fun StardomUpdateDialog(
                               text = "ОШИБКА // ERROR: ${updateState.message}",
                               color = StardomColors.Error,
                               fontSize = 9.5.sp,
-                              fontFamily = IbmPlexMono)
+                              fontFamily = StardomTechnicalFont(language))
                         }
                     Spacer(Modifier.height(16.dp))
                   }
@@ -254,7 +254,7 @@ fun StardomUpdateDialog(
                               text = "ПАКЕТ ПРОВЕРЕН // SHA-256 VALIDATED • ГОТОВ К УСТАНОВКЕ",
                               color = StardomColors.TextPrimary,
                               fontSize = 9.sp,
-                              fontFamily = IbmPlexMono)
+                              fontFamily = StardomTechnicalFont(language))
                         }
                     Spacer(Modifier.height(16.dp))
                   }
@@ -279,7 +279,7 @@ fun StardomUpdateDialog(
                                       text = StardomLocalization.updateLaterBtn(language),
                                       color = StardomColors.TextSecondary,
                                       fontSize = 9.5.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(language),
                                       letterSpacing = 1.sp)
                                 }
                             Spacer(Modifier.width(10.dp))
@@ -298,7 +298,7 @@ fun StardomUpdateDialog(
                                     text = StardomLocalization.updateNowBtn(language),
                                     color = StardomColors.Background,
                                     fontSize = 9.5.sp,
-                                    fontFamily = IbmPlexMono,
+                                    fontFamily = StardomTechnicalFont(language),
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp)
                               }
@@ -316,7 +316,7 @@ fun StardomUpdateDialog(
                                     text = StardomLocalization.updateCancelBtn(language),
                                     color = StardomColors.TextSecondary,
                                     fontSize = 9.5.sp,
-                                    fontFamily = IbmPlexMono,
+                                    fontFamily = StardomTechnicalFont(language),
                                     letterSpacing = 1.sp)
                               }
                         }
@@ -332,7 +332,7 @@ fun StardomUpdateDialog(
                                     text = StardomLocalization.updateInstallBtn(language),
                                     color = StardomColors.Background,
                                     fontSize = 10.sp,
-                                    fontFamily = IbmPlexMono,
+                                    fontFamily = StardomTechnicalFont(language),
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp)
                               }
@@ -348,7 +348,7 @@ fun StardomUpdateDialog(
                                       text = StardomLocalization.closeBtn(language),
                                       color = StardomColors.TextSecondary,
                                       fontSize = 9.5.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(language),
                                       letterSpacing = 1.sp)
                                 }
                             Spacer(Modifier.width(10.dp))
@@ -366,7 +366,7 @@ fun StardomUpdateDialog(
                                       text = StardomLocalization.updateRetryBtn(language),
                                       color = StardomColors.Background,
                                       fontSize = 9.5.sp,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(language),
                                       fontWeight = FontWeight.Bold,
                                       letterSpacing = 1.sp)
                                 }

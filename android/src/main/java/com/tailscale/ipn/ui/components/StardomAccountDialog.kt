@@ -33,6 +33,7 @@ import com.tailscale.ipn.ui.model.AccountProfile
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 
@@ -100,7 +101,7 @@ fun StardomAccountDialog(
                         text = StardomLocalization.accountIdentity(language),
                         color = StardomColors.TextMuted,
                         fontSize = 8.sp,
-                        fontFamily = IbmPlexMono,
+                        fontFamily = StardomTechnicalFont(language),
                         letterSpacing = 1.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -125,7 +126,7 @@ fun StardomAccountDialog(
                         text = StardomLocalization.accountStubNotice(language),
                         color = StardomColors.TextSecondary,
                         fontSize = 8.sp,
-                        fontFamily = IbmPlexMono,
+                        fontFamily = StardomTechnicalFont(language),
                         letterSpacing = 0.5.sp)
                   }
             }
@@ -141,17 +142,22 @@ fun StardomAccountDialog(
                 }
 
             AccountMetricRow(
+                language = language,
                 label = StardomLocalization.accountTier(language), value = profile.tier)
             AccountMetricRow(
+                language = language,
                 label = StardomLocalization.accountPublicKey(language), value = profile.publicKey)
             AccountMetricRow(
+                language = language,
                 label = StardomLocalization.accountActiveDevices(language),
                 value =
                     "${profile.activeDevices} / ${profile.maxDevices} ${StardomLocalization.accountDevicesSuffix(language)}")
             AccountMetricRow(
+                language = language,
                 label = StardomLocalization.accountDataTransferred(language),
                 value = "${profile.bandwidthUsedGb} GB / $quotaText")
             AccountMetricRow(
+                language = language,
                 label = StardomLocalization.accountValidUntil(language), value = profile.validUntil)
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -218,7 +224,7 @@ fun StardomAccountDialog(
                         text = StardomLocalization.logoutBtn(language),
                         color = StardomColors.Error,
                         fontSize = 10.sp,
-                        fontFamily = IbmPlexMono,
+                        fontFamily = StardomTechnicalFont(language),
                         letterSpacing = 1.sp)
                   }
             }
@@ -228,7 +234,7 @@ fun StardomAccountDialog(
 }
 
 @Composable
-private fun AccountMetricRow(label: String, value: String) {
+private fun AccountMetricRow(language: AppLanguage, label: String, value: String) {
   Row(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -237,11 +243,11 @@ private fun AccountMetricRow(label: String, value: String) {
             text = label,
             color = StardomColors.TextMuted,
             fontSize = 9.sp,
-            fontFamily = IbmPlexMono)
+            fontFamily = StardomTechnicalFont(language))
         Text(
             text = value,
             color = StardomColors.TextSecondary,
             fontSize = 10.sp,
-            fontFamily = IbmPlexMono)
+            fontFamily = StardomTechnicalFont(language))
       }
 }

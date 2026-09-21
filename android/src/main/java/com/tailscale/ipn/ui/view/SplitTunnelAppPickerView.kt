@@ -51,7 +51,7 @@ import com.tailscale.ipn.App
 import com.tailscale.ipn.ui.components.StardomBackground
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.theme.StardomDimensions
@@ -110,7 +110,7 @@ fun SplitTunnelAppPickerView(
                         text = StardomLocalization.splitTunnelBackBtn(language),
                         color = StardomColors.TextSecondary,
                         fontSize = 9.sp,
-                        fontFamily = IbmPlexMono,
+                        fontFamily = StardomTechnicalFont(language),
                         letterSpacing = 1.sp)
                   }
 
@@ -127,7 +127,7 @@ fun SplitTunnelAppPickerView(
                     text = "МАРШРУТИЗАЦИЯ ТРАФИКА // SPLIT TUNNEL",
                     color = StardomColors.TextSecondary,
                     fontSize = 8.sp,
-                    fontFamily = IbmPlexMono,
+                    fontFamily = StardomTechnicalFont(language),
                     letterSpacing = 1.sp)
               }
 
@@ -197,7 +197,7 @@ fun SplitTunnelAppPickerView(
                       Text(
                           text = StardomLocalization.splitTunnelModeBypassDesc(language),
                           color = StardomColors.TextMuted,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(language),
                           fontSize = 8.sp,
                           lineHeight = 11.sp)
                     }
@@ -254,7 +254,7 @@ fun SplitTunnelAppPickerView(
                       Text(
                           text = StardomLocalization.splitTunnelModeOnlySelectedDesc(language),
                           color = StardomColors.TextMuted,
-                          fontFamily = IbmPlexMono,
+                          fontFamily = StardomTechnicalFont(language),
                           fontSize = 8.sp,
                           lineHeight = 11.sp)
                     }
@@ -276,7 +276,7 @@ fun SplitTunnelAppPickerView(
                     color = StardomColors.TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = IbmPlexMono)
+                    fontFamily = StardomTechnicalFont(language))
                 Spacer(modifier = Modifier.width(10.dp))
                 BasicTextField(
                     value = searchQuery,
@@ -285,7 +285,7 @@ fun SplitTunnelAppPickerView(
                         TextStyle(
                             color = StardomColors.TextPrimary,
                             fontSize = 12.sp,
-                            fontFamily = IbmPlexMono),
+                            fontFamily = StardomTechnicalFont(language)),
                     cursorBrush = SolidColor(StardomColors.TextPrimary),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("split_tunnel_search_input"),
@@ -295,7 +295,7 @@ fun SplitTunnelAppPickerView(
                             text = StardomLocalization.splitTunnelSearchPlaceholder(language),
                             color = StardomColors.TextMuted,
                             fontSize = 10.sp,
-                            fontFamily = IbmPlexMono,
+                            fontFamily = StardomTechnicalFont(language),
                             letterSpacing = 1.sp)
                       }
                       innerTextField()
@@ -318,7 +318,7 @@ fun SplitTunnelAppPickerView(
                 Text(
                     text = "// УПРАВЛЯЕТСЯ ОРГАНИЗАЦИЕЙ (MDM)",
                     color = StardomColors.TextSecondary,
-                    fontFamily = IbmPlexMono,
+                    fontFamily = StardomTechnicalFont(language),
                     fontSize = 9.sp,
                     letterSpacing = 1.sp)
               }
@@ -336,7 +336,7 @@ fun SplitTunnelAppPickerView(
                           language, filteredApps.size, selectedPackageNames.size),
                   color = StardomColors.TextMuted,
                   fontSize = 9.sp,
-                  fontFamily = IbmPlexMono,
+                  fontFamily = StardomTechnicalFont(language),
                   letterSpacing = 1.sp)
             }
 
@@ -446,7 +446,7 @@ fun SplitTunnelAppPickerView(
                                 Text(
                                     text = app.packageName,
                                     color = StardomColors.TextMuted,
-                                    fontFamily = IbmPlexMono,
+                                    fontFamily = StardomTechnicalFont(language),
                                     fontSize = 9.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis)
@@ -455,7 +455,7 @@ fun SplitTunnelAppPickerView(
                                   Text(
                                       text = "// СИСТЕМНОЕ ИСКЛЮЧЕНИЕ",
                                       color = StardomColors.TextMuted,
-                                      fontFamily = IbmPlexMono,
+                                      fontFamily = StardomTechnicalFont(language),
                                       fontSize = 8.sp,
                                       letterSpacing = 0.5.sp)
                                 }

@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.model.VpnState
-import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.theme.StardomDimensions
@@ -97,7 +97,7 @@ fun StardomHeader(
                     vpnState.isConnected -> StardomColors.TextPrimary
                     else -> StardomColors.TextSecondary
                   },
-              fontFamily = IbmPlexMono,
+              fontFamily = StardomTechnicalFont(language),
               fontSize = 9.sp,
               letterSpacing = 2.sp)
         }

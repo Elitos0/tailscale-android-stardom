@@ -31,7 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.ConnectionMode
 import com.tailscale.ipn.ui.model.StarServerNode
+import com.tailscale.ipn.ui.util.capitalizeNodeNameForDisplay
 import com.tailscale.ipn.ui.theme.IbmPlexMono
+import com.tailscale.ipn.ui.theme.StardomTechnicalFont
 import com.tailscale.ipn.ui.theme.SpaceGrotesk
 import com.tailscale.ipn.ui.theme.StardomColors
 import com.tailscale.ipn.ui.theme.StardomDimensions
@@ -60,7 +62,7 @@ fun StardomRoutingPanel(
         Text(
             text = if (language == AppLanguage.RU) "МАРШРУТИЗАЦИЯ" else "ROUTING",
             color = StardomColors.TextSecondary,
-            fontFamily = IbmPlexMono,
+            fontFamily = StardomTechnicalFont(language),
             fontSize = 9.sp,
             letterSpacing = 2.sp)
 
@@ -112,14 +114,14 @@ fun StardomRoutingPanel(
               Text(
                   text = if (language == AppLanguage.RU) "АКТИВНЫЙ УЗЕЛ" else "ACTIVE NODE",
                   color = StardomColors.TextSecondary,
-                  fontFamily = IbmPlexMono,
+                  fontFamily = StardomTechnicalFont(language),
                   fontSize = 9.sp,
                   letterSpacing = 1.8.sp)
 
               Text(
                   text = "—",
                   color = StardomColors.TextSecondary,
-                  fontFamily = IbmPlexMono,
+                  fontFamily = StardomTechnicalFont(language),
                   fontSize = 9.sp,
                   letterSpacing = 1.5.sp)
             }
@@ -152,7 +154,7 @@ fun StardomRoutingPanel(
                 Text(
                     text = routingNodeDetails(activeServer, language),
                     color = StardomColors.TextSecondary,
-                    fontFamily = IbmPlexMono,
+                    fontFamily = StardomTechnicalFont(language),
                     fontSize = 9.sp,
                     lineHeight = 10.sp,
                     letterSpacing = 1.2.sp)
@@ -184,9 +186,11 @@ internal fun routingNodeTitle(
           if (language == AppLanguage.RU) "AUTO / ОЖИДАНИЕ УЗЛА" else "AUTO / NODE PENDING"
       activeServer == null ->
           if (language == AppLanguage.RU) "УЗЕЛ НЕ ВЫБРАН" else "NO NODE SELECTED"
-      connectionMode == ConnectionMode.AUTO -> "AUTO / ${activeServer.label}"
-      activeServer.city.isNotBlank() -> "${activeServer.label}: ${activeServer.city.uppercase()}"
-      else -> activeServer.label
+      connectionMode == ConnectionMode.AUTO ->
+          "AUTO / ${activeServer.label.capitalizeNodeNameForDisplay()}"
+      activeServer.city.isNotBlank() ->
+          "${activeServer.label.capitalizeNodeNameForDisplay()}: ${activeServer.city.uppercase()}"
+      else -> activeServer.label.capitalizeNodeNameForDisplay()
     }
 
 internal fun routingNodeDetails(activeServer: StarServerNode?, language: AppLanguage): String {
