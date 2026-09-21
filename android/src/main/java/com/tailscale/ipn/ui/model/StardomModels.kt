@@ -309,6 +309,42 @@ object StardomLocalization {
         AppLanguage.RU -> "← НАЗАД"
         AppLanguage.EN -> "← BACK"
       }
+  fun splitTunnelExpandList(lang: AppLanguage, count: Int): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЫБРАННЫЕ ПРИЛОЖЕНИЯ ($count) ▼"
+        AppLanguage.EN -> "SELECTED APPS ($count) ▼"
+      }
+
+  fun splitTunnelCollapseList(lang: AppLanguage, count: Int): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЫБРАННЫЕ ПРИЛОЖЕНИЯ ($count) ▲"
+        AppLanguage.EN -> "SELECTED APPS ($count) ▲"
+      }
+
+  fun splitTunnelEmptyList(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НЕТ ВЫБРАННЫХ ПРИЛОЖЕНИЙ"
+        AppLanguage.EN -> "NO APPS SELECTED"
+      }
+
+  fun splitTunnelEmptyListHint(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Нажмите «НАСТРОИТЬ →», чтобы добавить"
+        AppLanguage.EN -> "Tap 'CONFIGURE →' to add applications"
+      }
+
+  fun splitTunnelStatusBypassed(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОБХОД"
+        AppLanguage.EN -> "BYPASS"
+      }
+
+  fun splitTunnelStatusTunneled(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "В ТУННЕЛЕ"
+        AppLanguage.EN -> "TUNNELED"
+      }
+
 
   fun securitySection(lang: AppLanguage): String =
       when (lang) {

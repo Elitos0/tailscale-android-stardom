@@ -3,6 +3,7 @@
 
 package com.tailscale.ipn.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,22 +15,35 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
 import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.product.update.UpdateState
 import com.tailscale.ipn.ui.util.AppVersion
@@ -45,8 +59,8 @@ import com.tailscale.ipn.ui.theme.StardomColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StardomSettingsSheet(
-    selectedProtocol: VpnProtocol,
-    onSelectProtocol: (VpnProtocol) -> Unit,
+    selectedProtocol: VpnProtocol = VpnProtocol.WIREGUARD,
+    onSelectProtocol: (VpnProtocol) -> Unit = {},
     selectedDns: DnsProvider = DnsProvider.STARDOM_ZERO_KNOWLEDGE,
     onSelectDns: (DnsProvider) -> Unit = {},
     selectedLanguage: AppLanguage,
@@ -58,12 +72,13 @@ fun StardomSettingsSheet(
     onCheckForUpdate: () -> Unit = {},
     onOpenUpdateDialog: () -> Unit = {},
 ) {
-  val splitTunnelCount =
+  val selectedPackageNames =
       try {
-        UninitializedApp.get().selectedPackageNames().size
+        UninitializedApp.get().selectedPackageNames()
       } catch (_: Throwable) {
-        0
+        emptyList()
       }
+  val splitTunnelCount = selectedPackageNames.size
   val allowSelected =
       try {
         UninitializedApp.get().allowSelectedPackages()
@@ -73,6 +88,32 @@ fun StardomSettingsSheet(
   val badgeText =
       StardomLocalization.splitTunnelBypassBadge(
           selectedLanguage, splitTunnelCount, allowSelected)
+  var isAppListExpanded by remember { mutableStateOf(false) }
+  val context = LocalContext.current
+  val density = LocalDensity.current
+  val iconSizePx = remember(density) { with(density) { 24.dp.roundToPx() } }
+  val routedApps =
+      remember(selectedPackageNames, iconSizePx, context) {
+        val pm = context.packageManager
+        selectedPackageNames.map { pkg ->
+          val label =
+              try {
+                val appInfo = pm.getApplicationInfo(pkg, 0)
+                pm.getApplicationLabel(appInfo).toString()
+              } catch (_: Throwable) {
+                pkg
+              }
+          val iconBitmap =
+              try {
+                pm.getApplicationIcon(pkg)
+                    .toBitmap(width = iconSizePx, height = iconSizePx)
+                    .asImageBitmap()
+              } catch (_: Throwable) {
+                null
+              }
+          RoutedAppInfo(packageName = pkg, label = label, iconBitmap = iconBitmap)
+        }.sortedBy { it.label.lowercase() }
+      }
   ModalBottomSheet(
       onDismissRequest = onDismiss,
       sheetState = sheetState,
@@ -187,179 +228,6 @@ fun StardomSettingsSheet(
 
               Spacer(modifier = Modifier.height(18.dp))
 
-              // Section: Protocol Engine (WireGuard functional, others disabled Coming Soon)
-              SettingsSectionHeader(title = StardomLocalization.protocolSection(selectedLanguage))
-              Column(
-                  verticalArrangement = Arrangement.spacedBy(6.dp),
-                  modifier = Modifier.fillMaxWidth()) {
-                    VpnProtocol.entries.forEach { proto ->
-                      val isSelected = proto == selectedProtocol
-                      val isEnabled = proto.enabled
-
-                      Box(
-                          modifier =
-                              Modifier.fillMaxWidth()
-                                  .testTag("proto_option_${proto.name}")
-                                  .background(
-                                      if (isSelected) StardomColors.PanelSelected
-                                      else StardomColors.Panel)
-                                  .border(
-                                      1.dp,
-                                      if (isSelected) StardomColors.BorderStrong
-                                      else StardomColors.BorderFaint)
-                                  .clickable(enabled = isEnabled) {
-                                    if (isEnabled) onSelectProtocol(proto)
-                                  }
-                                  .padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()) {
-                                  Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier =
-                                            Modifier.size(10.dp)
-                                                .border(
-                                                    1.dp,
-                                                    if (isSelected) StardomColors.Selected
-                                                    else StardomColors.TextMuted),
-                                        contentAlignment = Alignment.Center) {
-                                          if (isSelected) {
-                                            Box(
-                                                modifier =
-                                                    Modifier.size(4.dp)
-                                                        .background(StardomColors.Selected))
-                                          }
-                                        }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                      Text(
-                                          text = proto.displayName,
-                                          color =
-                                              when {
-                                                !isEnabled -> StardomColors.TextMuted
-                                                isSelected -> StardomColors.TextPrimary
-                                                else -> StardomColors.TextSecondary
-                                              },
-                                          fontSize = 12.sp,
-                                          fontWeight = FontWeight.Medium,
-                                          fontFamily = SpaceGrotesk)
-                                      Spacer(Modifier.height(2.dp))
-                                      Text(
-                                          text = "CIPHER: ${proto.cipher} • PORT: ${proto.port}",
-                                          color = StardomColors.TextMuted,
-                                          fontSize = 9.sp,
-                                          fontFamily = StardomTechnicalFont(selectedLanguage))
-                                    }
-                                  }
-
-                                  if (isSelected) {
-                                    Text(
-                                        text = StardomLocalization.activeStatus(selectedLanguage),
-                                        color = StardomColors.TextPrimary,
-                                        fontSize = 9.sp,
-                                        fontFamily = StardomTechnicalFont(selectedLanguage),
-                                        letterSpacing = 1.sp)
-                                  } else if (!isEnabled) {
-                                    Text(
-                                        text =
-                                            StardomLocalization.comingSoonStatus(selectedLanguage),
-                                        color = StardomColors.TextMuted,
-                                        fontSize = 9.sp,
-                                        fontFamily = StardomTechnicalFont(selectedLanguage),
-                                        letterSpacing = 1.sp)
-                                  }
-                                }
-                          }
-                    }
-                  }
-
-              Spacer(modifier = Modifier.height(18.dp))
-
-              // Section: DNS Resolver (Informational / Route-Managed, others Coming Soon)
-              SettingsSectionHeader(title = StardomLocalization.dnsSection(selectedLanguage))
-              Column(
-                  verticalArrangement = Arrangement.spacedBy(6.dp),
-                  modifier = Modifier.fillMaxWidth()) {
-                    DnsProvider.entries.forEach { dns ->
-                      val isDefault = dns == DnsProvider.STARDOM_ZERO_KNOWLEDGE
-
-                      Box(
-                          modifier =
-                              Modifier.fillMaxWidth()
-                                  .testTag("dns_option_${dns.name}")
-                                  .background(
-                                      if (isDefault) StardomColors.PanelSelected
-                                      else StardomColors.Panel)
-                                  .border(
-                                      1.dp,
-                                      if (isDefault) StardomColors.BorderStrong
-                                      else StardomColors.BorderFaint)
-                                  .padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()) {
-                                  Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier =
-                                            Modifier.size(10.dp)
-                                                .border(
-                                                    1.dp,
-                                                    if (isDefault) StardomColors.Selected
-                                                    else StardomColors.TextMuted),
-                                        contentAlignment = Alignment.Center) {
-                                          if (isDefault) {
-                                            Box(
-                                                modifier =
-                                                    Modifier.size(4.dp)
-                                                        .background(StardomColors.Selected))
-                                          }
-                                        }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                      Text(
-                                          text = dns.displayName,
-                                          color =
-                                              if (isDefault) StardomColors.TextPrimary
-                                              else StardomColors.TextMuted,
-                                          fontSize = 12.sp,
-                                          fontWeight = FontWeight.Medium,
-                                          fontFamily = SpaceGrotesk)
-                                      Spacer(Modifier.height(2.dp))
-                                      Text(
-                                          text = "IP: ${dns.address}",
-                                          color = StardomColors.TextMuted,
-                                          fontSize = 9.sp,
-                                          fontFamily = StardomTechnicalFont(selectedLanguage))
-                                    }
-                                  }
-
-                                  if (isDefault) {
-                                    Text(
-                                        text =
-                                            StardomLocalization.dnsManagedStatus(selectedLanguage),
-                                        color = StardomColors.TextSecondary,
-                                        fontSize = 9.sp,
-                                        fontFamily = StardomTechnicalFont(selectedLanguage),
-                                        letterSpacing = 1.sp)
-                                  } else {
-                                    Text(
-                                        text =
-                                            StardomLocalization.comingSoonStatus(selectedLanguage),
-                                        color = StardomColors.TextMuted,
-                                        fontSize = 9.sp,
-                                        fontFamily = StardomTechnicalFont(selectedLanguage),
-                                        letterSpacing = 1.sp)
-                                  }
-                                }
-                          }
-                    }
-                  }
-
-
-              Spacer(modifier = Modifier.height(18.dp))
-
               // Section: App Split Tunneling
               SettingsSectionHeader(
                   title = StardomLocalization.splitTunnelingSection(selectedLanguage))
@@ -425,39 +293,157 @@ fun StardomSettingsSheet(
                               letterSpacing = 1.sp)
                         }
                   }
-              Spacer(modifier = Modifier.height(18.dp))
+              Spacer(modifier = Modifier.height(6.dp))
 
-              // Section: Security Toggles (Coming Soon stubs)
-              SettingsSectionHeader(title = StardomLocalization.securitySection(selectedLanguage))
-              Column(
-                  verticalArrangement = Arrangement.spacedBy(6.dp),
-                  modifier = Modifier.fillMaxWidth()) {
-                    SecurityToggleStubItem(
-                        title = StardomLocalization.killSwitchTitle(selectedLanguage),
-                        description = StardomLocalization.killSwitchDesc(selectedLanguage),
-                        language = selectedLanguage,
-                        testTag = "security_toggle_kill_switch")
+              // Expandable toggle bar
+              Box(
+                  modifier =
+                      Modifier.fillMaxWidth()
+                          .testTag("split_tunnel_toggle_bar")
+                          .background(StardomColors.Panel)
+                          .border(1.dp, StardomColors.BorderFaint)
+                          .clickable(onClickLabel = "Toggle routed apps list") {
+                            isAppListExpanded = !isAppListExpanded
+                          }
+                          .padding(horizontal = 12.dp, vertical = 8.dp),
+                  contentAlignment = Alignment.CenterStart) {
+                Text(
+                    text =
+                        if (isAppListExpanded)
+                          StardomLocalization.splitTunnelCollapseList(
+                              selectedLanguage, splitTunnelCount)
+                        else
+                          StardomLocalization.splitTunnelExpandList(
+                              selectedLanguage, splitTunnelCount),
+                    color = StardomColors.TextSecondary,
+                    fontSize = 9.sp,
+                    fontFamily = IbmPlexMono,
+                    letterSpacing = 1.sp)
+              }
 
-                    SecurityToggleStubItem(
-                        title = StardomLocalization.dnsGuardTitle(selectedLanguage),
-                        description = StardomLocalization.dnsGuardDesc(selectedLanguage),
-                        language = selectedLanguage,
-                        testTag = "security_toggle_dns_guard")
-
-                    SecurityToggleStubItem(
-                        title = StardomLocalization.obfuscationTitle(selectedLanguage),
-                        description = StardomLocalization.obfuscationDesc(selectedLanguage),
-                        language = selectedLanguage,
-                        testTag = "security_toggle_obfuscation")
-
-                    SecurityToggleStubItem(
-                        title = StardomLocalization.autoWifiTitle(selectedLanguage),
-                        description = StardomLocalization.autoWifiDesc(selectedLanguage),
-                        language = selectedLanguage,
-                        testTag = "security_toggle_auto_wifi")
+              if (isAppListExpanded) {
+                Spacer(modifier = Modifier.height(6.dp))
+                if (routedApps.isEmpty()) {
+                  Box(
+                      modifier =
+                          Modifier.fillMaxWidth()
+                              .testTag("split_tunnel_empty_state")
+                              .background(StardomColors.Panel)
+                              .border(1.dp, StardomColors.BorderFaint)
+                              .clickable(onClickLabel = "Configure apps") {
+                                onOpenSplitTunneling(selectedLanguage)
+                              }
+                              .padding(16.dp),
+                      contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                      Text(
+                          text = StardomLocalization.splitTunnelEmptyList(selectedLanguage),
+                          color = StardomColors.TextMuted,
+                          fontSize = 10.sp,
+                          fontFamily = SpaceGrotesk,
+                          fontWeight = FontWeight.Medium,
+                          letterSpacing = 1.sp)
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text(
+                          text =
+                              StardomLocalization.splitTunnelEmptyListHint(
+                                  selectedLanguage),
+                          color = StardomColors.TextSecondary,
+                          fontSize = 9.sp,
+                          fontFamily = StardomTechnicalFont(selectedLanguage),
+                          letterSpacing = 0.5.sp)
+                    }
                   }
+                } else {
+                  Column(
+                      modifier =
+                          Modifier.fillMaxWidth()
+                              .testTag("split_tunnel_routed_apps_list")
+                              .heightIn(max = 240.dp)
+                              .verticalScroll(rememberScrollState()),
+                      verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    routedApps.forEach { app ->
+                      Box(
+                          modifier =
+                              Modifier.fillMaxWidth()
+                                  .testTag("split_tunnel_routed_app_${app.packageName}")
+                                  .background(StardomColors.Panel)
+                                  .border(1.dp, StardomColors.BorderFaint)
+                                  .padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()) {
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              modifier = Modifier.weight(1f)) {
+                                if (app.iconBitmap != null) {
+                                  Image(
+                                      bitmap = app.iconBitmap,
+                                      contentDescription = null,
+                                      modifier =
+                                          Modifier.size(24.dp)
+                                              .clip(RoundedCornerShape(4.dp)))
+                                } else {
+                                  Box(
+                                      modifier =
+                                          Modifier.size(24.dp)
+                                              .background(StardomColors.PanelSelected),
+                                      contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = app.label.take(1).uppercase(),
+                                        color = StardomColors.TextMuted,
+                                        fontFamily = SpaceGrotesk,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold)
+                                  }
+                                }
 
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                  Text(
+                                      text = app.label,
+                                      color = StardomColors.TextPrimary,
+                                      fontFamily = SpaceGrotesk,
+                                      fontWeight = FontWeight.Medium,
+                                      fontSize = 11.sp,
+                                      maxLines = 1,
+                                      overflow = TextOverflow.Ellipsis)
+                                  Spacer(modifier = Modifier.height(1.dp))
+                                  Text(
+                                      text = app.packageName,
+                                      color = StardomColors.TextMuted,
+                                      fontFamily = IbmPlexMono,
+                                      fontSize = 8.sp,
+                                      maxLines = 1,
+                                      overflow = TextOverflow.Ellipsis)
+                                }
+                              }
+
+                          Spacer(modifier = Modifier.width(8.dp))
+
+                          Text(
+                              text =
+                                  if (allowSelected) {
+                                    "[${StardomLocalization.splitTunnelStatusTunneled(selectedLanguage)}]"
+                                  } else {
+                                    "[${StardomLocalization.splitTunnelStatusBypassed(selectedLanguage)}]"
+                                  },
+                              color =
+                                  if (allowSelected) StardomColors.Selected
+                                  else StardomColors.TextSecondary,
+                              fontFamily = IbmPlexMono,
+                              fontSize = 8.sp,
+                              letterSpacing = 0.5.sp)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
               Spacer(modifier = Modifier.height(18.dp))
+
 
               // Section: Client Update
               SettingsSectionHeader(title = StardomLocalization.clientUpdateSection(selectedLanguage))
@@ -593,47 +579,8 @@ private fun SettingsSectionHeader(title: String) {
       modifier = Modifier.padding(bottom = 8.dp))
 }
 
-@Composable
-private fun SecurityToggleStubItem(
-    title: String,
-    description: String,
-    language: AppLanguage,
-    testTag: String
-) {
-  Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .testTag(testTag)
-              .background(StardomColors.Panel)
-              .border(1.dp, StardomColors.BorderFaint)
-              .padding(12.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()) {
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    color = StardomColors.TextMuted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    fontFamily = SpaceGrotesk)
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = description,
-                    color = StardomColors.TextMuted,
-                    fontSize = 9.sp,
-                    fontFamily = IbmPlexMono)
-              }
-
-              Spacer(Modifier.width(12.dp))
-
-              Text(
-                  text = StardomLocalization.comingSoonStatus(language),
-                  color = StardomColors.TextMuted,
-                  fontSize = 9.sp,
-                  fontFamily = IbmPlexMono,
-                  letterSpacing = 1.sp)
-            }
-      }
-}
+private data class RoutedAppInfo(
+    val packageName: String,
+    val label: String,
+    val iconBitmap: ImageBitmap?,
+)

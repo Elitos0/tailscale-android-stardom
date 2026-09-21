@@ -77,7 +77,13 @@ class StardomSettingsSheetTest {
               StardomLocalization.splitTunnelBypassBadge(lang, 0, false),
               StardomLocalization.splitTunnelBypassBadge(lang, 2, true),
               StardomLocalization.splitTunnelConfigureBtn(lang),
-              StardomLocalization.splitTunnelBackBtn(lang))
+              StardomLocalization.splitTunnelBackBtn(lang),
+              StardomLocalization.splitTunnelExpandList(lang, 2),
+              StardomLocalization.splitTunnelCollapseList(lang, 2),
+              StardomLocalization.splitTunnelEmptyList(lang),
+              StardomLocalization.splitTunnelEmptyListHint(lang),
+              StardomLocalization.splitTunnelStatusBypassed(lang),
+              StardomLocalization.splitTunnelStatusTunneled(lang))
 
       for (str in strings) {
         assertFalse(
@@ -169,5 +175,38 @@ class StardomSettingsSheetTest {
 
     onSelectLanguage(AppLanguage.RU)
     assertEquals(AppLanguage.RU, currentLanguage)
+  }
+
+  @Test
+  fun splitTunnelingExpandableListLocalizationStringsAreValid() {
+    for (lang in AppLanguage.entries) {
+      val expand = StardomLocalization.splitTunnelExpandList(lang, 5)
+      val collapse = StardomLocalization.splitTunnelCollapseList(lang, 5)
+      val empty = StardomLocalization.splitTunnelEmptyList(lang)
+      val emptyHint = StardomLocalization.splitTunnelEmptyListHint(lang)
+      val bypassed = StardomLocalization.splitTunnelStatusBypassed(lang)
+      val tunneled = StardomLocalization.splitTunnelStatusTunneled(lang)
+
+      assertTrue(expand.contains("5"))
+      assertTrue(expand.contains("▼"))
+      assertTrue(collapse.contains("5"))
+      assertTrue(collapse.contains("▲"))
+      assertTrue(empty.isNotEmpty())
+      assertTrue(emptyHint.isNotEmpty())
+      assertTrue(bypassed.isNotEmpty())
+      assertTrue(tunneled.isNotEmpty())
+
+      if (lang == AppLanguage.RU) {
+        assertEquals("ОБХОД", bypassed)
+        assertEquals("В ТУННЕЛЕ", tunneled)
+        assertEquals("НЕТ ВЫБРАННЫХ ПРИЛОЖЕНИЙ", empty)
+        assertEquals("Нажмите «НАСТРОИТЬ →», чтобы добавить", emptyHint)
+      } else {
+        assertEquals("BYPASS", bypassed)
+        assertEquals("TUNNELED", tunneled)
+        assertEquals("NO APPS SELECTED", empty)
+        assertEquals("Tap 'CONFIGURE →' to add applications", emptyHint)
+      }
+    }
   }
 }
