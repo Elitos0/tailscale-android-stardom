@@ -54,6 +54,12 @@ import com.tailscale.ipn.product.policy.VpnStopCommandDispatcher
 import com.tailscale.ipn.product.policy.VpnStopReason
 import com.tailscale.ipn.product.policy.VpnWantRunningPersistence
 import com.tailscale.ipn.product.startStardomProductObservers
+import com.tailscale.ipn.product.policy.VpnRuntimeState
+import com.tailscale.ipn.product.ondemand.OnDemandController
+import com.tailscale.ipn.product.ondemand.OnDemandRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.tailscale.ipn.ui.localapi.Client
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
@@ -88,6 +94,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import libtailscale.Libtailscale
+
 
 class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -142,6 +149,24 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   }
   val vpnStartDispatchBoundary: VpnStartDispatchBoundary by lazy {
     VpnStartDispatchBoundary(vpnEntitlementController)
+  }
+  val isVpnRunningFlow: StateFlow<Boolean> by lazy {
+    val flow = MutableStateFlow(vpnRuntimeTracker.state.value.isStartingOrRunning())
+    applicationScope.launch {
+      vpnRuntimeTracker.state.collect { state ->
+        flow.value = state.isStartingOrRunning()
+      }
+    }
+    flow.asStateFlow()
+  }
+  val onDemandController: OnDemandController by lazy {
+    OnDemandController(
+        networkFlow = NetworkChangeCallback.activeNetworkSnapshot,
+        configFlow = onDemandRepository.config,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = { startVPN(VpnStartOrigin.OnDemand) },
+        onDisconnect = { stopVPN() },
+    )
   }
   private val serializedWantRunningWriter: SerializedVpnWantRunningWriter by lazy {
     SerializedVpnWantRunningWriter(
@@ -294,6 +319,8 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     healthNotifier = HealthNotifier(Notifier.health, Notifier.state, applicationScope)
     connectivityManager = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
+    NetworkChangeCallback.setApplicationContext(this)
+    onDemandController.start(applicationScope)
     initViewModels()
     applicationScope.launch {
       val restrictionsManager =
@@ -743,6 +770,7 @@ open class UninitializedApp : Application() {
       }
     }
   }
+  val onDemandRepository by lazy { OnDemandRepository(this) }
 
   protected fun setUnprotectedInstance(instance: UninitializedApp) {
     appInstance = instance
@@ -780,12 +808,17 @@ open class UninitializedApp : Application() {
   @JvmOverloads
   fun startVPN(origin: VpnStartOrigin = VpnStartOrigin.AppStart) {
     val initializedApp = this as? App ?: return
+    if (origin == VpnStartOrigin.AppStart || origin == VpnStartOrigin.QuickSettings) {
+      initializedApp.onDemandController.notifyManualVpnToggle(true)
+    }
     initializedApp.applicationScope.launch { logVpnStartResult(startVPNIfAuthorized(origin)) }
   }
 
   suspend fun startVPNIfAuthorized(origin: VpnStartOrigin): VpnStartDispatchResult {
     val initializedApp = this as? App ?: return VpnStartDispatchResult.Denied
-    if (origin == VpnStartOrigin.QuickSettings || origin == VpnStartOrigin.InternalWorker) {
+    if (origin == VpnStartOrigin.QuickSettings ||
+        origin == VpnStartOrigin.InternalWorker ||
+        origin == VpnStartOrigin.OnDemand) {
       initializedApp.startForegroundForLogin()
     }
     if (Notifier.prefs.value == null) {
@@ -809,7 +842,9 @@ open class UninitializedApp : Application() {
           pendingIntent.send()
         }
     if (result is VpnStartDispatchResult.Denied &&
-        (origin == VpnStartOrigin.QuickSettings || origin == VpnStartOrigin.InternalWorker)) {
+        (origin == VpnStartOrigin.QuickSettings ||
+         origin == VpnStartOrigin.InternalWorker ||
+         origin == VpnStartOrigin.OnDemand)) {
       initializedApp.stopVPN()
     }
     return result
@@ -831,6 +866,8 @@ open class UninitializedApp : Application() {
   }
 
   fun stopVPN() {
+    val initializedApp = this as? App
+    initializedApp?.onDemandController?.notifyManualVpnToggle(false)
     val intent = Intent(this, IPNService::class.java).apply { action = IPNService.ACTION_STOP_VPN }
     try {
       startService(intent)

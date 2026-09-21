@@ -25,6 +25,7 @@ enum class StardomRoute(val path: String) {
   NOTIFICATIONS("notifications"),
   INTRO("intro"),
   LOGIN_WITH_STARDOM("loginWithStardom"),
+  ON_DEMAND("onDemand"),
 }
 
 object StardomProductionRoutes {

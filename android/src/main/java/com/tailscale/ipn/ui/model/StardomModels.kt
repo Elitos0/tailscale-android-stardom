@@ -689,4 +689,149 @@ object StardomLocalization {
         AppLanguage.RU -> "НАСТРОЙКИ"
         AppLanguage.EN -> "SETTINGS"
       }
+
+  fun onDemandSection(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "АВТОМАТИЗАЦИЯ СЕТИ"
+        AppLanguage.EN -> "ON DEMAND AUTOMATION"
+      }
+
+  fun onDemandTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "РЕЖИМ ON DEMAND"
+        AppLanguage.EN -> "ON DEMAND ROUTING"
+      }
+
+  fun onDemandSubtitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "АВТОМАТИЧЕСКОЕ ВКЛЮЧЕНИЕ И ОТКЛЮЧЕНИЕ VPN"
+        AppLanguage.EN -> "AUTO CONNECT AND DISCONNECT BY NETWORK"
+      }
+
+  fun onDemandCardBadge(
+      lang: AppLanguage,
+      enabled: Boolean,
+      isCellularConnect: Boolean,
+      isWifiDisconnect: Boolean
+  ): String =
+      when (lang) {
+        AppLanguage.RU ->
+            if (!enabled) "ОТКЛЮЧЕНО"
+            else if (isCellularConnect && isWifiDisconnect) "МОБИЛЬНАЯ [ВКЛ] // WI-FI [ОТКЛ]"
+            else if (isCellularConnect) "МОБИЛЬНАЯ СЕТЬ [ВКЛ]"
+            else "АКТИВЕН"
+        AppLanguage.EN ->
+            if (!enabled) "DISABLED"
+            else if (isCellularConnect && isWifiDisconnect) "CELLULAR [ON] // WI-FI [OFF]"
+            else if (isCellularConnect) "CELLULAR [ON]"
+            else "ACTIVE"
+      }
+
+  fun onDemandEnableToggle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "АКТИВИРОВАТЬ ON DEMAND"
+        AppLanguage.EN -> "ENABLE ON DEMAND"
+      }
+
+  fun onDemandCellularRuleTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "МОБИЛЬНАЯ СЕТЬ // CELLULAR"
+        AppLanguage.EN -> "CELLULAR NETWORK"
+      }
+
+  fun onDemandCellularRuleDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Действие при подключении к мобильному интернету"
+        AppLanguage.EN -> "Action when connected to cellular data"
+      }
+
+  fun onDemandWifiRuleTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "БЕСПРОВОДНАЯ СЕТЬ // WI-FI"
+        AppLanguage.EN -> "WI-FI NETWORKS"
+      }
+
+  fun onDemandWifiRuleDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Действие при подключении к Wi-Fi"
+        AppLanguage.EN -> "Action when connected to Wi-Fi"
+      }
+
+  fun onDemandWifiScopeAll(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДЛЯ ВСЕХ СЕТЕЙ WI-FI"
+        AppLanguage.EN -> "ALL WI-FI NETWORKS"
+      }
+
+  fun onDemandWifiScopeSelected(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ТОЛЬКО ДЛЯ ВЫБРАННЫХ СЕТЕЙ"
+        AppLanguage.EN -> "ONLY SELECTED NETWORKS"
+      }
+
+  fun onDemandUnlistedWifiTitle(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПРОЧИЕ СЕТИ WI-FI"
+        AppLanguage.EN -> "UNLISTED WI-FI NETWORKS"
+      }
+
+  fun onDemandUnlistedWifiDesc(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Действие для Wi-Fi, не входящих в список выше"
+        AppLanguage.EN -> "Action for Wi-Fi networks not listed above"
+      }
+
+  fun onDemandActionConnect(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ВКЛЮЧАТЬ VPN"
+        AppLanguage.EN -> "CONNECT VPN"
+      }
+
+  fun onDemandActionDisconnect(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ОТКЛЮЧАТЬ VPN"
+        AppLanguage.EN -> "DISCONNECT VPN"
+      }
+
+  fun onDemandActionNothing(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НЕ ИЗМЕНЯТЬ"
+        AppLanguage.EN -> "DO NOTHING"
+      }
+
+  fun onDemandAddCurrentSsid(lang: AppLanguage, ssid: String): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОБАВИТЬ ТЕКУЩУЮ СЕТЬ: $ssid"
+        AppLanguage.EN -> "ADD CURRENT NETWORK: $ssid"
+      }
+
+  fun onDemandNoCurrentSsid(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ТЕКУЩАЯ СЕТЬ НЕ ОПРЕДЕЛЕНА"
+        AppLanguage.EN -> "NO CURRENT WI-FI DETECTED"
+      }
+
+  fun onDemandSelectedSsidsHeader(lang: AppLanguage, count: Int): String =
+      when (lang) {
+        AppLanguage.RU -> "ВЫБРАННЫЕ СЕТИ ($count)"
+        AppLanguage.EN -> "SELECTED NETWORKS ($count)"
+      }
+
+  fun onDemandNoSelectedSsids(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НЕТ ДОБАВЛЕННЫХ СЕТЕЙ"
+        AppLanguage.EN -> "NO NETWORKS ADDED"
+      }
+
+  fun onDemandLocationPermissionNotice(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Для определения имени конкретной Wi-Fi сети требуется системное разрешение на геолокацию."
+        AppLanguage.EN -> "Android requires location permission to detect specific Wi-Fi network names."
+      }
+
+  fun onDemandLocationPermissionGrant(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ПРЕДОСТАВИТЬ ДОСТУП"
+        AppLanguage.EN -> "GRANT PERMISSION"
+      }
 }

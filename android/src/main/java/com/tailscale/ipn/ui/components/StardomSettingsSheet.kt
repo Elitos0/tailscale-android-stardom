@@ -28,6 +28,7 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.tailscale.ipn.UninitializedApp
 import com.tailscale.ipn.product.update.UpdateState
+import com.tailscale.ipn.product.ondemand.OnDemandAction
 import com.tailscale.ipn.ui.util.AppVersion
 import com.tailscale.ipn.ui.model.AppLanguage
 import com.tailscale.ipn.ui.model.DnsProvider
@@ -68,6 +70,7 @@ fun StardomSettingsSheet(
     sheetState: SheetState,
     onDismiss: () -> Unit,
     onOpenSplitTunneling: (AppLanguage) -> Unit = {},
+    onOpenOnDemand: (AppLanguage) -> Unit = {},
     updateState: UpdateState = UpdateState.Idle,
     onCheckForUpdate: () -> Unit = {},
     onOpenUpdateDialog: () -> Unit = {},
@@ -85,6 +88,15 @@ fun StardomSettingsSheet(
       } catch (_: Throwable) {
         false
       }
+  val onDemandRepo = remember { runCatching { UninitializedApp.get().onDemandRepository }.getOrNull() }
+  val onDemandConfig by onDemandRepo?.config?.collectAsState() ?: remember { mutableStateOf(null) }
+  val onDemandEnabled = onDemandConfig?.enabled == true
+  val onDemandBadge =
+      StardomLocalization.onDemandCardBadge(
+          selectedLanguage,
+          onDemandEnabled,
+          onDemandConfig?.cellularAction == OnDemandAction.CONNECT,
+          onDemandConfig?.wifiAction == OnDemandAction.DISCONNECT)
   val badgeText =
       StardomLocalization.splitTunnelBypassBadge(
           selectedLanguage, splitTunnelCount, allowSelected)
@@ -443,6 +455,70 @@ fun StardomSettingsSheet(
                 }
               }
               Spacer(modifier = Modifier.height(18.dp))
+              // Section: On Demand Automation
+              SettingsSectionHeader(title = StardomLocalization.onDemandSection(selectedLanguage))
+              Box(
+                  modifier =
+                      Modifier.fillMaxWidth()
+                          .testTag("on_demand_card")
+                          .background(StardomColors.Panel)
+                          .border(1.dp, StardomColors.Border)
+                          .clickable(onClickLabel = "Open on demand settings") {
+                            onOpenOnDemand(selectedLanguage)
+                          }
+                          .padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()) {
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier =
+                                        Modifier.size(10.dp)
+                                            .border(
+                                                1.dp,
+                                                if (onDemandEnabled)
+                                                    StardomColors.Selected
+                                                else StardomColors.TextMuted),
+                                    contentAlignment = Alignment.Center) {
+                                      if (onDemandEnabled) {
+                                        Box(
+                                            modifier =
+                                                Modifier.size(4.dp)
+                                                    .background(StardomColors.Selected))
+                                      }
+                                    }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                  Text(
+                                      text = StardomLocalization.onDemandTitle(selectedLanguage),
+                                      color = StardomColors.TextPrimary,
+                                      fontSize = 12.sp,
+                                      fontWeight = FontWeight.Medium,
+                                      fontFamily = SpaceGrotesk)
+                                  Spacer(Modifier.height(2.dp))
+                                  Text(
+                                      text = onDemandBadge,
+                                      color =
+                                          if (onDemandEnabled) StardomColors.Selected
+                                          else StardomColors.TextMuted,
+                                      fontSize = 9.sp,
+                                      fontFamily = StardomTechnicalFont(selectedLanguage))
+                                }
+                              }
+
+                          Text(
+                              text = StardomLocalization.splitTunnelConfigureBtn(selectedLanguage),
+                              color = StardomColors.TextPrimary,
+                              fontSize = 9.sp,
+                              fontFamily = StardomTechnicalFont(selectedLanguage),
+                              letterSpacing = 1.sp)
+                        }
+                  }
+              Spacer(modifier = Modifier.height(18.dp))
+
 
 
               // Section: Client Update

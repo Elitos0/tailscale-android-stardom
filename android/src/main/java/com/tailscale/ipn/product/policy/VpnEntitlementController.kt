@@ -38,6 +38,7 @@ enum class VpnStartOrigin {
   StickyRestart,
   QuickSettings,
   InternalWorker,
+  OnDemand,
 }
 
 sealed interface ExitNodeMutation {

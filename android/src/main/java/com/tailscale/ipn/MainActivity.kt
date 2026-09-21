@@ -86,6 +86,7 @@ import com.tailscale.ipn.ui.view.PermissionsView
 import com.tailscale.ipn.ui.view.PrimaryActionButton
 import com.tailscale.ipn.ui.view.RunExitNodeView
 import com.tailscale.ipn.ui.view.SearchView
+import com.tailscale.ipn.ui.view.StardomOnDemandView
 import com.tailscale.ipn.ui.view.SettingsView
 import com.tailscale.ipn.ui.view.SplitTunnelAppPickerView
 import com.tailscale.ipn.ui.view.SubnetRoutingView
@@ -338,6 +339,11 @@ class MainActivity : ComponentActivity() {
                             navController.currentBackStackEntry?.savedStateHandle?.set(
                                 "stardom_language", language)
                             navController.navigate(StardomRoute.SPLIT_TUNNELING.path)
+                          },
+                          onNavigateToOnDemand = { language ->
+                            navController.currentBackStackEntry?.savedStateHandle?.set(
+                                "stardom_language", language)
+                            navController.navigate(StardomRoute.ON_DEMAND.path)
                           })
                   val settingsNav =
                       SettingsNav(
@@ -459,6 +465,15 @@ class MainActivity : ComponentActivity() {
                             "stardom_language") ?: AppLanguage.RU
                     SplitTunnelAppPickerView(
                         backToSettings = backTo(StardomRoute.MAIN.path), language = language)
+                  }
+                  composable(StardomRoute.ON_DEMAND.path) {
+                    val language =
+                        navController.previousBackStackEntry?.savedStateHandle?.get<AppLanguage>(
+                            "stardom_language") ?: AppLanguage.RU
+                    StardomOnDemandView(
+                        onBack = backTo(StardomRoute.MAIN.path),
+                        language = language,
+                    )
                   }
                   composable(StardomRoute.TAILNET_LOCK.path) {
                     TailnetLockSetupView(backTo(StardomRoute.SETTINGS.path))

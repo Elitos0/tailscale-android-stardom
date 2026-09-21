@@ -83,7 +83,31 @@ class StardomSettingsSheetTest {
               StardomLocalization.splitTunnelEmptyList(lang),
               StardomLocalization.splitTunnelEmptyListHint(lang),
               StardomLocalization.splitTunnelStatusBypassed(lang),
-              StardomLocalization.splitTunnelStatusTunneled(lang))
+              StardomLocalization.splitTunnelStatusTunneled(lang),
+              StardomLocalization.onDemandSection(lang),
+              StardomLocalization.onDemandTitle(lang),
+              StardomLocalization.onDemandSubtitle(lang),
+              StardomLocalization.onDemandCardBadge(lang, false, false, false),
+              StardomLocalization.onDemandCardBadge(lang, true, true, true),
+              StardomLocalization.onDemandCardBadge(lang, true, true, false),
+              StardomLocalization.onDemandEnableToggle(lang),
+              StardomLocalization.onDemandCellularRuleTitle(lang),
+              StardomLocalization.onDemandCellularRuleDesc(lang),
+              StardomLocalization.onDemandWifiRuleTitle(lang),
+              StardomLocalization.onDemandWifiRuleDesc(lang),
+              StardomLocalization.onDemandWifiScopeAll(lang),
+              StardomLocalization.onDemandWifiScopeSelected(lang),
+              StardomLocalization.onDemandUnlistedWifiTitle(lang),
+              StardomLocalization.onDemandUnlistedWifiDesc(lang),
+              StardomLocalization.onDemandActionConnect(lang),
+              StardomLocalization.onDemandActionDisconnect(lang),
+              StardomLocalization.onDemandActionNothing(lang),
+              StardomLocalization.onDemandAddCurrentSsid(lang, "Home-Wifi"),
+              StardomLocalization.onDemandNoCurrentSsid(lang),
+              StardomLocalization.onDemandSelectedSsidsHeader(lang, 3),
+              StardomLocalization.onDemandNoSelectedSsids(lang),
+              StardomLocalization.onDemandLocationPermissionNotice(lang),
+              StardomLocalization.onDemandLocationPermissionGrant(lang))
 
       for (str in strings) {
         assertFalse(
@@ -206,6 +230,29 @@ class StardomSettingsSheetTest {
         assertEquals("TUNNELED", tunneled)
         assertEquals("NO APPS SELECTED", empty)
         assertEquals("Tap 'CONFIGURE →' to add applications", emptyHint)
+      }
+    }
+  }
+
+  @Test
+  fun onDemandLocalizationAndBadgeLogic() {
+    for (lang in AppLanguage.entries) {
+      val badgeDisabled = StardomLocalization.onDemandCardBadge(lang, false, false, false)
+      val badgeCellOnly = StardomLocalization.onDemandCardBadge(lang, true, true, true)
+      val badgeActive = StardomLocalization.onDemandCardBadge(lang, true, false, false)
+
+      assertTrue(badgeDisabled.isNotBlank())
+      assertTrue(badgeCellOnly.isNotBlank())
+      assertTrue(badgeActive.isNotBlank())
+
+      if (lang == AppLanguage.RU) {
+        assertEquals("ОТКЛЮЧЕНО", badgeDisabled)
+        assertEquals("МОБИЛЬНАЯ [ВКЛ] // WI-FI [ОТКЛ]", badgeCellOnly)
+        assertEquals("АКТИВЕН", badgeActive)
+      } else {
+        assertEquals("DISABLED", badgeDisabled)
+        assertEquals("CELLULAR [ON] // WI-FI [OFF]", badgeCellOnly)
+        assertEquals("ACTIVE", badgeActive)
       }
     }
   }

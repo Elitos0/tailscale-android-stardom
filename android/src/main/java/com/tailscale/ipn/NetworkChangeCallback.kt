@@ -12,6 +12,18 @@ import com.tailscale.ipn.util.TSLog
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import libtailscale.Libtailscale
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.wifi.WifiInfo
+import android.net.wifi.WifiManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import com.tailscale.ipn.product.ondemand.ActiveNetworkSnapshot
+import com.tailscale.ipn.product.ondemand.NetworkTransport
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal data class NetworkCandidate<T>(
     val value: T,
@@ -72,6 +84,14 @@ object NetworkChangeCallback {
 
   fun setUnderlyingNetworkListener(listener: ((Network?) -> Unit)?) {
     underlyingNetworkListener = listener
+  }
+  private val _activeNetworkSnapshot = MutableStateFlow(ActiveNetworkSnapshot())
+  val activeNetworkSnapshot: StateFlow<ActiveNetworkSnapshot> = _activeNetworkSnapshot.asStateFlow()
+
+  @Volatile private var appContext: Context? = null
+
+  fun setApplicationContext(context: Context) {
+    appContext = context.applicationContext
   }
 
   // monitorDnsChanges sets up a network callback to monitor changes to the
@@ -192,6 +212,7 @@ object NetworkChangeCallback {
         TAG,
         "$why: cachedDefaultNetwork=$newNetwork iface=${cachedDefaultInterfaceName ?: "none"}",
     )
+    updateActiveNetworkSnapshotLocked(info)
 
     if (newNetwork != oldNetwork) {
       underlyingNetworkListener?.invoke(newNetwork)
@@ -228,6 +249,7 @@ object NetworkChangeCallback {
       cachedDefaultNetworkInfo = null
       cachedDefaultInterfaceName = null
       underlyingNetworkListener = null
+      _activeNetworkSnapshot.value = ActiveNetworkSnapshot()
     }
   }
 
@@ -270,5 +292,73 @@ object NetworkChangeCallback {
       Libtailscale.onGatewayChanged(gatewayIP)
       Libtailscale.onDNSConfigChanged(linkProps.interfaceName)
     }
+  }
+
+  private fun updateActiveNetworkSnapshotLocked(info: NetworkInfo?) {
+    val caps = info?.caps
+    if (caps == null) {
+      _activeNetworkSnapshot.value = ActiveNetworkSnapshot(
+          transport = NetworkTransport.NONE,
+          ssid = null,
+          isValidated = false,
+      )
+      return
+    }
+
+    val isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    val transport = when {
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkTransport.WIFI
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> NetworkTransport.CELLULAR
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkTransport.ETHERNET
+      else -> NetworkTransport.NONE
+    }
+
+    val ssid = if (transport == NetworkTransport.WIFI) {
+      extractWifiSsid(caps)
+    } else {
+      null
+    }
+
+    _activeNetworkSnapshot.value = ActiveNetworkSnapshot(
+        transport = transport,
+        ssid = ssid,
+        isValidated = isValidated,
+    )
+  }
+
+  private fun extractWifiSsid(caps: NetworkCapabilities): String? {
+    val context = appContext ?: return null
+
+    val hasLocationPermission = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+
+    if (!hasLocationPermission) {
+      return null
+    }
+
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val wifiInfo = caps.transportInfo as? WifiInfo
+        val rawSsid = wifiInfo?.ssid
+        if (!rawSsid.isNullOrBlank() && rawSsid != WifiManager.UNKNOWN_SSID && rawSsid != "<unknown ssid>") {
+          return rawSsid.removeSurrounding("\"")
+        }
+      }
+
+      val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+      val rawSsid = wifiManager?.connectionInfo?.ssid
+      if (!rawSsid.isNullOrBlank() && rawSsid != WifiManager.UNKNOWN_SSID && rawSsid != "<unknown ssid>") {
+        return rawSsid.removeSurrounding("\"")
+      }
+    } catch (e: Exception) {
+      TSLog.w(TAG, "Failed to extract Wi-Fi SSID: ${e.message}")
+    }
+
+    return null
   }
 }
