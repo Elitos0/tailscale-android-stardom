@@ -107,7 +107,18 @@ class StardomSettingsSheetTest {
               StardomLocalization.onDemandSelectedSsidsHeader(lang, 3),
               StardomLocalization.onDemandNoSelectedSsids(lang),
               StardomLocalization.onDemandLocationPermissionNotice(lang),
-              StardomLocalization.onDemandLocationPermissionGrant(lang))
+              StardomLocalization.onDemandLocationPermissionGrant(lang),
+              StardomLocalization.onDemandCurrentNetworkHeader(lang),
+              StardomLocalization.onDemandKnownNetworksHeader(lang),
+              StardomLocalization.onDemandNoKnownNetworks(lang),
+              StardomLocalization.onDemandNearbyNetworksHeader(lang),
+              StardomLocalization.onDemandScanNearbyBtn(lang),
+              StardomLocalization.onDemandScanning(lang),
+              StardomLocalization.onDemandNoNearbyNetworks(lang),
+              StardomLocalization.onDemandAddManualHeader(lang),
+              StardomLocalization.onDemandAddBtn(lang),
+              StardomLocalization.onDemandAddedBadge(lang),
+              StardomLocalization.onDemandAddAction(lang))
 
       for (str in strings) {
         assertFalse(
@@ -253,6 +264,61 @@ class StardomSettingsSheetTest {
         assertEquals("DISABLED", badgeDisabled)
         assertEquals("CELLULAR [ON] // WI-FI [OFF]", badgeCellOnly)
         assertEquals("ACTIVE", badgeActive)
+      }
+    }
+  }
+
+  @Test
+  fun onDemandWifiSelectorLocalizationStringsAreValid() {
+    for (lang in AppLanguage.entries) {
+      val currentHdr = StardomLocalization.onDemandCurrentNetworkHeader(lang)
+      val knownHdr = StardomLocalization.onDemandKnownNetworksHeader(lang)
+      val noKnown = StardomLocalization.onDemandNoKnownNetworks(lang)
+      val nearbyHdr = StardomLocalization.onDemandNearbyNetworksHeader(lang)
+      val scanBtn = StardomLocalization.onDemandScanNearbyBtn(lang)
+      val scanning = StardomLocalization.onDemandScanning(lang)
+      val noNearby = StardomLocalization.onDemandNoNearbyNetworks(lang)
+      val addManualHdr = StardomLocalization.onDemandAddManualHeader(lang)
+      val addBtn = StardomLocalization.onDemandAddBtn(lang)
+      val addedBadge = StardomLocalization.onDemandAddedBadge(lang)
+      val addAction = StardomLocalization.onDemandAddAction(lang)
+
+      assertTrue(currentHdr.isNotBlank())
+      assertTrue(knownHdr.isNotBlank())
+      assertTrue(noKnown.isNotBlank())
+      assertTrue(nearbyHdr.isNotBlank())
+      assertTrue(scanBtn.isNotBlank())
+      assertTrue(scanning.isNotBlank())
+      assertTrue(noNearby.isNotBlank())
+      assertTrue(addManualHdr.isNotBlank())
+      assertTrue(addBtn.isNotBlank())
+      assertTrue(addedBadge.isNotBlank())
+      assertTrue(addAction.isNotBlank())
+
+      if (lang == AppLanguage.RU) {
+        assertEquals("ТЕКУЩЕЕ ПОДКЛЮЧЕНИЕ", currentHdr)
+        assertEquals("ИЗВЕСТНЫЕ СЕТИ STARDOM", knownHdr)
+        assertEquals("НЕТ ИЗВЕСТНЫХ СЕТЕЙ (запоминаются при подключении)", noKnown)
+        assertEquals("СЕТИ ПОБЛИЗОСТИ", nearbyHdr)
+        assertEquals("СКАНИРОВАТЬ ЭФИР", scanBtn)
+        assertEquals("СКАНИРОВАНИЕ...", scanning)
+        assertEquals("СЕТИ ПОБЛИЗОСТИ НЕ НАЙДЕНЫ", noNearby)
+        assertEquals("ДОБАВИТЬ ВРУЧНУЮ", addManualHdr)
+        assertEquals("ДОБАВИТЬ", addBtn)
+        assertEquals("[ В СПИСКЕ ]", addedBadge)
+        assertEquals("[ + ВЫБРАТЬ ]", addAction)
+      } else {
+        assertEquals("CURRENT CONNECTION", currentHdr)
+        assertEquals("KNOWN BY STARDOM", knownHdr)
+        assertEquals("NO KNOWN NETWORKS (auto-saved upon connection)", noKnown)
+        assertEquals("NEARBY NETWORKS", nearbyHdr)
+        assertEquals("SCAN NEARBY NETWORKS", scanBtn)
+        assertEquals("SCANNING...", scanning)
+        assertEquals("NO NEARBY NETWORKS FOUND", noNearby)
+        assertEquals("ADD MANUALLY", addManualHdr)
+        assertEquals("ADD", addBtn)
+        assertEquals("[ ADDED ]", addedBadge)
+        assertEquals("[ + SELECT ]", addAction)
       }
     }
   }

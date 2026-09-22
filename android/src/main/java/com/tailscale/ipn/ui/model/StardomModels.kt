@@ -852,4 +852,70 @@ object StardomLocalization {
         AppLanguage.RU -> "ДОБАВИТЬ"
         AppLanguage.EN -> "ADD"
       }
+
+  fun onDemandCurrentNetworkHeader(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ТЕКУЩЕЕ ПОДКЛЮЧЕНИЕ"
+        AppLanguage.EN -> "CURRENT CONNECTION"
+      }
+
+  fun onDemandKnownNetworksHeader(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ИЗВЕСТНЫЕ СЕТИ STARDOM"
+        AppLanguage.EN -> "KNOWN BY STARDOM"
+      }
+
+  fun onDemandNoKnownNetworks(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НЕТ ИЗВЕСТНЫХ СЕТЕЙ (запоминаются при подключении)"
+        AppLanguage.EN -> "NO KNOWN NETWORKS (auto-saved upon connection)"
+      }
+
+  fun onDemandNearbyNetworksHeader(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СЕТИ ПОБЛИЗОСТИ"
+        AppLanguage.EN -> "NEARBY NETWORKS"
+      }
+
+  fun onDemandScanNearbyBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СКАНИРОВАТЬ ЭФИР"
+        AppLanguage.EN -> "SCAN NEARBY NETWORKS"
+      }
+
+  fun onDemandScanning(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СКАНИРОВАНИЕ..."
+        AppLanguage.EN -> "SCANNING..."
+      }
+
+  fun onDemandNoNearbyNetworks(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СЕТИ ПОБЛИЗОСТИ НЕ НАЙДЕНЫ"
+        AppLanguage.EN -> "NO NEARBY NETWORKS FOUND"
+      }
+
+  fun onDemandAddManualHeader(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОБАВИТЬ ВРУЧНУЮ"
+        AppLanguage.EN -> "ADD MANUALLY"
+      }
+
+  fun onDemandAddBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ДОБАВИТЬ"
+        AppLanguage.EN -> "ADD"
+      }
+
+  fun onDemandAddedBadge(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "[ В СПИСКЕ ]"
+        AppLanguage.EN -> "[ ADDED ]"
+      }
+
+  fun onDemandAddAction(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "[ + ВЫБРАТЬ ]"
+        AppLanguage.EN -> "[ + SELECT ]"
+      }
 }

@@ -3,6 +3,7 @@
 package com.tailscale.ipn
 
 import android.net.ConnectivityManager
+import android.net.ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -85,6 +86,11 @@ object NetworkChangeCallback {
   fun setUnderlyingNetworkListener(listener: ((Network?) -> Unit)?) {
     underlyingNetworkListener = listener
   }
+  @Volatile private var ssidDiscoveryListener: ((String) -> Unit)? = null
+
+  fun setSsidDiscoveryListener(listener: ((String) -> Unit)?) {
+    ssidDiscoveryListener = listener
+  }
   private val _activeNetworkSnapshot = MutableStateFlow(ActiveNetworkSnapshot())
   val activeNetworkSnapshot: StateFlow<ActiveNetworkSnapshot> = _activeNetworkSnapshot.asStateFlow()
 
@@ -113,58 +119,108 @@ object NetworkChangeCallback {
     // default network used by Tailscale will always show up with capability
     // NOT_VPN=false, and we must filter out NOT_VPN networks to avoid routing
     // loops.
-    connectivityManager.registerNetworkCallback(
-        networkConnectivityRequest,
-        object : ConnectivityManager.NetworkCallback() {
+    val callback =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+            override fun onAvailable(network: Network) {
+              super.onAvailable(network)
+              handleNetworkAvailable(network)
+            }
 
-          override fun onAvailable(network: Network) {
-            super.onAvailable(network)
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities,
+            ) {
+              super.onCapabilitiesChanged(network, capabilities)
+              handleNetworkCapabilitiesChanged(network, capabilities, dns)
+            }
 
-            TSLog.d(TAG, "onAvailable: network $network")
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                linkProperties: LinkProperties,
+            ) {
+              super.onLinkPropertiesChanged(network, linkProperties)
+              handleNetworkLinkPropertiesChanged(network, linkProperties, dns)
+            }
 
-            lock.withLock {
-              activeNetworks[network] = NetworkInfo()
-              recomputeDefaultNetworkLocked("onAvailable")
+            override fun onLost(network: Network) {
+              super.onLost(network)
+              handleNetworkLost(network, dns)
             }
           }
+        } else {
+          object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+              super.onAvailable(network)
+              handleNetworkAvailable(network)
+            }
 
-          override fun onCapabilitiesChanged(
-              network: Network,
-              capabilities: NetworkCapabilities,
-          ) {
-            super.onCapabilitiesChanged(network, capabilities)
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities,
+            ) {
+              super.onCapabilitiesChanged(network, capabilities)
+              handleNetworkCapabilitiesChanged(network, capabilities, dns)
+            }
 
-            lock.withLock {
-              activeNetworks[network]?.caps = capabilities
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                linkProperties: LinkProperties,
+            ) {
+              super.onLinkPropertiesChanged(network, linkProperties)
+              handleNetworkLinkPropertiesChanged(network, linkProperties, dns)
+            }
 
-              if (recomputeDefaultNetworkLocked("onCapabilitiesChanged")) {
-                maybeUpdateDNSConfig("onCapabilitiesChanged", dns)
-              }
+            override fun onLost(network: Network) {
+              super.onLost(network)
+              handleNetworkLost(network, dns)
             }
           }
+        }
+    connectivityManager.registerNetworkCallback(networkConnectivityRequest, callback)
+  }
 
-          override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-            super.onLinkPropertiesChanged(network, linkProperties)
+  private fun handleNetworkAvailable(network: Network) {
+    TSLog.d(TAG, "onAvailable: network $network")
+    lock.withLock {
+      activeNetworks[network] = NetworkInfo()
+      recomputeDefaultNetworkLocked("onAvailable")
+    }
+  }
 
-            lock.withLock {
-              activeNetworks[network]?.linkProps = linkProperties
-              recomputeDefaultNetworkLocked("onLinkPropertiesChanged")
-              maybeUpdateDNSConfig("onLinkPropertiesChanged", dns)
-            }
-          }
+  private fun handleNetworkCapabilitiesChanged(
+      network: Network,
+      capabilities: NetworkCapabilities,
+      dns: DnsConfig,
+  ) {
+    lock.withLock {
+      activeNetworks[network]?.caps = capabilities
 
-          override fun onLost(network: Network) {
-            super.onLost(network)
+      if (recomputeDefaultNetworkLocked("onCapabilitiesChanged")) {
+        maybeUpdateDNSConfig("onCapabilitiesChanged", dns)
+      }
+    }
+  }
 
-            TSLog.d(TAG, "onLost: network $network")
+  private fun handleNetworkLinkPropertiesChanged(
+      network: Network,
+      linkProperties: LinkProperties,
+      dns: DnsConfig,
+  ) {
+    lock.withLock {
+      activeNetworks[network]?.linkProps = linkProperties
+      recomputeDefaultNetworkLocked("onLinkPropertiesChanged")
+      maybeUpdateDNSConfig("onLinkPropertiesChanged", dns)
+    }
+  }
 
-            lock.withLock {
-              activeNetworks.remove(network)
-              recomputeDefaultNetworkLocked("onLost")
-              maybeUpdateDNSConfig("onLost", dns)
-            }
-          }
-        })
+  private fun handleNetworkLost(network: Network, dns: DnsConfig) {
+    TSLog.d(TAG, "onLost: network $network")
+    lock.withLock {
+      activeNetworks.remove(network)
+      recomputeDefaultNetworkLocked("onLost")
+      maybeUpdateDNSConfig("onLost", dns)
+    }
   }
 
   // pickDefaultNetwork returns a non-VPN network to use as the 'default'
@@ -249,6 +305,7 @@ object NetworkChangeCallback {
       cachedDefaultNetworkInfo = null
       cachedDefaultInterfaceName = null
       underlyingNetworkListener = null
+      ssidDiscoveryListener = null
       _activeNetworkSnapshot.value = ActiveNetworkSnapshot()
     }
   }
@@ -319,6 +376,9 @@ object NetworkChangeCallback {
       null
     }
 
+    if (ssid != null && ssid.isNotBlank()) {
+      ssidDiscoveryListener?.invoke(ssid)
+    }
     _activeNetworkSnapshot.value = ActiveNetworkSnapshot(
         transport = transport,
         ssid = ssid,

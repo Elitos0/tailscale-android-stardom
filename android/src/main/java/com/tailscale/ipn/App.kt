@@ -770,7 +770,14 @@ open class UninitializedApp : Application() {
       }
     }
   }
-  val onDemandRepository by lazy { OnDemandRepository(this) }
+  val onDemandRepository: OnDemandRepository by lazy {
+    OnDemandRepository(this).also { repo ->
+      NetworkChangeCallback.setSsidDiscoveryListener { ssid -> repo.rememberKnownSsid(ssid) }
+      NetworkChangeCallback.activeNetworkSnapshot.value.ssid?.takeIf { it.isNotBlank() }?.let { ssid ->
+        repo.rememberKnownSsid(ssid)
+      }
+    }
+  }
 
   protected fun setUnprotectedInstance(instance: UninitializedApp) {
     appInstance = instance

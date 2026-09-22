@@ -18,6 +18,26 @@ class OnDemandRepository(
 
   private val _config = MutableStateFlow(loadConfig())
   val config: StateFlow<OnDemandConfig> = _config.asStateFlow()
+  private val _knownSsids = MutableStateFlow(loadKnownSsids())
+  val knownSsids: StateFlow<Set<String>> = _knownSsids.asStateFlow()
+
+  fun rememberKnownSsid(ssid: String) {
+    val trimmed = ssid.trim()
+    if (trimmed.isEmpty()) return
+    val updated = _knownSsids.value + trimmed
+    prefs.edit().putStringSet(KEY_KNOWN_SSIDS, updated).apply()
+    _knownSsids.value = updated
+  }
+
+  fun removeKnownSsid(ssid: String) {
+    val updated = _knownSsids.value - ssid
+    prefs.edit().putStringSet(KEY_KNOWN_SSIDS, updated).apply()
+    _knownSsids.value = updated
+  }
+
+  private fun loadKnownSsids(): Set<String> {
+    return prefs.getStringSet(KEY_KNOWN_SSIDS, emptySet())?.toSet() ?: emptySet()
+  }
 
   fun updateConfig(newConfig: OnDemandConfig) {
     saveConfig(newConfig)
@@ -99,5 +119,6 @@ class OnDemandRepository(
     private const val KEY_WIFI_ACTION = "wifi_action"
     private const val KEY_SELECTED_SSIDS = "selected_ssids"
     private const val KEY_UNLISTED_WIFI_ACTION = "unlisted_wifi_action"
+    private const val KEY_KNOWN_SSIDS = "known_ssids"
   }
 }
