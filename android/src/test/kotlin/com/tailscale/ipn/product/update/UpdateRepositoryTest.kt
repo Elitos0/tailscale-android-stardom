@@ -16,6 +16,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Test
 import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.ArgumentMatchers.anyString
@@ -25,6 +27,8 @@ import org.mockito.kotlin.mock
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class UpdateRepositoryTest {
+
+  @get:Rule val tempFolder = TemporaryFolder()
 
   private val testDispatcher = StandardTestDispatcher()
   private val testScope = TestScope(testDispatcher)
@@ -60,7 +64,12 @@ class UpdateRepositoryTest {
     `when`(context.getSharedPreferences(anyString(), anyInt())).thenReturn(sharedPreferences)
     `when`(sharedPreferences.edit()).thenReturn(editor)
     `when`(editor.putLong(anyString(), any())).thenReturn(editor)
-    `when`(context.cacheDir).thenReturn(File("/tmp"))
+    `when`(context.cacheDir).thenReturn(tempFolder.root)
+    `when`(client.getFinalApkFile(any(), any())).thenAnswer { invocation ->
+      val ctx = invocation.getArgument<Context>(0)
+      val manifest = invocation.getArgument<UpdateManifest>(1)
+      UpdateClient.getFinalApkFile(ctx, manifest)
+    }
   }
 
   private fun createRepository(): UpdateRepository {
@@ -238,5 +247,89 @@ class UpdateRepositoryTest {
     assertTrue((repo.updateState.value as UpdateState.UpdateAvailable).isForced)
     repo.dismissUpdate()
     assertTrue("Forced update must not be dismissed", repo.updateState.value is UpdateState.UpdateAvailable)
+  }
+
+  @Test
+  fun checkForUpdateWhenValidCachedApkExistsSetsDownloaded() = runTest(testDispatcher) {
+    `when`(client.fetchManifest()).thenReturn(Result.success(testManifest))
+    val apkFile = UpdateClient.getFinalApkFile(context, testManifest)
+    apkFile.parentFile?.mkdirs()
+    apkFile.writeBytes(ByteArray(100) { 0 })
+    `when`(installer.verifyArchive(any(), any())).thenReturn(Result.success(Unit))
+
+    val repo = createRepository()
+    repo.checkForUpdate(isManual = true)
+    advanceUntilIdle()
+
+    val state = repo.updateState.value
+    assertTrue("State should be Downloaded when valid cached APK exists", state is UpdateState.Downloaded)
+    val downloaded = state as UpdateState.Downloaded
+    assertEquals(apkFile, downloaded.apkFile)
+  }
+
+  @Test
+  fun checkForUpdateWhenInvalidCachedApkExistsDeletesAndSetsUpdateAvailable() = runTest(testDispatcher) {
+    `when`(client.fetchManifest()).thenReturn(Result.success(testManifest))
+    val apkFile = UpdateClient.getFinalApkFile(context, testManifest)
+    apkFile.parentFile?.mkdirs()
+    apkFile.writeBytes(ByteArray(100) { 0 })
+    `when`(installer.verifyArchive(any(), any())).thenReturn(Result.failure(SecurityException("SHA-256 mismatch")))
+
+    val repo = createRepository()
+    repo.checkForUpdate(isManual = true)
+    advanceUntilIdle()
+
+    val state = repo.updateState.value
+    assertTrue("State should be UpdateAvailable when cached APK verification fails", state is UpdateState.UpdateAvailable)
+    assertFalse("Invalid cached APK must be deleted", apkFile.exists())
+  }
+
+  @Test
+  fun onActivityResumeWhenCachedApkValidSetsDownloaded() = runTest(testDispatcher) {
+    `when`(client.fetchManifest()).thenReturn(Result.success(testManifest))
+    val apkFile = UpdateClient.getFinalApkFile(context, testManifest)
+    apkFile.parentFile?.mkdirs()
+    apkFile.writeBytes(ByteArray(100) { 0 })
+    `when`(installer.verifyArchive(any(), any())).thenReturn(Result.success(Unit))
+    `when`(installer.canRequestPackageInstalls()).thenReturn(true)
+    `when`(installer.launchInstaller(any(), any())).thenReturn(Result.success(Unit))
+
+    val repo = createRepository()
+    repo.checkForUpdate(isManual = true)
+    advanceUntilIdle()
+    assertTrue(repo.updateState.value is UpdateState.Downloaded)
+
+    val activity: android.app.Activity = mock()
+    repo.install(activity)
+    assertTrue(repo.updateState.value is UpdateState.Installing)
+
+    repo.onActivityResume(activity)
+    assertTrue("State must revert to Downloaded when cached APK is valid", repo.updateState.value is UpdateState.Downloaded)
+  }
+
+  @Test
+  fun onActivityResumeWhenCachedApkMissingSetsUpdateAvailable() = runTest(testDispatcher) {
+    `when`(client.fetchManifest()).thenReturn(Result.success(testManifest))
+    val apkFile = UpdateClient.getFinalApkFile(context, testManifest)
+    apkFile.parentFile?.mkdirs()
+    apkFile.writeBytes(ByteArray(100) { 0 })
+    `when`(installer.verifyArchive(any(), any())).thenReturn(Result.success(Unit))
+    `when`(installer.canRequestPackageInstalls()).thenReturn(true)
+    `when`(installer.launchInstaller(any(), any())).thenReturn(Result.success(Unit))
+
+    val repo = createRepository()
+    repo.checkForUpdate(isManual = true)
+    advanceUntilIdle()
+    assertTrue(repo.updateState.value is UpdateState.Downloaded)
+
+    val activity: android.app.Activity = mock()
+    repo.install(activity)
+    assertTrue(repo.updateState.value is UpdateState.Installing)
+
+    // Delete cached APK while installer was active
+    apkFile.delete()
+
+    repo.onActivityResume(activity)
+    assertTrue("State must become UpdateAvailable when cached APK is gone", repo.updateState.value is UpdateState.UpdateAvailable)
   }
 }

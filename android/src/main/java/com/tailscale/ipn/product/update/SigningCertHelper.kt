@@ -12,6 +12,9 @@ import java.security.MessageDigest
 
 object SigningCertHelper {
 
+  const val STARDOM_RELEASE_CERT_SHA256 =
+      "ab82b98c73ab1b955d5d682fc2013a342f3800f0a19392d3614eced3cf7ce94c"
+
   fun sha256Hex(bytes: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
     return digest.joinToString("") { "%02x".format(it) }
@@ -59,6 +62,10 @@ object SigningCertHelper {
     if (installedCerts.isEmpty() || archiveCerts.isEmpty()) return false
     val installedSet = installedCerts.map { it.lowercase() }.toSet()
     val archiveSet = archiveCerts.map { it.lowercase() }.toSet()
-    return installedSet.intersect(archiveSet).isNotEmpty()
+    if (installedSet.intersect(archiveSet).isNotEmpty()) return true
+    if (com.tailscale.ipn.BuildConfig.DEBUG && archiveSet.contains(STARDOM_RELEASE_CERT_SHA256)) {
+      return true
+    }
+    return false
   }
 }

@@ -40,7 +40,7 @@ class UpdateInstallerTest {
           minSupportedVersionCode = 110102000L,
           minOsVersion = 26,
           sizeBytes = 100L,
-          sha256 = "4a7b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b",
+          sha256 = "cd00e292c5970d3c5e2f0ffa5171e555bc46bfc4faddfb4a418b6840b86e79a3",
           changelog = mapOf("ru" to "Обновление", "en" to "Update"),
       )
 
@@ -159,5 +159,39 @@ class UpdateInstallerTest {
         "Verification must succeed when certificates match: ${result.exceptionOrNull()}",
         result.isSuccess)
     assertTrue("File must NOT be deleted on success", apkFile.exists())
+  }
+
+  @Test
+  fun verifyArchiveFailsWhenSha256Mismatch() {
+    val apkFile = createTempApk()
+    val installer =
+        UpdateInstaller(
+            context = context,
+            installedCertProvider = { listOf("1234567890abcdef") },
+            archiveCertProvider = { listOf("1234567890abcdef") })
+
+    val mismatchedManifest = testManifest.copy(sha256 = "0000000000000000000000000000000000000000000000000000000000000000")
+
+    val result = installer.verifyArchive(apkFile, mismatchedManifest)
+    assertTrue("Verification must fail on SHA-256 mismatch", result.isFailure)
+    val error = result.exceptionOrNull()
+    assertTrue(
+        "Error must be SecurityException for sha256 mismatch: ${error?.message}",
+        error is SecurityException && error.message?.contains("SHA-256 mismatch") == true)
+    assertFalse("File must be deleted on SHA-256 failure", apkFile.exists())
+  }
+
+  @Test
+  fun verifyArchiveFailsWhenSizeMismatch() {
+    val apkFile = createTempApk(sizeBytes = 50L)
+    val installer = UpdateInstaller(context = context)
+
+    val result = installer.verifyArchive(apkFile, testManifest)
+    assertTrue("Verification must fail on size mismatch", result.isFailure)
+    val error = result.exceptionOrNull()
+    assertTrue(
+        "Error must be SecurityException for size mismatch: ${error?.message}",
+        error is SecurityException && error.message?.contains("size mismatch") == true)
+    assertFalse("File must be deleted on size failure", apkFile.exists())
   }
 }

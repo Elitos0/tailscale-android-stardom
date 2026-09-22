@@ -29,9 +29,24 @@ class UpdateClient(
     private const val READ_TIMEOUT_MS = 20_000
     private const val BUFFER_SIZE = 32 * 1024
     private const val STORAGE_SAFETY_MARGIN_BYTES = 15 * 1024 * 1024L // 15MB
-    const val PART_FILE_NAME = "stardom-update.apk.part"
-    const val FINAL_FILE_NAME = "stardom-update.apk"
+    fun getFinalApkFile(context: Context, manifest: UpdateManifest): File {
+      val updatesDir = File(context.cacheDir, "updates")
+      return File(updatesDir, "stardom-update-${manifest.versionCode}-${manifest.sha256.take(8).lowercase()}.apk")
+    }
+
+    fun getPartApkFile(context: Context, manifest: UpdateManifest): File {
+      val updatesDir = File(context.cacheDir, "updates")
+      return File(updatesDir, "stardom-update-${manifest.versionCode}-${manifest.sha256.take(8).lowercase()}.apk.part")
+    }
   }
+  fun getFinalApkFile(context: Context, manifest: UpdateManifest): File {
+    return Companion.getFinalApkFile(context, manifest)
+  }
+
+  fun getPartApkFile(context: Context, manifest: UpdateManifest): File {
+    return Companion.getPartApkFile(context, manifest)
+  }
+
 
   fun fetchManifest(): Result<UpdateManifest> {
     var connection: HttpURLConnection? = null
@@ -87,8 +102,15 @@ class UpdateClient(
               "Insufficient storage space: available ${usableSpace / (1024 * 1024)}MB, required ${requiredSpace / (1024 * 1024)}MB"))
     }
 
-    val partFile = File(updatesDir, PART_FILE_NAME)
-    val finalFile = File(updatesDir, FINAL_FILE_NAME)
+    val partFile = getPartApkFile(context, manifest)
+    val finalFile = getFinalApkFile(context, manifest)
+
+    // Clean up any other .apk or .part files in cacheDir/updates that don't match the current manifest
+    updatesDir.listFiles()?.forEach { file ->
+      if (file != finalFile && file != partFile) {
+        file.delete()
+      }
+    }
 
     var connection: HttpURLConnection? = null
     var outStream: FileOutputStream? = null

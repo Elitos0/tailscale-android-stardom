@@ -73,11 +73,14 @@ class UpdateRepository(
 
             if (manifest.isUpdateAvailable(currentCode, currentSdk)) {
               val isForced = manifest.isMandatory(currentCode, currentSdk)
-              val cachedApk = File(context.cacheDir, "updates/${UpdateClient.FINAL_FILE_NAME}")
+              val cachedApk = client.getFinalApkFile(context, manifest)
 
-              if (cachedApk.exists() && runCatching { installer.verifyArchive(cachedApk, manifest) }.isSuccess) {
+              if (cachedApk.exists() && runCatching { installer.verifyArchive(cachedApk, manifest).getOrThrow() }.isSuccess) {
                 _updateState.value = UpdateState.Downloaded(manifest, cachedApk, isForced)
               } else {
+                if (cachedApk.exists()) {
+                  cachedApk.delete()
+                }
                 _updateState.value = UpdateState.UpdateAvailable(manifest, isForced)
               }
             } else {
@@ -199,9 +202,8 @@ class UpdateRepository(
   fun onActivityResume(activity: Activity) {
     val currentState = _updateState.value
     if (currentState is UpdateState.Installing) {
-      // Revert to Downloaded so user can tap install again if system dialog was dismissed
-      val cachedApk = File(context.cacheDir, "updates/${UpdateClient.FINAL_FILE_NAME}")
-      if (cachedApk.exists()) {
+      val cachedApk = client.getFinalApkFile(context, currentState.manifest)
+      if (cachedApk.exists() && runCatching { installer.verifyArchive(cachedApk, currentState.manifest).getOrThrow() }.isSuccess) {
         _updateState.value = UpdateState.Downloaded(currentState.manifest, cachedApk, currentState.isForced)
       } else {
         _updateState.value = UpdateState.UpdateAvailable(currentState.manifest, currentState.isForced)
