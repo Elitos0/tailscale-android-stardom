@@ -42,6 +42,33 @@ class OnDemandRepositoryTest {
     assertTrue(repo.knownSsids.value.isEmpty())
     assertTrue(prefs.getStringSet("known_ssids", emptySet())!!.isEmpty())
   }
+  @Test
+  fun rememberKnownSsid_rejectsInvalidSsids() {
+    val prefs = FakeSharedPreferences()
+    val repo = OnDemandRepository(prefs)
+
+    repo.rememberKnownSsid(null)
+    repo.rememberKnownSsid("<unknown ssid>")
+    repo.rememberKnownSsid("0x")
+    repo.rememberKnownSsid("0x00")
+    repo.rememberKnownSsid("")
+    repo.rememberKnownSsid("   ")
+    repo.rememberKnownSsid("\"<unknown ssid>\"")
+    repo.rememberKnownSsid("\"0x\"")
+
+    assertTrue(repo.knownSsids.value.isEmpty())
+    assertTrue(prefs.getStringSet("known_ssids", emptySet())!!.isEmpty())
+  }
+
+  @Test
+  fun initialState_filtersOutInvalidSsidsFromPreferences() {
+    val initialPrefs = FakeSharedPreferences(
+        mapOf("known_ssids" to setOf("Office-WiFi", "<unknown ssid>", "0x", "0x00", "", "   ", "\"Home-Net\""))
+    )
+    val repo = OnDemandRepository(initialPrefs)
+
+    assertEquals(setOf("Office-WiFi", "Home-Net"), repo.knownSsids.value)
+  }
 
   @Test
   fun rememberKnownSsid_preservesExistingSsids() {

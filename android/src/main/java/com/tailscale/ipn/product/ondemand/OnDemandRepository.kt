@@ -4,6 +4,7 @@
 package com.tailscale.ipn.product.ondemand
 
 import android.content.Context
+import com.tailscale.ipn.sanitizeSsid
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,10 +22,9 @@ class OnDemandRepository(
   private val _knownSsids = MutableStateFlow(loadKnownSsids())
   val knownSsids: StateFlow<Set<String>> = _knownSsids.asStateFlow()
 
-  fun rememberKnownSsid(ssid: String) {
-    val trimmed = ssid.trim()
-    if (trimmed.isEmpty()) return
-    val updated = _knownSsids.value + trimmed
+  fun rememberKnownSsid(ssid: String?) {
+    val valid = sanitizeSsid(ssid) ?: return
+    val updated = _knownSsids.value + valid
     prefs.edit().putStringSet(KEY_KNOWN_SSIDS, updated).apply()
     _knownSsids.value = updated
   }
@@ -36,7 +36,11 @@ class OnDemandRepository(
   }
 
   private fun loadKnownSsids(): Set<String> {
-    return prefs.getStringSet(KEY_KNOWN_SSIDS, emptySet())?.toSet() ?: emptySet()
+    return prefs.getStringSet(KEY_KNOWN_SSIDS, emptySet())
+        ?.mapNotNull { sanitizeSsid(it) }
+        ?.filter { it.isNotBlank() && it != "<unknown ssid>" && it != "0x" }
+        ?.toSet()
+        ?: emptySet()
   }
 
   fun updateConfig(newConfig: OnDemandConfig) {

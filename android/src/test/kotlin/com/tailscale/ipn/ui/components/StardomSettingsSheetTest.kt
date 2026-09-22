@@ -118,7 +118,17 @@ class StardomSettingsSheetTest {
               StardomLocalization.onDemandAddManualHeader(lang),
               StardomLocalization.onDemandAddBtn(lang),
               StardomLocalization.onDemandAddedBadge(lang),
-              StardomLocalization.onDemandAddAction(lang))
+              StardomLocalization.onDemandAddAction(lang),
+              StardomLocalization.onDemandLocationAccessGranted(lang),
+              StardomLocalization.onDemandLocationAccessDenied(lang),
+              StardomLocalization.onDemandLocationServicesDisabled(lang),
+              StardomLocalization.onDemandLocationServicesEnabled(lang),
+              StardomLocalization.onDemandEnableLocationBtn(lang),
+              StardomLocalization.onDemandScanBlocked(lang),
+              StardomLocalization.onDemandScanLocationOff(lang),
+              StardomLocalization.onDemandScanNoPermission(lang),
+              StardomLocalization.onDemandScanTimeout(lang),
+              StardomLocalization.onDemandKnownBadge(lang))
 
       for (str in strings) {
         assertFalse(
@@ -319,6 +329,57 @@ class StardomSettingsSheetTest {
         assertEquals("ADD", addBtn)
         assertEquals("[ ADDED ]", addedBadge)
         assertEquals("[ + SELECT ]", addAction)
+      }
+    }
+  }
+
+  @Test
+  fun onDemandDiagnosticAndPermissionLocalizationStringsAreValid() {
+    for (lang in AppLanguage.entries) {
+      val accessGranted = StardomLocalization.onDemandLocationAccessGranted(lang)
+      val accessDenied = StardomLocalization.onDemandLocationAccessDenied(lang)
+      val servicesDisabled = StardomLocalization.onDemandLocationServicesDisabled(lang)
+      val servicesEnabled = StardomLocalization.onDemandLocationServicesEnabled(lang)
+      val enableLocationBtn = StardomLocalization.onDemandEnableLocationBtn(lang)
+      val scanBlocked = StardomLocalization.onDemandScanBlocked(lang)
+      val scanLocationOff = StardomLocalization.onDemandScanLocationOff(lang)
+      val scanNoPermission = StardomLocalization.onDemandScanNoPermission(lang)
+      val scanTimeout = StardomLocalization.onDemandScanTimeout(lang)
+      val knownBadge = StardomLocalization.onDemandKnownBadge(lang)
+
+      assertTrue(accessGranted.isNotBlank())
+      assertTrue(accessDenied.isNotBlank())
+      assertTrue(servicesDisabled.isNotBlank())
+      assertTrue(servicesEnabled.isNotBlank())
+      assertTrue(enableLocationBtn.isNotBlank())
+      assertTrue(scanBlocked.isNotBlank())
+      assertTrue(scanLocationOff.isNotBlank())
+      assertTrue(scanNoPermission.isNotBlank())
+      assertTrue(scanTimeout.isNotBlank())
+      assertTrue(knownBadge.isNotBlank())
+
+      if (lang == AppLanguage.RU) {
+        assertEquals("Доступ к геолокации: разрешён", accessGranted)
+        assertEquals("Доступ к геолокации: не разрешён", accessDenied)
+        assertEquals("Службы геолокации: выключены", servicesDisabled)
+        assertEquals("Службы геолокации: включены", servicesEnabled)
+        assertEquals("ВКЛЮЧИТЬ ГЕОЛОКАЦИЮ", enableLocationBtn)
+        assertEquals("СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ANDROID", scanBlocked)
+        assertEquals("ГЕОЛОКАЦИЯ ВЫКЛЮЧЕНА", scanLocationOff)
+        assertEquals("НЕТ РАЗРЕШЕНИЯ", scanNoPermission)
+        assertEquals("СКАНИРОВАНИЕ НЕ ЗАВЕРШЕНО", scanTimeout)
+        assertEquals("[ ИЗВЕСТНА ]", knownBadge)
+      } else {
+        assertEquals("Location permission: granted", accessGranted)
+        assertEquals("Location permission: not granted", accessDenied)
+        assertEquals("Location services: disabled", servicesDisabled)
+        assertEquals("Location services: enabled", servicesEnabled)
+        assertEquals("ENABLE LOCATION", enableLocationBtn)
+        assertEquals("SCAN BLOCKED BY ANDROID", scanBlocked)
+        assertEquals("LOCATION SERVICES DISABLED", scanLocationOff)
+        assertEquals("PERMISSION MISSING", scanNoPermission)
+        assertEquals("SCAN TIMED OUT", scanTimeout)
+        assertEquals("[ KNOWN ]", knownBadge)
       }
     }
   }

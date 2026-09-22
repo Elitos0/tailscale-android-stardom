@@ -7,6 +7,18 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.location.LocationManager
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import androidx.core.location.LocationManagerCompat
+import com.tailscale.ipn.sanitizeSsid
+import com.tailscale.ipn.util.TSLog
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Job
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -83,16 +95,25 @@ fun StardomOnDemandView(
   val activeNetwork by NetworkChangeCallback.activeNetworkSnapshot.collectAsState()
   val coroutineScope = rememberCoroutineScope()
   var isScanning by remember { mutableStateOf(false) }
+  var scanStatusMessage by remember { mutableStateOf<String?>(null) }
   var nearbySsids by remember { mutableStateOf<List<String>>(emptyList()) }
-  var scanPerformed by remember { mutableStateOf(false) }
 
   val wifiManager = remember {
     context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
   }
 
+  val locationManager = remember {
+    context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+  }
+  fun isLocationEnabled(): Boolean =
+      locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager)
+  var isLocationServicesEnabled by remember { mutableStateOf(isLocationEnabled()) }
+
   var hasLocationPermission by remember {
     mutableStateOf(
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
     )
   }
@@ -103,7 +124,11 @@ fun StardomOnDemandView(
       if (event == Lifecycle.Event.ON_RESUME) {
         hasLocationPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
+        isLocationServicesEnabled = isLocationEnabled()
+        NetworkChangeCallback.refreshActiveNetwork()
       }
     }
     lifecycleOwner.lifecycle.addObserver(observer)
@@ -114,10 +139,21 @@ fun StardomOnDemandView(
 
   val permissionLauncher =
       rememberLauncherForActivityResult(
-          contract = ActivityResultContracts.RequestPermission()
-      ) { isGranted ->
-        hasLocationPermission = isGranted
+          ActivityResultContracts.RequestMultiplePermissions()
+      ) { permissions ->
+        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        isLocationServicesEnabled = isLocationEnabled()
+        NetworkChangeCallback.refreshActiveNetwork()
       }
+
+  val activeScanCleanup = remember { mutableStateOf<(() -> Unit)?>(null) }
+  DisposableEffect(Unit) {
+    onDispose {
+      activeScanCleanup.value?.invoke()
+      activeScanCleanup.value = null
+    }
+  }
 
   val currentSsid =
       activeNetwork.ssid ?: run {
@@ -468,8 +504,8 @@ fun StardomOnDemandView(
 
                     // Scope = ONLY_SELECTED details (Location Notice + Dropdown)
                     if (config.wifiScope == WifiRuleScope.ONLY_SELECTED) {
-                      // Location Permission Notice (appears only when not granted)
-                      if (!hasLocationPermission) {
+                      // Location Notice Card (appears if permission missing OR location services disabled)
+                      if (!hasLocationPermission || !isLocationServicesEnabled) {
                         Spacer(Modifier.height(12.dp))
                         Box(
                             modifier =
@@ -481,38 +517,77 @@ fun StardomOnDemandView(
                               Column(
                                   modifier = Modifier.fillMaxWidth(),
                                   horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text =
-                                        StardomLocalization.onDemandLocationPermissionNotice(
-                                            language),
-                                    color = StardomColors.TextSecondary,
-                                    fontSize = 9.sp,
-                                    fontFamily = StardomTechnicalFont(language),
-                                    lineHeight = 14.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth())
-                                Spacer(Modifier.height(10.dp))
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier =
-                                        Modifier.testTag("grant_location_permission_btn")
-                                            .background(StardomColors.Background)
-                                            .border(1.dp, StardomColors.BorderStrong)
-                                            .clickable {
-                                              permissionLauncher.launch(
-                                                  Manifest.permission.ACCESS_FINE_LOCATION)
-                                            }
-                                            .padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                      Text(
-                                          text =
-                                              StardomLocalization.onDemandLocationPermissionGrant(
-                                                  language),
-                                          color = StardomColors.TextPrimary,
-                                          fontSize = 9.sp,
-                                          fontFamily = StardomTechnicalFont(language),
-                                          fontWeight = FontWeight.Bold,
-                                          letterSpacing = 0.5.sp)
-                                    }
+                                if (!hasLocationPermission) {
+                                  Text(
+                                      text =
+                                          "${StardomLocalization.onDemandLocationAccessDenied(language)}\n${StardomLocalization.onDemandLocationPermissionNotice(language)}",
+                                      color = StardomColors.TextSecondary,
+                                      fontSize = 9.sp,
+                                      fontFamily = StardomTechnicalFont(language),
+                                      lineHeight = 14.sp,
+                                      textAlign = TextAlign.Center,
+                                      modifier = Modifier.fillMaxWidth())
+                                  Spacer(Modifier.height(10.dp))
+                                  Box(
+                                      contentAlignment = Alignment.Center,
+                                      modifier =
+                                          Modifier.testTag("grant_location_permission_btn")
+                                              .background(StardomColors.Background)
+                                              .border(1.dp, StardomColors.BorderStrong)
+                                              .clickable {
+                                                permissionLauncher.launch(
+                                                    arrayOf(
+                                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                                        Manifest.permission.ACCESS_COARSE_LOCATION))
+                                              }
+                                              .padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                        Text(
+                                            text =
+                                                StardomLocalization.onDemandLocationPermissionGrant(
+                                                    language),
+                                            color = StardomColors.TextPrimary,
+                                            fontSize = 9.sp,
+                                            fontFamily = StardomTechnicalFont(language),
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp)
+                                      }
+                                } else {
+                                  Text(
+                                      text =
+                                          "${StardomLocalization.onDemandLocationAccessGranted(language)}\n${StardomLocalization.onDemandLocationServicesDisabled(language)}",
+                                      color = StardomColors.TextSecondary,
+                                      fontSize = 9.sp,
+                                      fontFamily = StardomTechnicalFont(language),
+                                      lineHeight = 14.sp,
+                                      textAlign = TextAlign.Center,
+                                      modifier = Modifier.fillMaxWidth())
+                                  Spacer(Modifier.height(10.dp))
+                                  Box(
+                                      contentAlignment = Alignment.Center,
+                                      modifier =
+                                          Modifier.testTag("enable_location_services_btn")
+                                              .background(StardomColors.Background)
+                                              .border(1.dp, StardomColors.BorderStrong)
+                                              .clickable {
+                                                try {
+                                                  context.startActivity(
+                                                      Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                                } catch (e: Exception) {
+                                                  TSLog.w("OnDemandWifi", "Failed to launch location settings: $e")
+                                                }
+                                              }
+                                              .padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                        Text(
+                                            text =
+                                                StardomLocalization.onDemandEnableLocationBtn(
+                                                    language),
+                                            color = StardomColors.TextPrimary,
+                                            fontSize = 9.sp,
+                                            fontFamily = StardomTechnicalFont(language),
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp)
+                                      }
+                                }
                               }
                             }
                       }
@@ -833,42 +908,134 @@ fun StardomOnDemandView(
                                                   if (isScanning) StardomColors.BorderFaint
                                                   else StardomColors.BorderStrong)
                                               .clickable(enabled = !isScanning) {
-                                                coroutineScope.launch {
-                                                  isScanning = true
-                                                  try {
+                                                if (!hasLocationPermission) {
+                                                  scanStatusMessage =
+                                                      StardomLocalization.onDemandScanNoPermission(
+                                                          language)
+                                                  return@clickable
+                                                }
+                                                if (!isLocationServicesEnabled) {
+                                                  scanStatusMessage =
+                                                      StardomLocalization.onDemandScanLocationOff(
+                                                          language)
+                                                  return@clickable
+                                                }
+
+                                                scanStatusMessage = null
+                                                isScanning = true
+
+                                                activeScanCleanup.value?.invoke()
+
+                                                val isReceiverRegistered = AtomicBoolean(false)
+                                                var receiver: BroadcastReceiver? = null
+                                                var timeoutJob: Job? = null
+
+                                                fun unregister() {
+                                                  if (isReceiverRegistered.compareAndSet(true, false)) {
                                                     try {
-                                                      wifiManager?.startScan()
+                                                      receiver?.let { context.unregisterReceiver(it) }
                                                     } catch (_: Throwable) {}
-                                                    delay(500)
-                                                    val scanList =
-                                                        try {
-                                                          wifiManager?.scanResults ?: emptyList()
-                                                        } catch (_: Throwable) {
-                                                          emptyList()
-                                                        }
-                                                    val validNearby =
-                                                         scanList
-                                                            .mapNotNull { result ->
-                                                              val raw = result.SSID?.trim()
-                                                              val cleaned =
-                                                                  raw?.removePrefix("\"")
-                                                                      ?.removeSuffix("\"")
-                                                                      ?.trim()
-                                                              if (!cleaned.isNullOrBlank() &&
-                                                                  cleaned != "<unknown ssid>" &&
-                                                                  cleaned != "0x") {
-                                                                cleaned
-                                                              } else null
-                                                            }
-                                                            .distinct()
-                                                            .filter { ssid ->
-                                                              ssid != currentSsid &&
-                                                                  !knownSsids.contains(ssid)
-                                                            }
-                                                            .sorted()
-                                                    nearbySsids = validNearby
-                                                    scanPerformed = true
-                                                  } finally {
+                                                    activeScanCleanup.value = null
+                                                  }
+                                                }
+
+                                                receiver = object : BroadcastReceiver() {
+                                                  override fun onReceive(c: Context?, intent: Intent?) {
+                                                    if (intent?.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) {
+                                                      timeoutJob?.cancel()
+                                                      val scanList = try {
+                                                        @Suppress("DEPRECATION")
+                                                        wifiManager?.scanResults
+                                                      } catch (e: Exception) {
+                                                        TSLog.w("OnDemandWifi", "scanResults read exception: $e")
+                                                        null
+                                                      }
+                                                      val validSsids = scanList
+                                                          ?.mapNotNull { sanitizeSsid(it.SSID) }
+                                                          ?.distinct()
+                                                          ?.sorted()
+                                                          .orEmpty()
+                                                      nearbySsids = validSsids
+                                                      isScanning = false
+                                                      if (validSsids.isEmpty()) {
+                                                        scanStatusMessage =
+                                                            StardomLocalization.onDemandNoNearbyNetworks(
+                                                                language)
+                                                      } else {
+                                                        scanStatusMessage = null
+                                                      }
+                                                      unregister()
+                                                    }
+                                                  }
+                                                }
+
+                                                val intentFilter =
+                                                    IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
+                                                try {
+                                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                    ContextCompat.registerReceiver(
+                                                        context,
+                                                        receiver,
+                                                        intentFilter,
+                                                        ContextCompat.RECEIVER_NOT_EXPORTED,
+                                                    )
+                                                  } else {
+                                                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                                                    context.registerReceiver(receiver, intentFilter)
+                                                  }
+                                                  isReceiverRegistered.set(true)
+                                                } catch (e: Exception) {
+                                                  TSLog.w("OnDemandWifi", "registerReceiver failed: $e")
+                                                  isScanning = false
+                                                  scanStatusMessage =
+                                                      StardomLocalization.onDemandScanBlocked(language)
+                                                  return@clickable
+                                                }
+
+                                                activeScanCleanup.value = {
+                                                  unregister()
+                                                  timeoutJob?.cancel()
+                                                }
+
+                                                val started = try {
+                                                  @Suppress("DEPRECATION")
+                                                  wifiManager?.startScan() ?: false
+                                                } catch (e: Exception) {
+                                                  TSLog.w("OnDemandWifi", "startScan exception: $e")
+                                                  false
+                                                }
+
+                                                if (!started) {
+                                                  isScanning = false
+                                                  scanStatusMessage =
+                                                      StardomLocalization.onDemandScanBlocked(language)
+                                                  unregister()
+                                                  TSLog.w("OnDemandWifi", "startScan returned false (throttled)")
+                                                  return@clickable
+                                                }
+
+                                                timeoutJob = coroutineScope.launch {
+                                                  delay(6000)
+                                                  if (isScanning) {
+                                                    unregister()
+                                                    val fallbackSsids = try {
+                                                      @Suppress("DEPRECATION")
+                                                      wifiManager?.scanResults
+                                                          ?.mapNotNull { sanitizeSsid(it.SSID) }
+                                                          ?.distinct()
+                                                          ?.sorted()
+                                                          .orEmpty()
+                                                    } catch (e: Exception) {
+                                                      emptyList()
+                                                    }
+                                                    if (fallbackSsids.isNotEmpty()) {
+                                                      nearbySsids = fallbackSsids
+                                                      scanStatusMessage = null
+                                                    } else {
+                                                      scanStatusMessage =
+                                                          StardomLocalization.onDemandScanTimeout(
+                                                              language)
+                                                    }
                                                     isScanning = false
                                                   }
                                                 }
@@ -892,18 +1059,20 @@ fun StardomOnDemandView(
                                 }
                                 Spacer(Modifier.height(6.dp))
 
-                                if (scanPerformed && nearbySsids.isEmpty() && !isScanning) {
+                                if (scanStatusMessage != null && !isScanning) {
                                   Text(
-                                      text =
-                                          StardomLocalization.onDemandNoNearbyNetworks(language),
+                                      text = scanStatusMessage ?: "",
                                       color = StardomColors.TextMuted,
                                       fontSize = 9.sp,
                                       fontFamily = StardomTechnicalFont(language),
                                       modifier = Modifier.padding(vertical = 2.dp))
-                                } else if (nearbySsids.isNotEmpty()) {
+                                }
+
+                                if (nearbySsids.isNotEmpty()) {
                                   Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     nearbySsids.forEach { ssid ->
                                       val alreadyInSelected = config.selectedSsids.contains(ssid)
+                                      val isKnown = knownSsids.contains(ssid)
                                       Row(
                                           modifier =
                                               Modifier.fillMaxWidth()
@@ -941,6 +1110,49 @@ fun StardomOnDemandView(
                                                   fontFamily =
                                                       StardomTechnicalFont(language),
                                                   fontWeight = FontWeight.Bold)
+                                            } else if (isKnown) {
+                                              Row(
+                                                  verticalAlignment = Alignment.CenterVertically,
+                                                  horizontalArrangement =
+                                                      Arrangement.spacedBy(8.dp)) {
+                                                Text(
+                                                    text =
+                                                        StardomLocalization.onDemandKnownBadge(
+                                                            language),
+                                                    color = StardomColors.TextSecondary,
+                                                    fontSize = 8.sp,
+                                                    fontFamily =
+                                                        StardomTechnicalFont(language),
+                                                    fontWeight = FontWeight.Bold)
+                                                Box(
+                                                    modifier =
+                                                        Modifier.testTag(
+                                                                "add_nearby_ssid_$ssid")
+                                                            .background(
+                                                                StardomColors.PanelSelected)
+                                                            .border(
+                                                                1.dp,
+                                                                StardomColors.BorderStrong)
+                                                            .clickable(
+                                                                enabled = config.enabled) {
+                                                              repo.addSsid(ssid)
+                                                            }
+                                                            .padding(
+                                                                horizontal = 8.dp,
+                                                                vertical = 4.dp)) {
+                                                      Text(
+                                                          text =
+                                                              StardomLocalization
+                                                                  .onDemandAddAction(
+                                                                      language),
+                                                          color = StardomColors.TextPrimary,
+                                                          fontSize = 8.sp,
+                                                          fontFamily =
+                                                              StardomTechnicalFont(language),
+                                                          fontWeight = FontWeight.Bold,
+                                                          letterSpacing = 0.5.sp)
+                                                    }
+                                              }
                                             } else {
                                               Box(
                                                   modifier =
@@ -955,17 +1167,17 @@ fun StardomOnDemandView(
                                                           .padding(
                                                               horizontal = 8.dp,
                                                               vertical = 4.dp)) {
-                                                        Text(
-                                                            text =
-                                                                StardomLocalization
-                                                                    .onDemandAddAction(language),
-                                                            color = StardomColors.TextPrimary,
-                                                            fontSize = 8.sp,
-                                                            fontFamily =
-                                                                StardomTechnicalFont(language),
-                                                            fontWeight = FontWeight.Bold,
-                                                            letterSpacing = 0.5.sp)
-                                                      }
+                                                    Text(
+                                                        text =
+                                                            StardomLocalization
+                                                                .onDemandAddAction(language),
+                                                        color = StardomColors.TextPrimary,
+                                                        fontSize = 8.sp,
+                                                        fontFamily =
+                                                            StardomTechnicalFont(language),
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = 0.5.sp)
+                                                  }
                                             }
                                           }
                                     }

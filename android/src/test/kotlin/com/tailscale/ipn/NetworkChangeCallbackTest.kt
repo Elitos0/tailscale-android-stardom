@@ -306,6 +306,63 @@ class NetworkChangeCallbackTest {
     assertTrue(dispatched.isEmpty())
   }
 
+  @Test
+  fun sanitizeSsid_rejectsNullBlankAndUnknownValues() {
+    assertNull(sanitizeSsid(null))
+    assertNull(sanitizeSsid(""))
+    assertNull(sanitizeSsid("   "))
+    assertNull(sanitizeSsid("<unknown ssid>"))
+    assertNull(sanitizeSsid("\"<unknown ssid>\""))
+    assertNull(sanitizeSsid("0x"))
+    assertNull(sanitizeSsid("\"0x\""))
+    assertNull(sanitizeSsid("0x00"))
+    assertNull(sanitizeSsid("\"0x00\""))
+  }
+
+  @Test
+  fun sanitizeSsid_trimsAndRemovesSurroundingQuotes() {
+    assertEquals("Office-WiFi", sanitizeSsid("Office-WiFi"))
+    assertEquals("Office-WiFi", sanitizeSsid("\"Office-WiFi\""))
+    assertEquals("Office-WiFi", sanitizeSsid("  Office-WiFi  "))
+    assertEquals("Office-WiFi", sanitizeSsid("  \"Office-WiFi\"  "))
+  }
+
+  @Test
+  fun refreshActiveNetwork_withNullAppContextDoesNotThrow() {
+    NetworkChangeCallback.resetForTesting()
+    NetworkChangeCallback.refreshActiveNetwork()
+    assertNull(NetworkChangeCallback.cachedDefaultNetwork)
+  }
+
+  @Test
+  fun refreshActiveNetwork_queriesActiveNetworkAndRecomputes() {
+    val context = mock(android.content.Context::class.java)
+    val cm = mock(android.net.ConnectivityManager::class.java)
+    val activeNet = mock(Network::class.java)
+    val caps = mock(NetworkCapabilities::class.java)
+    val linkProps = mock(LinkProperties::class.java)
+
+    `when`(context.applicationContext).thenReturn(context)
+    `when`(context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)).thenReturn(cm)
+    `when`(cm.activeNetwork).thenReturn(activeNet)
+    `when`(cm.getNetworkCapabilities(activeNet)).thenReturn(caps)
+    `when`(cm.getLinkProperties(activeNet)).thenReturn(linkProps)
+
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)).thenReturn(true)
+
+    NetworkChangeCallback.setApplicationContext(context)
+    NetworkChangeCallback.refreshActiveNetwork()
+
+    assertEquals(activeNet, NetworkChangeCallback.cachedDefaultNetwork)
+    assertEquals(
+        com.tailscale.ipn.product.ondemand.NetworkTransport.CELLULAR,
+        NetworkChangeCallback.activeNetworkSnapshot.value.transport,
+    )
+  }
+
   private fun candidate(
       name: String,
       internet: Boolean = true,

@@ -18,8 +18,10 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
+import android.location.LocationManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import com.tailscale.ipn.product.ondemand.ActiveNetworkSnapshot
 import com.tailscale.ipn.product.ondemand.NetworkTransport
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,6 +101,21 @@ object NetworkChangeCallback {
   fun setApplicationContext(context: Context) {
     appContext = context.applicationContext
   }
+  fun refreshActiveNetwork() {
+    val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+    lock.withLock {
+      val activeNet = cm.activeNetwork
+      if (activeNet != null) {
+        val caps = cm.getNetworkCapabilities(activeNet)
+        val linkProps = cm.getLinkProperties(activeNet)
+        val info = activeNetworks.getOrPut(activeNet) { NetworkInfo() }
+        if (caps != null) info.caps = caps
+        if (linkProps != null) info.linkProps = linkProps
+      }
+      recomputeDefaultNetworkLocked("manualRefresh")
+    }
+  }
+
 
   // monitorDnsChanges sets up a network callback to monitor changes to the
   // system's network state and update the DNS configuration when interfaces
@@ -255,6 +272,21 @@ object NetworkChangeCallback {
   // Update cached default network + log interface name. Return whether or not default network
   // changed.
   private fun recomputeDefaultNetworkLocked(why: String): Boolean {
+    val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    if (cm != null) {
+      val activeNet = cm.activeNetwork
+      if (activeNet != null && !activeNetworks.containsKey(activeNet)) {
+        activeNetworks[activeNet] = NetworkInfo(
+            caps = cm.getNetworkCapabilities(activeNet),
+            linkProps = cm.getLinkProperties(activeNet),
+        )
+      }
+      for ((net, info) in activeNetworks) {
+        cm.getNetworkCapabilities(net)?.let { info.caps = it }
+        cm.getLinkProperties(net)?.let { info.linkProps = it }
+      }
+    }
+
     val oldNetwork = cachedDefaultNetwork
     val newNetwork = pickDefaultNetwork()
 
@@ -306,6 +338,7 @@ object NetworkChangeCallback {
       cachedDefaultInterfaceName = null
       underlyingNetworkListener = null
       ssidDiscoveryListener = null
+      appContext = null
       _activeNetworkSnapshot.value = ActiveNetworkSnapshot()
     }
   }
@@ -389,36 +422,83 @@ object NetworkChangeCallback {
   private fun extractWifiSsid(caps: NetworkCapabilities): String? {
     val context = appContext ?: return null
 
-    val hasLocationPermission = ContextCompat.checkSelfPermission(
+    val hasFineLocation = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+    ) == PackageManager.PERMISSION_GRANTED
+    val hasCoarseLocation = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_COARSE_LOCATION
     ) == PackageManager.PERMISSION_GRANTED
+    val hasLocationPermission = hasFineLocation || hasCoarseLocation
+
+    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+    val isLocationEnabled = locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager)
+
+    Log.d(
+        "OnDemandWifi",
+        "extractWifiSsid: fineLocation=$hasFineLocation, coarseLocation=$hasCoarseLocation, locationServicesEnabled=$isLocationEnabled",
+    )
 
     if (!hasLocationPermission) {
+      Log.d("OnDemandWifi", "extractWifiSsid: location permission not granted, cannot read SSID")
       return null
     }
+
+    var rawWifiInfoSsid: String? = null
+    var rawConnectionInfoSsid: String? = null
 
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val wifiInfo = caps.transportInfo as? WifiInfo
-        val rawSsid = wifiInfo?.ssid
-        if (!rawSsid.isNullOrBlank() && rawSsid != WifiManager.UNKNOWN_SSID && rawSsid != "<unknown ssid>") {
-          return rawSsid.removeSurrounding("\"")
+        rawWifiInfoSsid = wifiInfo?.ssid
+        Log.d("OnDemandWifi", "extractWifiSsid: raw wifiInfo?.ssid=$rawWifiInfoSsid")
+        val sanitized = sanitizeSsid(rawWifiInfoSsid)
+        if (sanitized != null) {
+          Log.d("OnDemandWifi", "extractWifiSsid: resolved SSID from wifiInfo: $sanitized")
+          return sanitized
         }
       }
 
       val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-      val rawSsid = wifiManager?.connectionInfo?.ssid
-      if (!rawSsid.isNullOrBlank() && rawSsid != WifiManager.UNKNOWN_SSID && rawSsid != "<unknown ssid>") {
-        return rawSsid.removeSurrounding("\"")
+      @Suppress("DEPRECATION")
+      val connectionInfo = wifiManager?.connectionInfo
+      rawConnectionInfoSsid = connectionInfo?.ssid
+      Log.d("OnDemandWifi", "extractWifiSsid: raw fallback connectionInfo?.ssid=$rawConnectionInfoSsid")
+      val sanitized = sanitizeSsid(rawConnectionInfoSsid)
+      if (sanitized != null) {
+        Log.d("OnDemandWifi", "extractWifiSsid: resolved SSID from connectionInfo: $sanitized")
+        return sanitized
       }
     } catch (e: Exception) {
-      TSLog.w(TAG, "Failed to extract Wi-Fi SSID: ${e.message}")
+      Log.w("OnDemandWifi", "Failed to extract Wi-Fi SSID: ${e.message}", e)
     }
 
+    Log.d(
+        "OnDemandWifi",
+        "extractWifiSsid: could not determine valid SSID (rawWifiInfo=$rawWifiInfoSsid, rawConnectionInfo=$rawConnectionInfoSsid)",
+    )
     return null
   }
+
+  fun sanitizeSsid(raw: String?): String? = com.tailscale.ipn.sanitizeSsid(raw)
+}
+
+fun sanitizeSsid(raw: String?): String? {
+  if (raw.isNullOrBlank() ||
+      raw == WifiManager.UNKNOWN_SSID ||
+      raw == "<unknown ssid>" ||
+      raw == "0x" ||
+      raw == "0x00") {
+    return null
+  }
+  val cleaned = raw.trim().removeSurrounding("\"").trim()
+  if (cleaned.isBlank() ||
+      cleaned == WifiManager.UNKNOWN_SSID ||
+      cleaned == "<unknown ssid>" ||
+      cleaned == "0x" ||
+      cleaned == "0x00") {
+    return null
+  }
+  return cleaned
 }

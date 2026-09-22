@@ -918,4 +918,64 @@ object StardomLocalization {
         AppLanguage.RU -> "[ + ВЫБРАТЬ ]"
         AppLanguage.EN -> "[ + SELECT ]"
       }
+
+  fun onDemandLocationAccessGranted(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Доступ к геолокации: разрешён"
+        AppLanguage.EN -> "Location permission: granted"
+      }
+
+  fun onDemandLocationAccessDenied(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Доступ к геолокации: не разрешён"
+        AppLanguage.EN -> "Location permission: not granted"
+      }
+
+  fun onDemandLocationServicesDisabled(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Службы геолокации: выключены"
+        AppLanguage.EN -> "Location services: disabled"
+      }
+
+  fun onDemandLocationServicesEnabled(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Службы геолокации: включены"
+        AppLanguage.EN -> "Location services: enabled"
+      }
+
+  fun onDemandEnableLocationBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ВКЛЮЧИТЬ ГЕОЛОКАЦИЮ"
+        AppLanguage.EN -> "ENABLE LOCATION"
+      }
+
+  fun onDemandScanBlocked(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ANDROID"
+        AppLanguage.EN -> "SCAN BLOCKED BY ANDROID"
+      }
+
+  fun onDemandScanLocationOff(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "ГЕОЛОКАЦИЯ ВЫКЛЮЧЕНА"
+        AppLanguage.EN -> "LOCATION SERVICES DISABLED"
+      }
+
+  fun onDemandScanNoPermission(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "НЕТ РАЗРЕШЕНИЯ"
+        AppLanguage.EN -> "PERMISSION MISSING"
+      }
+
+  fun onDemandScanTimeout(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "СКАНИРОВАНИЕ НЕ ЗАВЕРШЕНО"
+        AppLanguage.EN -> "SCAN TIMED OUT"
+      }
+
+  fun onDemandKnownBadge(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "[ ИЗВЕСТНА ]"
+        AppLanguage.EN -> "[ KNOWN ]"
+      }
 }
