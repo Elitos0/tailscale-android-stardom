@@ -363,6 +363,71 @@ class NetworkChangeCallbackTest {
     )
   }
 
+  @Test
+  fun activeNetworkSnapshot_containsNetworkId() {
+    val network = mock(Network::class.java)
+    val caps = mock(NetworkCapabilities::class.java)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)).thenReturn(true)
+
+    NetworkChangeCallback.updateNetworkForTesting(network, caps = caps)
+
+    val snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    val expectedId = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+      network.networkHandle
+    } else {
+      network.hashCode().toLong()
+    }
+    assertEquals(expectedId, snapshot.networkId)
+  }
+
+  @Test
+  fun updateNetworkForTesting_preservesExplicitSsid() {
+    val network = mock(Network::class.java)
+    val caps = mock(NetworkCapabilities::class.java)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)).thenReturn(true)
+
+    NetworkChangeCallback.updateNetworkForTesting(network, caps = caps, ssid = "MyHomeWifi")
+
+    val snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals(com.tailscale.ipn.product.ondemand.NetworkTransport.WIFI, snapshot.transport)
+    assertEquals("MyHomeWifi", snapshot.ssid)
+  }
+
+  @Test
+  fun refreshActiveNetwork_doesNotOverwriteExistingCapsOrSsid() {
+    val context = mock(android.content.Context::class.java)
+    val cm = mock(android.net.ConnectivityManager::class.java)
+    val network = mock(Network::class.java)
+    val originalCaps = mock(NetworkCapabilities::class.java)
+    val newRedactedCaps = mock(NetworkCapabilities::class.java)
+
+    `when`(context.applicationContext).thenReturn(context)
+    `when`(context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)).thenReturn(cm)
+    `when`(cm.activeNetwork).thenReturn(network)
+    `when`(cm.getNetworkCapabilities(network)).thenReturn(newRedactedCaps)
+
+    `when`(originalCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(originalCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(originalCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(originalCaps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)).thenReturn(true)
+
+    NetworkChangeCallback.setApplicationContext(context)
+    NetworkChangeCallback.updateNetworkForTesting(network, caps = originalCaps, ssid = "KnownSsid")
+
+    // Run refreshActiveNetwork - cm.getNetworkCapabilities should NOT overwrite originalCaps or SSID
+    NetworkChangeCallback.refreshActiveNetwork()
+
+    val snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals("KnownSsid", snapshot.ssid)
+    assertEquals(com.tailscale.ipn.product.ondemand.NetworkTransport.WIFI, snapshot.transport)
+  }
+
   private fun candidate(
       name: String,
       internet: Boolean = true,

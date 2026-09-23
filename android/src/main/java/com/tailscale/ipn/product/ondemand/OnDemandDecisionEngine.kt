@@ -20,10 +20,15 @@ object OnDemandDecisionEngine {
         when (config.wifiScope) {
           WifiRuleScope.ALL -> config.wifiAction
           WifiRuleScope.ONLY_SELECTED -> {
-            if (network.ssid != null && config.selectedSsids.contains(network.ssid)) {
-              config.wifiAction
+            if (network.ssid != null) {
+              if (config.selectedSsids.contains(network.ssid)) {
+                config.wifiAction
+              } else {
+                config.unlistedWifiAction
+              }
             } else {
-              config.unlistedWifiAction
+              // SSID is not determined yet; do NOT treat as unlisted; return NoAction!
+              OnDemandAction.DO_NOTHING
             }
           }
         }

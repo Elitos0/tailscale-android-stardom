@@ -125,7 +125,7 @@ fun interface VpnStopCommandRegistration {
   fun unregister()
 }
 
-class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
+class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit = {}) {
   private val lock = Any()
   private var generation = 0L
   private var registeredHandler: Pair<Long, () -> Unit>? = null
@@ -144,14 +144,15 @@ class VpnStopCommandDispatcher(private val fallbackDispatch: () -> Unit) {
     }
   }
 
-  fun dispatchStopCommand() {
+  fun dispatchStopCommand(): Boolean {
     synchronized(lock) {
-      // Delivery must be linearizable with registration lifecycle changes: once STOP selects a
-      // handler, that handler must queue WantRunning=false and enter the close fence before a new
-      // service can register and start. JVM monitors are reentrant, so same-thread unregister or
-      // replacement from a handler is safe. Production handlers do not wait for another thread to
-      // register or unregister.
-      (registeredHandler?.second ?: fallbackDispatch).invoke()
+      val handler = registeredHandler?.second
+      if (handler != null) {
+        handler.invoke()
+        return true
+      }
+      fallbackDispatch.invoke()
+      return false
     }
   }
 }

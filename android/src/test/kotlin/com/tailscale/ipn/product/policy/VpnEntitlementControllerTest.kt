@@ -492,6 +492,33 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun stopDispatcherReturnsTrueWhenHandlerRegisteredAndFalseWhenFallback() {
+    val fallbackCount = AtomicInteger()
+    val handlerCount = AtomicInteger()
+    val dispatcher = VpnStopCommandDispatcher { fallbackCount.incrementAndGet() }
+
+    // No handler registered -> calls fallback and returns false
+    val resultWithoutHandler = dispatcher.dispatchStopCommand()
+    assertEquals(false, resultWithoutHandler)
+    assertEquals(1, fallbackCount.get())
+    assertEquals(0, handlerCount.get())
+
+    // Register handler -> calls handler and returns true
+    val registration = dispatcher.register { handlerCount.incrementAndGet() }
+    val resultWithHandler = dispatcher.dispatchStopCommand()
+    assertEquals(true, resultWithHandler)
+    assertEquals(1, fallbackCount.get()) // fallback not called again
+    assertEquals(1, handlerCount.get())
+
+    // Unregister -> back to fallback
+    registration.unregister()
+    val resultAfterUnregister = dispatcher.dispatchStopCommand()
+    assertEquals(false, resultAfterUnregister)
+    assertEquals(2, fallbackCount.get())
+    assertEquals(1, handlerCount.get())
+  }
+
+  @Test
   fun stopDispatchWinningRaceFinishesOldHandlerBeforeNewRegistrationAndTrueWrite() {
     val dispatcher = VpnStopCommandDispatcher {}
     val writes = mutableListOf<Boolean>()

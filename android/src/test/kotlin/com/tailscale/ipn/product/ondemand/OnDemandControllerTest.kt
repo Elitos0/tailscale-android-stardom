@@ -138,4 +138,170 @@ class OnDemandControllerTest {
     // Connect succeeds on the new network
     assertEquals(1, connects)
   }
+
+  @Test
+  fun debounce_identicalPendingDecisionDoesNotRestartTimer() = runTest {
+    val networkFlow = MutableStateFlow(ActiveNetworkSnapshot(transport = NetworkTransport.NONE))
+    val configFlow = MutableStateFlow(
+        OnDemandConfig(enabled = true, cellularAction = OnDemandAction.CONNECT)
+    )
+    val isVpnRunningFlow = MutableStateFlow(false)
+    var connects = 0
+
+    val controller = OnDemandController(
+        networkFlow = networkFlow,
+        configFlow = configFlow,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = { connects++ },
+        onDisconnect = {},
+        connectDebounceMs = 2000L,
+        disconnectDebounceMs = 4000L,
+    )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    // Switch to cellular (networkId = 100) -> schedules CONNECT with 2000ms debounce
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.CELLULAR, networkId = 100L)
+    runCurrent()
+
+    // Advance 1000ms: timer at 1000/2000ms
+    advanceTimeBy(1000L)
+    runCurrent()
+    assertEquals(0, connects)
+
+    // Capabilities or validation update arrives for SAME decision and SAME networkKey
+    networkFlow.value = ActiveNetworkSnapshot(
+        transport = NetworkTransport.CELLULAR,
+        networkId = 100L,
+        isValidated = true
+    )
+    runCurrent()
+
+    // Advance 1001ms (total 2001ms from initial event): original debounce MUST finish and fire
+    advanceTimeBy(1001L)
+    runCurrent()
+    assertEquals(1, connects)
+  }
+
+  @Test
+  fun manualOverride_ignoredOnWifiWhenSsidIsNull() = runTest {
+    val networkFlow = MutableStateFlow(ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = null))
+    val configFlow = MutableStateFlow(
+        OnDemandConfig(
+            enabled = true,
+            wifiScope = WifiRuleScope.ONLY_SELECTED,
+            selectedSsids = setOf("Home-5G"),
+            wifiAction = OnDemandAction.CONNECT
+        )
+    )
+    val isVpnRunningFlow = MutableStateFlow(true)
+    var connects = 0
+
+    val controller = OnDemandController(
+        networkFlow = networkFlow,
+        configFlow = configFlow,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = { connects++ },
+        onDisconnect = {},
+        connectDebounceMs = 500L,
+        disconnectDebounceMs = 500L,
+    )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    // User toggles off while on Wi-Fi with null SSID: MUST NOT record override for all Wi-Fi
+    controller.notifyManualVpnToggle(false)
+    isVpnRunningFlow.value = false
+    runCurrent()
+
+    // Now Wi-Fi SSID resolves to "Home-5G" -> requires CONNECT
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = "Home-5G")
+    runCurrent()
+    advanceTimeBy(600L)
+    runCurrent()
+
+    // Connect succeeds because null-SSID Wi-Fi did not set manual override
+    assertEquals(1, connects)
+  }
+
+  @Test
+  fun disconnect_onSelectedWifi_executesWithoutInternetValidation() = runTest {
+    val networkFlow = MutableStateFlow(ActiveNetworkSnapshot(transport = NetworkTransport.NONE))
+    val configFlow = MutableStateFlow(
+        OnDemandConfig(
+            enabled = true,
+            wifiScope = WifiRuleScope.ONLY_SELECTED,
+            selectedSsids = setOf("Home-NoInternet"),
+            wifiAction = OnDemandAction.DISCONNECT,
+        )
+    )
+    val isVpnRunningFlow = MutableStateFlow(true)
+    var disconnects = 0
+
+    val controller = OnDemandController(
+        networkFlow = networkFlow,
+        configFlow = configFlow,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = {},
+        onDisconnect = { disconnects++ },
+        connectDebounceMs = 500L,
+        disconnectDebounceMs = 500L,
+    )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    // Connected to selected Wi-Fi, but internet is NOT validated (isValidated = false)
+    networkFlow.value = ActiveNetworkSnapshot(
+        transport = NetworkTransport.WIFI,
+        ssid = "Home-NoInternet",
+        isValidated = false
+    )
+    runCurrent()
+    advanceTimeBy(600L)
+    runCurrent()
+
+    // Disconnect MUST execute even though isValidated is false
+    assertEquals(1, disconnects)
+  }
+
+  @Test
+  fun networkKey_distinguishesDifferentNetworkIds() = runTest {
+    val networkFlow = MutableStateFlow(
+        ActiveNetworkSnapshot(transport = NetworkTransport.CELLULAR, networkId = 1L)
+    )
+    val configFlow = MutableStateFlow(
+        OnDemandConfig(enabled = true, cellularAction = OnDemandAction.CONNECT)
+    )
+    val isVpnRunningFlow = MutableStateFlow(true)
+    var connects = 0
+
+    val controller = OnDemandController(
+        networkFlow = networkFlow,
+        configFlow = configFlow,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = { connects++ },
+        onDisconnect = {},
+        connectDebounceMs = 500L,
+        disconnectDebounceMs = 500L,
+    )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    // User manually toggles VPN off on Cellular network 1
+    controller.notifyManualVpnToggle(false)
+    isVpnRunningFlow.value = false
+    runCurrent()
+    advanceTimeBy(600L)
+    runCurrent()
+    assertEquals(0, connects)
+
+    // Switch to Cellular network 2 (different networkId)
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.CELLULAR, networkId = 2L)
+    runCurrent()
+    advanceTimeBy(600L)
+    runCurrent()
+
+    // Connect succeeds because networkId changed!
+    assertEquals(1, connects)
+  }
 }

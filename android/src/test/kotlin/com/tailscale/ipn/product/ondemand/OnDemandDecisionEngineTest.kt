@@ -120,9 +120,26 @@ class OnDemandDecisionEngineTest {
     assertEquals(OnDemandDecision.Connect, OnDemandDecisionEngine.evaluate(publicWifi, config, isVpnRunning = false))
     assertEquals(OnDemandDecision.NoAction, OnDemandDecisionEngine.evaluate(publicWifi, config, isVpnRunning = true))
 
-    // Null SSID (e.g. without location permission) also falls back to unlistedWifiAction
-    assertEquals(OnDemandDecision.Connect, OnDemandDecisionEngine.evaluate(nullSsidWifi, config, isVpnRunning = false))
+    // When ssid == null, it MUST evaluate to NoAction
+    assertEquals(OnDemandDecision.NoAction, OnDemandDecisionEngine.evaluate(nullSsidWifi, config, isVpnRunning = false))
     assertEquals(OnDemandDecision.NoAction, OnDemandDecisionEngine.evaluate(nullSsidWifi, config, isVpnRunning = true))
+  }
+
+  @Test
+  fun evaluate_wifi_scopeOnlySelected_otherWifiFallsBackToUnlisted() {
+    val config = OnDemandConfig(
+        enabled = true,
+        wifiScope = WifiRuleScope.ONLY_SELECTED,
+        wifiAction = OnDemandAction.DISCONNECT,
+        selectedSsids = setOf("Home-5G"),
+        unlistedWifiAction = OnDemandAction.CONNECT,
+    )
+
+    val otherWifi = ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = "OtherWifi")
+
+    // Valid non-null SSID not in selected falls back to unlistedWifiAction (CONNECT)
+    assertEquals(OnDemandDecision.Connect, OnDemandDecisionEngine.evaluate(otherWifi, config, isVpnRunning = false))
+    assertEquals(OnDemandDecision.NoAction, OnDemandDecisionEngine.evaluate(otherWifi, config, isVpnRunning = true))
   }
 
   @Test

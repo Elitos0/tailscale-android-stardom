@@ -63,6 +63,7 @@ object NetworkChangeCallback {
   private data class NetworkInfo(
       var caps: NetworkCapabilities? = null,
       var linkProps: LinkProperties? = null,
+      var ssid: String? = null,
   )
 
   private val lock = ReentrantLock()
@@ -106,11 +107,13 @@ object NetworkChangeCallback {
     lock.withLock {
       val activeNet = cm.activeNetwork
       if (activeNet != null) {
-        val caps = cm.getNetworkCapabilities(activeNet)
-        val linkProps = cm.getLinkProperties(activeNet)
         val info = activeNetworks.getOrPut(activeNet) { NetworkInfo() }
-        if (caps != null) info.caps = caps
-        if (linkProps != null) info.linkProps = linkProps
+        if (info.caps == null) {
+          info.caps = cm.getNetworkCapabilities(activeNet)
+        }
+        if (info.linkProps == null) {
+          info.linkProps = cm.getLinkProperties(activeNet)
+        }
       }
       recomputeDefaultNetworkLocked("manualRefresh")
     }
@@ -211,7 +214,14 @@ object NetworkChangeCallback {
       dns: DnsConfig,
   ) {
     lock.withLock {
-      activeNetworks[network]?.caps = capabilities
+      val info = activeNetworks.getOrPut(network) { NetworkInfo() }
+      info.caps = capabilities
+
+      val discoveredSsid = extractWifiSsid(capabilities)
+      if (discoveredSsid != null) {
+        info.ssid = discoveredSsid
+        ssidDiscoveryListener?.invoke(discoveredSsid)
+      }
 
       if (recomputeDefaultNetworkLocked("onCapabilitiesChanged")) {
         maybeUpdateDNSConfig("onCapabilitiesChanged", dns)
@@ -276,14 +286,30 @@ object NetworkChangeCallback {
     if (cm != null) {
       val activeNet = cm.activeNetwork
       if (activeNet != null && !activeNetworks.containsKey(activeNet)) {
-        activeNetworks[activeNet] = NetworkInfo(
-            caps = cm.getNetworkCapabilities(activeNet),
-            linkProps = cm.getLinkProperties(activeNet),
-        )
+        val caps = cm.getNetworkCapabilities(activeNet)
+        if (caps != null) {
+          activeNetworks[activeNet] = NetworkInfo(
+              caps = caps,
+              linkProps = cm.getLinkProperties(activeNet),
+          )
+        }
       }
-      for ((net, info) in activeNetworks) {
-        cm.getNetworkCapabilities(net)?.let { info.caps = it }
-        cm.getLinkProperties(net)?.let { info.linkProps = it }
+      val iterator = activeNetworks.entries.iterator()
+      while (iterator.hasNext()) {
+        val entry = iterator.next()
+        val net = entry.key
+        val info = entry.value
+        if (info.caps == null) {
+          val caps = cm.getNetworkCapabilities(net)
+          if (caps == null) {
+            iterator.remove()
+            continue
+          }
+          info.caps = caps
+        }
+        if (info.linkProps == null) {
+          info.linkProps = cm.getLinkProperties(net)
+        }
       }
     }
 
@@ -314,11 +340,13 @@ object NetworkChangeCallback {
       network: Network,
       caps: NetworkCapabilities? = null,
       linkProps: LinkProperties? = null,
+      ssid: String? = null,
   ) {
     lock.withLock {
       val info = activeNetworks.getOrPut(network) { NetworkInfo() }
       caps?.let { info.caps = it }
       linkProps?.let { info.linkProps = it }
+      ssid?.let { info.ssid = it }
       recomputeDefaultNetworkLocked("test")
     }
   }
@@ -385,12 +413,16 @@ object NetworkChangeCallback {
   }
 
   private fun updateActiveNetworkSnapshotLocked(info: NetworkInfo?) {
+    val networkId = cachedDefaultNetwork?.let {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) it.networkHandle else it.hashCode().toLong()
+    }
     val caps = info?.caps
     if (caps == null) {
       _activeNetworkSnapshot.value = ActiveNetworkSnapshot(
           transport = NetworkTransport.NONE,
           ssid = null,
           isValidated = false,
+          networkId = networkId,
       )
       return
     }
@@ -404,18 +436,16 @@ object NetworkChangeCallback {
     }
 
     val ssid = if (transport == NetworkTransport.WIFI) {
-      extractWifiSsid(caps)
+      info.ssid
     } else {
       null
     }
 
-    if (ssid != null && ssid.isNotBlank()) {
-      ssidDiscoveryListener?.invoke(ssid)
-    }
     _activeNetworkSnapshot.value = ActiveNetworkSnapshot(
         transport = transport,
         ssid = ssid,
         isValidated = isValidated,
+        networkId = networkId,
     )
   }
 

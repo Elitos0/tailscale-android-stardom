@@ -114,7 +114,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     )
   }
   val vpnStopCommandDispatcher: VpnStopCommandDispatcher by lazy {
-    VpnStopCommandDispatcher(::stopVPN)
+    VpnStopCommandDispatcher()
   }
   val vpnRuntimeTracker: VpnRuntimeStateTracker by lazy {
     VpnRuntimeStateTracker(vpnStopCommandDispatcher::dispatchStopCommand)
@@ -165,7 +165,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
         configFlow = onDemandRepository.config,
         isVpnRunningFlow = isVpnRunningFlow,
         onConnect = { startVPN(VpnStartOrigin.OnDemand) },
-        onDisconnect = { stopVPN() },
+        onDisconnect = { stopVPN(isManual = false) },
     )
   }
   private val serializedWantRunningWriter: SerializedVpnWantRunningWriter by lazy {
@@ -852,7 +852,7 @@ open class UninitializedApp : Application() {
         (origin == VpnStartOrigin.QuickSettings ||
          origin == VpnStartOrigin.InternalWorker ||
          origin == VpnStartOrigin.OnDemand)) {
-      initializedApp.stopVPN()
+      initializedApp.stopVPN(isManual = false)
     }
     return result
   }
@@ -872,9 +872,13 @@ open class UninitializedApp : Application() {
     }
   }
 
-  fun stopVPN() {
+  @JvmOverloads
+  fun stopVPN(isManual: Boolean = true) {
     val initializedApp = this as? App
-    initializedApp?.onDemandController?.notifyManualVpnToggle(false)
+    if (isManual) {
+      initializedApp?.onDemandController?.notifyManualVpnToggle(false)
+    }
+    if (initializedApp?.vpnStopCommandDispatcher?.dispatchStopCommand() == true) return
     val intent = Intent(this, IPNService::class.java).apply { action = IPNService.ACTION_STOP_VPN }
     try {
       startService(intent)

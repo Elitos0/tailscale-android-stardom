@@ -14,6 +14,7 @@ data class ActiveNetworkSnapshot(
     val transport: NetworkTransport = NetworkTransport.NONE,
     val ssid: String? = null,
     val isValidated: Boolean = false,
+    val networkId: Long? = null,
 )
 
 enum class OnDemandAction {

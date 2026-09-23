@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 package com.tailscale.ipn
 
+import android.Manifest
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.Network
 import android.net.VpnService
 import android.os.Build
+import androidx.core.content.ContextCompat
 import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.product.policy.VpnServiceRunCoordinator
@@ -236,9 +239,30 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       exitNodeName: String? = null
   ) {
     try {
-      startForeground(
-          UninitializedApp.STATUS_NOTIFICATION_ID,
-          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName))
+      val notification =
+          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        val hasLocation =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val fgsType =
+            if (hasLocation) {
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                  ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            } else {
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            }
+        startForeground(UninitializedApp.STATUS_NOTIFICATION_ID, notification, fgsType)
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(
+            UninitializedApp.STATUS_NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+      } else {
+        startForeground(UninitializedApp.STATUS_NOTIFICATION_ID, notification)
+      }
     } catch (e: Exception) {
       TSLog.e(TAG, "Failed to start foreground service: $e")
     }

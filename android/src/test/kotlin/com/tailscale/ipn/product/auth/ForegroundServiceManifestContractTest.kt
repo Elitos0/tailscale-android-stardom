@@ -22,6 +22,9 @@ class ForegroundServiceManifestContractTest {
     assertTrue(
         "Must declare FOREGROUND_SERVICE_SPECIAL_USE permission for targetSdk 34+ compliance",
         content.contains("android.permission.FOREGROUND_SERVICE_SPECIAL_USE\""))
+    assertTrue(
+        "Must declare FOREGROUND_SERVICE_LOCATION permission for Wi-Fi SSID access in foreground service",
+        content.contains("android.permission.FOREGROUND_SERVICE_LOCATION\""))
     assertFalse(
         "Must not declare FOREGROUND_SERVICE_SYSTEM_EXEMPTED to prevent targetSdk 36 SecurityException",
         content.contains("android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED"))
@@ -33,8 +36,8 @@ class ForegroundServiceManifestContractTest {
         content.contains("USE_EXACT_ALARM"))
 
     assertTrue(
-        "IPNService must declare foregroundServiceType specialUse",
-        content.contains("android:foregroundServiceType=\"specialUse\""))
+        "IPNService must declare foregroundServiceType specialUse|location",
+        content.contains("android:foregroundServiceType=\"specialUse|location\""))
     assertTrue(
         "IPNService must declare PROPERTY_SPECIAL_USE_FGS_SUBTYPE property",
         content.contains("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"))
