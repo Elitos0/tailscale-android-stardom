@@ -108,6 +108,9 @@ class StardomSettingsSheetTest {
               StardomLocalization.onDemandNoSelectedSsids(lang),
               StardomLocalization.onDemandLocationPermissionNotice(lang),
               StardomLocalization.onDemandLocationPermissionGrant(lang),
+              StardomLocalization.onDemandBgLocationNotice(lang),
+              StardomLocalization.onDemandBgLocationGrantBtn(lang),
+              StardomLocalization.onDemandMonitorNotificationText(lang),
               StardomLocalization.onDemandCurrentNetworkHeader(lang),
               StardomLocalization.onDemandKnownNetworksHeader(lang),
               StardomLocalization.onDemandNoKnownNetworks(lang),
@@ -369,6 +372,11 @@ class StardomSettingsSheetTest {
         assertEquals("НЕТ РАЗРЕШЕНИЯ", scanNoPermission)
         assertEquals("СКАНИРОВАНИЕ НЕ ЗАВЕРШЕНО", scanTimeout)
         assertEquals("[ ИЗВЕСТНА ]", knownBadge)
+        assertEquals(
+            "Для автоматического переключения в фоне требуется доступ к геолокации в любом режиме.",
+            StardomLocalization.onDemandBgLocationNotice(lang))
+        assertEquals("РАЗРЕШИТЬ В ФОНЕ", StardomLocalization.onDemandBgLocationGrantBtn(lang))
+        assertEquals("Автоматизация сети активна", StardomLocalization.onDemandMonitorNotificationText(lang))
       } else {
         assertEquals("Location permission: granted", accessGranted)
         assertEquals("Location permission: not granted", accessDenied)
@@ -380,6 +388,11 @@ class StardomSettingsSheetTest {
         assertEquals("PERMISSION MISSING", scanNoPermission)
         assertEquals("SCAN TIMED OUT", scanTimeout)
         assertEquals("[ KNOWN ]", knownBadge)
+        assertEquals(
+            "Background network automation requires location access set to 'Allow all the time'.",
+            StardomLocalization.onDemandBgLocationNotice(lang))
+        assertEquals("ALLOW IN BACKGROUND", StardomLocalization.onDemandBgLocationGrantBtn(lang))
+        assertEquals("Network automation active", StardomLocalization.onDemandMonitorNotificationText(lang))
       }
     }
   }

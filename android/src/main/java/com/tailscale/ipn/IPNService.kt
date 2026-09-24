@@ -55,20 +55,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     super.onCreate()
     // grab app to make sure it initializes
     app = App.get()
-    runCoordinator =
-        VpnServiceRunCoordinator(
-            runtime = app.vpnRuntimeTracker,
-            authorizer = app.vpnEntitlementController,
-            wantRunningWriter =
-                VpnWantRunningWriter { wantRunning, onComplete ->
-                  app.setWantRunning(
-                      wantRunning,
-                      onSuccess = { onComplete(Result.success(Unit)) },
-                      onFailure = { error -> onComplete(Result.failure(error)) },
-                  )
-                },
-            scope = scope,
-        )
+    runCoordinator = createRunCoordinator()
     startRejectionBoundary =
         VpnServiceStartRejectionBoundary(app.vpnEntitlementController::revokeRejectedRuntimeStart)
     stopCommandRegistration = app.vpnStopCommandDispatcher.register(::handleStopCommand)
@@ -81,6 +68,9 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     when (intent?.action) {
       ACTION_STOP_VPN -> {
         handleStopCommand()
+      }
+      ACTION_START_MONITOR -> {
+        showForegroundNotification()
       }
       ACTION_RESTART_VPN -> {
         scope.launch {
@@ -180,9 +170,38 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     startRejectionBoundary.reject()
   }
 
+  private fun createRunCoordinator(): VpnServiceRunCoordinator {
+    return VpnServiceRunCoordinator(
+        runtime = app.vpnRuntimeTracker,
+        authorizer = app.vpnEntitlementController,
+        wantRunningWriter =
+            VpnWantRunningWriter { wantRunning, onComplete ->
+              app.setWantRunning(
+                  wantRunning,
+                  onSuccess = { onComplete(Result.success(Unit)) },
+                  onFailure = { error -> onComplete(Result.failure(error)) },
+              )
+            },
+        scope = scope,
+    )
+  }
+
   private fun handleStopCommand() {
     app.setWantRunning(false)
-    close()
+    val isOnDemandEnabled = app.onDemandRepository.config.value.enabled
+    if (isOnDemandEnabled) {
+      // Keep IPNService running in foreground monitor mode for On Demand!
+      runCoordinator.close {
+        Notifier.setState(Ipn.State.Stopped)
+        // Disconnect tunnel but do NOT call stopSelf()
+        Libtailscale.serviceDisconnect(this)
+      }
+      runCoordinator = createRunCoordinator()
+      closed.set(false)
+      showForegroundNotification()
+    } else {
+      close()
+    }
   }
 
   override fun close() {
@@ -239,8 +258,12 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       exitNodeName: String? = null
   ) {
     try {
+      val isMonitorMode = app.onDemandRepository.config.value.enabled &&
+          Notifier.state.value != Ipn.State.Running &&
+          Notifier.state.value != Ipn.State.Starting
+      val vpnRunning = !isMonitorMode
       val notification =
-          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName)
+          UninitializedApp.get().buildStatusNotification(vpnRunning, hideDisconnectAction, exitNodeName)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         val hasLocation =
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -256,10 +279,19 @@ open class IPNService : VpnService(), libtailscale.IPNService {
             }
         startForeground(UninitializedApp.STATUS_NOTIFICATION_ID, notification, fgsType)
       } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        startForeground(
-            UninitializedApp.STATUS_NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        val hasLocation =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (hasLocation) {
+          startForeground(
+              UninitializedApp.STATUS_NOTIFICATION_ID,
+              notification,
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+          startForeground(UninitializedApp.STATUS_NOTIFICATION_ID, notification)
+        }
       } else {
         startForeground(UninitializedApp.STATUS_NOTIFICATION_ID, notification)
       }
@@ -366,6 +398,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     const val ACTION_STOP_VPN = "com.tailscale.ipn.STOP_VPN"
     const val ACTION_RESTART_VPN = "com.tailscale.ipn.RESTART_VPN"
     const val ACTION_START_FOREGROUND_ONLY = "com.tailscale.ipn.START_FOREGROUND_ONLY"
+    const val ACTION_START_MONITOR = "com.tailscale.ipn.START_MONITOR"
   }
 }
 

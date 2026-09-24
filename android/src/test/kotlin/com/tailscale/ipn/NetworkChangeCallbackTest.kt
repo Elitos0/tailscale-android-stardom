@@ -428,6 +428,25 @@ class NetworkChangeCallbackTest {
     assertEquals(com.tailscale.ipn.product.ondemand.NetworkTransport.WIFI, snapshot.transport)
   }
 
+  @Test
+  fun multipleWifiCandidates_prefersCandidateWithSsid() {
+    val wifiWithoutSsid = candidate("wifi-no-ssid", isWifi = true, hasSsid = false, nonMetered = true)
+    val wifiWithSsid = candidate("wifi-with-ssid", isWifi = true, hasSsid = true, nonMetered = true)
+
+    assertEquals(
+        "wifi-with-ssid",
+        pickPreferredNetwork(listOf(wifiWithoutSsid, wifiWithSsid))
+    )
+  }
+
+  @Test
+  fun multipleWifiCandidates_neitherHasSsid_picksFirstNonMetered() {
+    val wifi1 = candidate("wifi-1", isWifi = true, hasSsid = false, nonMetered = true)
+    val wifi2 = candidate("wifi-2", isWifi = true, hasSsid = false, nonMetered = true)
+
+    assertEquals("wifi-1", pickPreferredNetwork(listOf(wifi1, wifi2)))
+  }
+
   private fun candidate(
       name: String,
       internet: Boolean = true,
@@ -435,6 +454,8 @@ class NetworkChangeCallbackTest {
       validated: Boolean = true,
       hasDns: Boolean = true,
       nonMetered: Boolean = false,
+      isWifi: Boolean = false,
+      hasSsid: Boolean = false,
   ) =
       NetworkCandidate(
           value = name,
@@ -443,5 +464,7 @@ class NetworkChangeCallbackTest {
           validated = validated,
           hasDns = hasDns,
           nonMetered = nonMetered,
+          isWifi = isWifi,
+          hasSsid = hasSsid,
       )
 }

@@ -61,6 +61,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.tailscale.ipn.ui.localapi.Client
+import com.tailscale.ipn.ui.model.AppLanguage
+import com.tailscale.ipn.ui.model.StardomLocalization
 import com.tailscale.ipn.ui.localapi.Request
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.model.Netmap
@@ -321,6 +323,11 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     NetworkChangeCallback.setApplicationContext(this)
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
     onDemandController.start(applicationScope)
+    applicationScope.launch {
+      onDemandRepository.config.collect { config ->
+        updateOnDemandMonitorState(config.enabled)
+      }
+    }
     initViewModels()
     applicationScope.launch {
       val restrictionsManager =
@@ -721,6 +728,27 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     }
     return sb.toString().toByteArray(Charsets.UTF_8)
   }
+
+  fun updateOnDemandMonitorState(enabled: Boolean) {
+    val isRunning = vpnRuntimeTracker.state.value.isStartingOrRunning()
+    if (enabled) {
+      if (!isRunning) {
+        val intent =
+            Intent(this, IPNService::class.java).apply {
+              action = IPNService.ACTION_START_MONITOR
+            }
+        try {
+          startForegroundService(intent)
+        } catch (e: Exception) {
+          TSLog.e(TAG, "updateOnDemandMonitorState: failed to start monitor service: $e")
+        }
+      }
+    } else {
+      if (!isRunning) {
+        stopVPN(isManual = false)
+      }
+    }
+  }
 }
 
 /**
@@ -945,7 +973,16 @@ open class UninitializedApp : Application() {
       hideDisconnectAction: Boolean,
       exitNodeName: String? = null
   ): Notification {
-    val title = getString(if (vpnRunning) R.string.connected else R.string.not_connected)
+    val isOnDemandMonitoring = !vpnRunning && onDemandRepository.config.value.enabled
+    val title =
+        if (isOnDemandMonitoring) {
+          val loc = resources.configuration.locales.get(0) ?: java.util.Locale.getDefault()
+          val lang =
+              if (loc.language.equals("ru", ignoreCase = true)) AppLanguage.RU else AppLanguage.EN
+          StardomLocalization.onDemandMonitorNotificationText(lang)
+        } else {
+          getString(if (vpnRunning) R.string.connected else R.string.not_connected)
+        }
     val message =
         if (vpnRunning && exitNodeName != null) {
           getString(R.string.using_exit_node, exitNodeName)

@@ -35,6 +35,8 @@ internal data class NetworkCandidate<T>(
     val validated: Boolean,
     val hasDns: Boolean,
     val nonMetered: Boolean,
+    val isWifi: Boolean = false,
+    val hasSsid: Boolean = false,
 )
 
 internal fun <T> pickPreferredNetwork(candidates: List<NetworkCandidate<T>>): T? {
@@ -47,7 +49,15 @@ internal fun <T> pickPreferredNetwork(candidates: List<NetworkCandidate<T>>): T?
               (!requireDNS || it.hasDns)
         }
 
-    return matching.firstOrNull { it.nonMetered }?.value ?: matching.firstOrNull()?.value
+    val wifiCandidates = matching.filter { it.isWifi || it.hasSsid }
+    val filtered =
+        if (wifiCandidates.size > 1 && wifiCandidates.any { it.hasSsid }) {
+          matching.filter { !(it.isWifi || it.hasSsid) || it.hasSsid }
+        } else {
+          matching
+        }
+
+    return filtered.firstOrNull { it.nonMetered }?.value ?: filtered.firstOrNull()?.value
   }
 
   return pick(requireValidated = true, requireDNS = true)
@@ -275,6 +285,8 @@ object NetworkChangeCallback {
               validated = info.caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
               hasDns = info.linkProps?.dnsServers?.isNotEmpty() == true,
               nonMetered = info.caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true,
+              isWifi = info.caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true,
+              hasSsid = info.ssid != null,
           )
         })
   }
@@ -299,13 +311,13 @@ object NetworkChangeCallback {
         val entry = iterator.next()
         val net = entry.key
         val info = entry.value
+        val liveCaps = cm.getNetworkCapabilities(net)
+        if (liveCaps == null) {
+          iterator.remove()
+          continue
+        }
         if (info.caps == null) {
-          val caps = cm.getNetworkCapabilities(net)
-          if (caps == null) {
-            iterator.remove()
-            continue
-          }
-          info.caps = caps
+          info.caps = liveCaps
         }
         if (info.linkProps == null) {
           info.linkProps = cm.getLinkProperties(net)
@@ -460,7 +472,6 @@ object NetworkChangeCallback {
         context,
         Manifest.permission.ACCESS_COARSE_LOCATION
     ) == PackageManager.PERMISSION_GRANTED
-    val hasLocationPermission = hasFineLocation || hasCoarseLocation
 
     val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     val isLocationEnabled = locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager)
@@ -470,8 +481,8 @@ object NetworkChangeCallback {
         "extractWifiSsid: fineLocation=$hasFineLocation, coarseLocation=$hasCoarseLocation, locationServicesEnabled=$isLocationEnabled",
     )
 
-    if (!hasLocationPermission) {
-      Log.d("OnDemandWifi", "extractWifiSsid: location permission not granted, cannot read SSID")
+    if (!hasFineLocation) {
+      Log.d("OnDemandWifi", "extractWifiSsid: ACCESS_FINE_LOCATION not granted, cannot read SSID")
       return null
     }
 

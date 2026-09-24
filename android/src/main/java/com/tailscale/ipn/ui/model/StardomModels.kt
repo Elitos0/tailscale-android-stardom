@@ -835,6 +835,24 @@ object StardomLocalization {
         AppLanguage.EN -> "GRANT PERMISSION"
       }
 
+  fun onDemandBgLocationNotice(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Для автоматического переключения в фоне требуется доступ к геолокации в любом режиме."
+        AppLanguage.EN -> "Background network automation requires location access set to 'Allow all the time'."
+      }
+
+  fun onDemandBgLocationGrantBtn(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "РАЗРЕШИТЬ В ФОНЕ"
+        AppLanguage.EN -> "ALLOW IN BACKGROUND"
+      }
+
+  fun onDemandMonitorNotificationText(lang: AppLanguage): String =
+      when (lang) {
+        AppLanguage.RU -> "Автоматизация сети активна"
+        AppLanguage.EN -> "Network automation active"
+      }
+
   fun onDemandSelectNetworkDropdown(lang: AppLanguage): String =
       when (lang) {
         AppLanguage.RU -> "ВЫБОР СЕТИ WI-FI"

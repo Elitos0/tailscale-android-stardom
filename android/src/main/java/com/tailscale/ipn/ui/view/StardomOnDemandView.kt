@@ -3,6 +3,7 @@
 
 package com.tailscale.ipn.ui.view
 
+import com.tailscale.ipn.App
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -117,6 +118,15 @@ fun StardomOnDemandView(
             PackageManager.PERMISSION_GRANTED
     )
   }
+  var hasBackgroundLocation by remember {
+    mutableStateOf(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+        } else {
+          true
+        }
+    )
+  }
 
   val lifecycleOwner = LocalLifecycleOwner.current
   DisposableEffect(lifecycleOwner) {
@@ -128,6 +138,12 @@ fun StardomOnDemandView(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
         isLocationServicesEnabled = isLocationEnabled()
+        hasBackgroundLocation =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+              ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            } else {
+              true
+            }
         NetworkChangeCallback.refreshActiveNetwork()
       }
     }
@@ -144,6 +160,19 @@ fun StardomOnDemandView(
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         isLocationServicesEnabled = isLocationEnabled()
+        hasBackgroundLocation =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+              ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            } else {
+              true
+            }
+        NetworkChangeCallback.refreshActiveNetwork()
+      }
+  val bgLocationLauncher =
+      rememberLauncherForActivityResult(
+          ActivityResultContracts.RequestPermission()
+      ) { granted ->
+        hasBackgroundLocation = granted
         NetworkChangeCallback.refreshActiveNetwork()
       }
 
@@ -243,7 +272,9 @@ fun StardomOnDemandView(
                             if (config.enabled) StardomColors.BorderStrong
                             else StardomColors.Border)
                         .clickable(onClickLabel = "Toggle On Demand") {
-                          repo.updateEnabled(!config.enabled)
+                          val newEnabled = !config.enabled
+                          repo.updateEnabled(newEnabled)
+                          (context.applicationContext as? App)?.updateOnDemandMonitorState(newEnabled)
                         }
                         .padding(14.dp)) {
                   Row(
@@ -588,6 +619,55 @@ fun StardomOnDemandView(
                                             letterSpacing = 0.5.sp)
                                       }
                                 }
+                              }
+                            }
+                      }
+
+                      // Background Location Notice Card (appears if location permission granted but background location missing)
+                      if (hasLocationPermission && !hasBackgroundLocation) {
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .testTag("bg_location_permission_notice")
+                                    .background(StardomColors.Panel)
+                                    .border(1.dp, StardomColors.BorderStrong)
+                                    .padding(14.dp)) {
+                              Column(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = StardomLocalization.onDemandBgLocationNotice(language),
+                                    color = StardomColors.TextSecondary,
+                                    fontSize = 9.sp,
+                                    fontFamily = StardomTechnicalFont(language),
+                                    lineHeight = 14.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(10.dp))
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier =
+                                        Modifier.testTag("grant_bg_location_permission_btn")
+                                            .background(StardomColors.Background)
+                                            .border(1.dp, StardomColors.BorderStrong)
+                                            .clickable {
+                                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                                bgLocationLauncher.launch(
+                                                    Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                                              }
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                      Text(
+                                          text =
+                                              StardomLocalization.onDemandBgLocationGrantBtn(
+                                                  language),
+                                          color = StardomColors.TextPrimary,
+                                          fontSize = 9.sp,
+                                          fontFamily = StardomTechnicalFont(language),
+                                          fontWeight = FontWeight.Bold,
+                                          letterSpacing = 0.5.sp)
+                                    }
                               }
                             }
                       }
