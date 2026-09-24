@@ -41,6 +41,10 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   private val serviceJob = SupervisorJob()
   private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
   private val closed = AtomicBoolean(false)
+  private val coordinatorLock = Any()
+  @Volatile private var isDestroyed = false
+  private var pendingStartOrigin: VpnStartOrigin? = null
+
 
   override fun id(): String {
     return randomID
@@ -55,6 +59,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     super.onCreate()
     // grab app to make sure it initializes
     app = App.get()
+    app.activeIpnService = this
     runCoordinator = createRunCoordinator()
     startRejectionBoundary =
         VpnServiceStartRejectionBoundary(app.vpnEntitlementController::revokeRejectedRuntimeStart)
@@ -97,8 +102,12 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         showForegroundNotification()
       }
       ACTION_START_VPN -> {
+        val originName = intent.getStringExtra(EXTRA_ORIGIN)
+        val origin =
+            originName?.let { runCatching { VpnStartOrigin.valueOf(it) }.getOrNull() }
+                ?: VpnStartOrigin.ServiceStart
         showForegroundNotification()
-        authorizeAndRequestVpn(VpnStartOrigin.ServiceStart)
+        authorizeAndRequestVpn(origin)
       }
       "android.net.VpnService" -> {
         // This means we were started by Android due to Always On VPN.
@@ -119,25 +128,25 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         }
       }
       else -> {
-        // This means that we were restarted after the service was killed
-        // (potentially due to OOM).
-        showForegroundNotification()
-        scope.launch {
-          if (!app.vpnEntitlementController.authorizeStart(VpnStartOrigin.StickyRestart)) {
-            rejectRuntimeStart()
-            return@launch
+        // Service restarted by Android OS (e.g. after process kill / OOM).
+        val isOnDemandEnabled = app.onDemandRepository.config.value.enabled
+        if (isOnDemandEnabled) {
+          // START_STICKY only restores monitor mode, never auto-starts VPN from cached state.
+          // OnDemandController will observe the network state and start the VPN if the
+          // current network rules require it.
+          synchronized(coordinatorLock) {
+            closed.set(false)
+            runCoordinator = createRunCoordinator()
           }
-          if (!app.isAbleToStartVPN()) {
-            rejectRuntimeStart()
-            return@launch
-          }
-          requestVpnAfterAuthorization(VpnStartOrigin.StickyRestart)
+          showForegroundNotification()
+        } else {
+          // If On Demand is disabled, a killed process must never be restarted
+          // from a cached backend-ready bit.
+          stopSelf()
         }
       }
     }
-    // A killed process must never be restarted from a cached backend-ready bit. Android Always-On
-    // may issue a new service start, which will receive another fresh entitlement decision.
-    return START_NOT_STICKY
+    return if (app.onDemandRepository.config.value.enabled) START_STICKY else START_NOT_STICKY
   }
 
   private fun authorizeAndRequestVpn(origin: VpnStartOrigin) {
@@ -150,19 +159,31 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     }
   }
 
+  fun startVpnFromApp(origin: VpnStartOrigin = VpnStartOrigin.ServiceStart) {
+    showForegroundNotification()
+    authorizeAndRequestVpn(origin)
+  }
+
   private fun requestVpnAfterAuthorization(
       origin: VpnStartOrigin,
       beforeRequest: () -> Unit = {},
   ) {
-    if (closed.get()) return
-    runCoordinator.beginAuthorizedStart(
-        origin = origin,
-        requestVpn = {
-          beforeRequest()
-          Libtailscale.requestVPN(this@IPNService)
-        },
-        rejectStart = { rejectRuntimeStart() },
-    )
+    synchronized(coordinatorLock) {
+      if (isDestroyed) return
+      if (closed.get()) {
+        TSLog.d(TAG, "requestVpnAfterAuthorization: teardown in flight, queueing start for origin=$origin")
+        pendingStartOrigin = origin
+        return
+      }
+      runCoordinator.beginAuthorizedStart(
+          origin = origin,
+          requestVpn = {
+            beforeRequest()
+            Libtailscale.requestVPN(this@IPNService)
+          },
+          rejectStart = { rejectRuntimeStart() },
+      )
+    }
   }
 
   private fun rejectRuntimeStart() {
@@ -191,33 +212,82 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     val isOnDemandEnabled = app.onDemandRepository.config.value.enabled
     if (isOnDemandEnabled) {
       // Keep IPNService running in foreground monitor mode for On Demand!
-      runCoordinator.close {
-        Notifier.setState(Ipn.State.Stopped)
-        // Disconnect tunnel but do NOT call stopSelf()
-        Libtailscale.serviceDisconnect(this)
+      // Order teardown before recreate: replacement coordinator must only be installed
+      // AFTER the previous coordinator's close fence (including any deferred action) has completed.
+      synchronized(coordinatorLock) {
+        if (closed.get()) {
+          return
+        }
+        closed.set(true)
+        val coordinatorToClose = runCoordinator
+        coordinatorToClose.close {
+          if (isDestroyed || (::app.isInitialized && app.activeIpnService !== this@IPNService && app.activeIpnService != null)) {
+            TSLog.w(TAG, "handleStopCommand: suppressed disconnect from superseded/destroyed IPNService instance")
+          } else {
+            Notifier.setState(Ipn.State.Stopped)
+            Libtailscale.serviceDisconnect(this)
+            synchronized(coordinatorLock) {
+              if (runCoordinator === coordinatorToClose && app.onDemandRepository.config.value.enabled && !isDestroyed) {
+                runCoordinator = createRunCoordinator()
+                closed.set(false)
+                showForegroundNotification()
+
+                val queuedOrigin = pendingStartOrigin
+                pendingStartOrigin = null
+                if (queuedOrigin != null) {
+                  TSLog.d(TAG, "handleStopCommand: executing queued start for origin=$queuedOrigin")
+                  requestVpnAfterAuthorization(queuedOrigin)
+                }
+              } else {
+                pendingStartOrigin = null
+              }
+            }
+          }
+        }
       }
-      runCoordinator = createRunCoordinator()
-      closed.set(false)
-      showForegroundNotification()
     } else {
       close()
     }
   }
 
   override fun close() {
-    if (!closed.compareAndSet(false, true)) return
-    runCoordinator.close {
-      Notifier.setState(Ipn.State.Stopping)
-      disconnectVPN()
-      Libtailscale.serviceDisconnect(this)
+    synchronized(coordinatorLock) {
+      pendingStartOrigin = null
+      if (!closed.compareAndSet(false, true)) {
+        stopSelf()
+        return
+      }
+      val coordinatorToClose = runCoordinator
+      coordinatorToClose.close {
+        if (::app.isInitialized && app.activeIpnService !== this@IPNService && app.activeIpnService != null) {
+          TSLog.w(TAG, "close: suppressed disconnect from superseded IPNService instance")
+        } else {
+          Notifier.setState(Ipn.State.Stopping)
+          stopSelf()
+          Libtailscale.serviceDisconnect(this)
+        }
+      }
     }
   }
 
   override fun disconnectVPN() {
-    stopSelf()
+    val isOnDemandEnabled = ::app.isInitialized && app.onDemandRepository.config.value.enabled
+    if (isOnDemandEnabled && !isDestroyed) {
+      TSLog.d(TAG, "disconnectVPN: preserving service in monitor mode")
+      handleStopCommand()
+    } else {
+      stopSelf()
+    }
   }
 
   override fun onDestroy() {
+    isDestroyed = true
+    synchronized(coordinatorLock) {
+      pendingStartOrigin = null
+    }
+    if (::app.isInitialized && app.activeIpnService === this) {
+      app.activeIpnService = null
+    }
     NetworkChangeCallback.setUnderlyingNetworkListener(null)
     serviceJob.cancel()
     close()
@@ -399,6 +469,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     const val ACTION_RESTART_VPN = "com.tailscale.ipn.RESTART_VPN"
     const val ACTION_START_FOREGROUND_ONLY = "com.tailscale.ipn.START_FOREGROUND_ONLY"
     const val ACTION_START_MONITOR = "com.tailscale.ipn.START_MONITOR"
+    const val EXTRA_ORIGIN = "com.tailscale.ipn.EXTRA_ORIGIN"
   }
 }
 

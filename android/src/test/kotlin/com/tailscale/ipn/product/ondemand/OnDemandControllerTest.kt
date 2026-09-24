@@ -304,4 +304,85 @@ class OnDemandControllerTest {
     // Connect succeeds because networkId changed!
     assertEquals(1, connects)
   }
+
+  @Test
+  fun backgroundHandover_aSelectedToBNullToBUnlistedToA_exercisesDebounceAndCallbacks() = runTest {
+    val networkFlow = MutableStateFlow(ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = "WifiA", isValidated = true))
+    val configFlow = MutableStateFlow(
+        OnDemandConfig(
+            enabled = true,
+            wifiScope = WifiRuleScope.ONLY_SELECTED,
+            selectedSsids = setOf("WifiA"),
+            wifiAction = OnDemandAction.DISCONNECT,
+            unlistedWifiAction = OnDemandAction.CONNECT,
+        )
+    )
+    val isVpnRunningFlow = MutableStateFlow(true)
+    var connects = 0
+    var disconnects = 0
+
+    val controller = OnDemandController(
+        networkFlow = networkFlow,
+        configFlow = configFlow,
+        isVpnRunningFlow = isVpnRunningFlow,
+        onConnect = {
+          connects++
+          isVpnRunningFlow.value = true
+        },
+        onDisconnect = {
+          disconnects++
+          isVpnRunningFlow.value = false
+        },
+        connectDebounceMs = 2000L,
+        disconnectDebounceMs = 4000L,
+    )
+    controller.start(backgroundScope)
+    runCurrent()
+
+    // Step 1: On selected WifiA with VPN running -> Disconnect scheduled after 4000ms
+    advanceTimeBy(2000L)
+    runCurrent()
+    assertEquals(0, disconnects) // Debounce not fired yet
+
+    advanceTimeBy(2001L)
+    runCurrent()
+    assertEquals(1, disconnects) // Disconnect executed!
+    assertEquals(0, connects)
+    assertEquals(false, isVpnRunningFlow.value)
+
+    // Step 2: New Wi-Fi B connects, but SSID is not yet determined (null SSID)
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = null, isValidated = true)
+    runCurrent()
+    // Null SSID on ONLY_SELECTED produces NoAction -> no connect or disconnect should fire
+    advanceTimeBy(5000L)
+    runCurrent()
+    assertEquals(1, disconnects)
+    assertEquals(0, connects)
+
+    // Step 3: Wi-Fi B resolves unlisted SSID "WifiB" -> Connect scheduled after 2000ms
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = "WifiB", isValidated = true)
+    runCurrent()
+    advanceTimeBy(1000L)
+    runCurrent()
+    assertEquals(0, connects) // Debounce not fired yet
+
+    advanceTimeBy(1001L)
+    runCurrent()
+    assertEquals(1, connects) // Connect executed!
+    assertEquals(1, disconnects)
+    assertEquals(true, isVpnRunningFlow.value)
+
+    // Step 4: Handover back to WifiA (selected network with DISCONNECT) -> Disconnect scheduled after 4000ms
+    networkFlow.value = ActiveNetworkSnapshot(transport = NetworkTransport.WIFI, ssid = "WifiA", isValidated = true)
+    runCurrent()
+    advanceTimeBy(2000L)
+    runCurrent()
+    assertEquals(1, disconnects) // Debounce not fired yet
+
+    advanceTimeBy(2001L)
+    runCurrent()
+    assertEquals(2, disconnects) // Disconnect executed!
+    assertEquals(1, connects)
+    assertEquals(false, isVpnRunningFlow.value)
+  }
 }

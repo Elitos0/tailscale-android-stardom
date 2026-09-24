@@ -96,4 +96,5 @@ class IPNServiceTest {
     )
     assertEquals(listOf("com.google.android.apps.messaging", "com.example.app", "com.google.android.projection.gearhead"), excludeResult)
   }
+
 }

@@ -20,6 +20,7 @@ import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.location.LocationManager
 import android.os.Build
+import java.util.concurrent.atomic.AtomicLong
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import com.tailscale.ipn.product.ondemand.ActiveNetworkSnapshot
@@ -35,8 +36,6 @@ internal data class NetworkCandidate<T>(
     val validated: Boolean,
     val hasDns: Boolean,
     val nonMetered: Boolean,
-    val isWifi: Boolean = false,
-    val hasSsid: Boolean = false,
 )
 
 internal fun <T> pickPreferredNetwork(candidates: List<NetworkCandidate<T>>): T? {
@@ -49,21 +48,26 @@ internal fun <T> pickPreferredNetwork(candidates: List<NetworkCandidate<T>>): T?
               (!requireDNS || it.hasDns)
         }
 
-    val wifiCandidates = matching.filter { it.isWifi || it.hasSsid }
-    val filtered =
-        if (wifiCandidates.size > 1 && wifiCandidates.any { it.hasSsid }) {
-          matching.filter { !(it.isWifi || it.hasSsid) || it.hasSsid }
-        } else {
-          matching
-        }
-
-    return filtered.firstOrNull { it.nonMetered }?.value ?: filtered.firstOrNull()?.value
+    return matching.firstOrNull { it.nonMetered }?.value ?: matching.firstOrNull()?.value
   }
 
   return pick(requireValidated = true, requireDNS = true)
       ?: pick(requireValidated = true, requireDNS = false)
       ?: pick(requireValidated = false, requireDNS = true)
       ?: pick(requireValidated = false, requireDNS = false)
+}
+
+internal data class OnDemandCandidate<T>(
+    val value: T,
+    val isSystemDefault: Boolean,
+    val sequence: Long,
+)
+
+internal fun <T> pickOnDemandCandidate(candidates: List<OnDemandCandidate<T>>): T? {
+  return candidates.sortedWith(
+      compareByDescending<OnDemandCandidate<T>> { it.isSystemDefault }
+          .thenByDescending { it.sequence }
+  ).firstOrNull()?.value
 }
 
 object NetworkChangeCallback {
@@ -74,7 +78,10 @@ object NetworkChangeCallback {
       var caps: NetworkCapabilities? = null,
       var linkProps: LinkProperties? = null,
       var ssid: String? = null,
+      var sequence: Long = 0L,
   )
+
+  private val sequenceGenerator = AtomicLong(0L)
 
   private val lock = ReentrantLock()
 
@@ -124,8 +131,9 @@ object NetworkChangeCallback {
         if (info.linkProps == null) {
           info.linkProps = cm.getLinkProperties(activeNet)
         }
+        info.sequence = sequenceGenerator.incrementAndGet()
       }
-      recomputeDefaultNetworkLocked("manualRefresh")
+      recomputeNetworksLocked("manualRefresh")
     }
   }
 
@@ -213,8 +221,10 @@ object NetworkChangeCallback {
   private fun handleNetworkAvailable(network: Network) {
     TSLog.d(TAG, "onAvailable: network $network")
     lock.withLock {
-      activeNetworks[network] = NetworkInfo()
-      recomputeDefaultNetworkLocked("onAvailable")
+      val info = NetworkInfo()
+      info.sequence = sequenceGenerator.incrementAndGet()
+      activeNetworks[network] = info
+      recomputeNetworksLocked("onAvailable")
     }
   }
 
@@ -225,6 +235,7 @@ object NetworkChangeCallback {
   ) {
     lock.withLock {
       val info = activeNetworks.getOrPut(network) { NetworkInfo() }
+      info.sequence = sequenceGenerator.incrementAndGet()
       info.caps = capabilities
 
       val discoveredSsid = extractWifiSsid(capabilities)
@@ -233,7 +244,7 @@ object NetworkChangeCallback {
         ssidDiscoveryListener?.invoke(discoveredSsid)
       }
 
-      if (recomputeDefaultNetworkLocked("onCapabilitiesChanged")) {
+      if (recomputeNetworksLocked("onCapabilitiesChanged")) {
         maybeUpdateDNSConfig("onCapabilitiesChanged", dns)
       }
     }
@@ -245,9 +256,12 @@ object NetworkChangeCallback {
       dns: DnsConfig,
   ) {
     lock.withLock {
-      activeNetworks[network]?.linkProps = linkProperties
-      recomputeDefaultNetworkLocked("onLinkPropertiesChanged")
-      maybeUpdateDNSConfig("onLinkPropertiesChanged", dns)
+      val info = activeNetworks.getOrPut(network) { NetworkInfo() }
+      info.linkProps = linkProperties
+      info.sequence = sequenceGenerator.incrementAndGet()
+      if (recomputeNetworksLocked("onLinkPropertiesChanged")) {
+        maybeUpdateDNSConfig("onLinkPropertiesChanged", dns)
+      }
     }
   }
 
@@ -255,8 +269,9 @@ object NetworkChangeCallback {
     TSLog.d(TAG, "onLost: network $network")
     lock.withLock {
       activeNetworks.remove(network)
-      recomputeDefaultNetworkLocked("onLost")
-      maybeUpdateDNSConfig("onLost", dns)
+      if (recomputeNetworksLocked("onLost")) {
+        maybeUpdateDNSConfig("onLost", dns)
+      }
     }
   }
 
@@ -271,10 +286,7 @@ object NetworkChangeCallback {
   //   4. INTERNET + NOT_VPN
   //   5. null
   //
-  // Within each group, prefer a non-metered network. VALIDATED is preferred,
-  // but not required, because per
-  // https://developer.android.com/develop/connectivity/network-ops/reading-network-state,
-  // newly available networks may be usable before Android has finished validating them.
+  // Within each group, prefer a non-metered network.
   private fun pickDefaultNetwork(): Network? {
     return pickPreferredNetwork(
         activeNetworks.map { (network, info) ->
@@ -285,46 +297,33 @@ object NetworkChangeCallback {
               validated = info.caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
               hasDns = info.linkProps?.dnsServers?.isNotEmpty() == true,
               nonMetered = info.caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true,
-              isWifi = info.caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true,
-              hasSsid = info.ssid != null,
           )
         })
   }
 
+  // pickOnDemandNetwork returns the preferred physical network for On Demand rules evaluation.
+  // Favors current OS physical network, then newest Wi-Fi with valid SSID.
+  private fun pickOnDemandNetwork(): Network? {
+    val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    val defaultNet = cm?.activeNetwork
+    val candidates = activeNetworks.mapNotNull { (network, info) ->
+      val caps = info.caps ?: return@mapNotNull null
+      if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+          !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
+        return@mapNotNull null
+      }
+      OnDemandCandidate(
+          value = network,
+          isSystemDefault = (network == defaultNet),
+          sequence = info.sequence,
+      )
+    }
+    return pickOnDemandCandidate(candidates)
+  }
+
   // Update cached default network + log interface name. Return whether or not default network
   // changed.
-  private fun recomputeDefaultNetworkLocked(why: String): Boolean {
-    val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-    if (cm != null) {
-      val activeNet = cm.activeNetwork
-      if (activeNet != null && !activeNetworks.containsKey(activeNet)) {
-        val caps = cm.getNetworkCapabilities(activeNet)
-        if (caps != null) {
-          activeNetworks[activeNet] = NetworkInfo(
-              caps = caps,
-              linkProps = cm.getLinkProperties(activeNet),
-          )
-        }
-      }
-      val iterator = activeNetworks.entries.iterator()
-      while (iterator.hasNext()) {
-        val entry = iterator.next()
-        val net = entry.key
-        val info = entry.value
-        val liveCaps = cm.getNetworkCapabilities(net)
-        if (liveCaps == null) {
-          iterator.remove()
-          continue
-        }
-        if (info.caps == null) {
-          info.caps = liveCaps
-        }
-        if (info.linkProps == null) {
-          info.linkProps = cm.getLinkProperties(net)
-        }
-      }
-    }
-
+  private fun recomputeNetworksLocked(why: String): Boolean {
     val oldNetwork = cachedDefaultNetwork
     val newNetwork = pickDefaultNetwork()
 
@@ -338,7 +337,10 @@ object NetworkChangeCallback {
         TAG,
         "$why: cachedDefaultNetwork=$newNetwork iface=${cachedDefaultInterfaceName ?: "none"}",
     )
-    updateActiveNetworkSnapshotLocked(info)
+
+    val onDemandNetwork = pickOnDemandNetwork()
+    val onDemandInfo = if (onDemandNetwork != null) activeNetworks[onDemandNetwork] else null
+    updateActiveNetworkSnapshotLocked(onDemandNetwork, onDemandInfo)
 
     if (newNetwork != oldNetwork) {
       underlyingNetworkListener?.invoke(newNetwork)
@@ -353,20 +355,22 @@ object NetworkChangeCallback {
       caps: NetworkCapabilities? = null,
       linkProps: LinkProperties? = null,
       ssid: String? = null,
+      sequence: Long? = null,
   ) {
     lock.withLock {
       val info = activeNetworks.getOrPut(network) { NetworkInfo() }
       caps?.let { info.caps = it }
       linkProps?.let { info.linkProps = it }
       ssid?.let { info.ssid = it }
-      recomputeDefaultNetworkLocked("test")
+      info.sequence = sequence ?: sequenceGenerator.incrementAndGet()
+      recomputeNetworksLocked("test")
     }
   }
 
   internal fun removeNetworkForTesting(network: Network) {
     lock.withLock {
       activeNetworks.remove(network)
-      recomputeDefaultNetworkLocked("test")
+      recomputeNetworksLocked("test")
     }
   }
 
@@ -379,6 +383,7 @@ object NetworkChangeCallback {
       underlyingNetworkListener = null
       ssidDiscoveryListener = null
       appContext = null
+      sequenceGenerator.set(0L)
       _activeNetworkSnapshot.value = ActiveNetworkSnapshot()
     }
   }
@@ -424,8 +429,8 @@ object NetworkChangeCallback {
     }
   }
 
-  private fun updateActiveNetworkSnapshotLocked(info: NetworkInfo?) {
-    val networkId = cachedDefaultNetwork?.let {
+  private fun updateActiveNetworkSnapshotLocked(network: Network?, info: NetworkInfo?) {
+    val networkId = network?.let {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) it.networkHandle else it.hashCode().toLong()
     }
     val caps = info?.caps

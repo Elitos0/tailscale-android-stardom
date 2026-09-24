@@ -3,8 +3,9 @@
 
 package com.tailscale.ipn.ui.view
 
-import com.tailscale.ipn.App
 import android.Manifest
+import com.tailscale.ipn.App
+import android.net.Uri
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
@@ -113,8 +114,6 @@ fun StardomOnDemandView(
   var hasLocationPermission by remember {
     mutableStateOf(
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
     )
   }
@@ -134,8 +133,6 @@ fun StardomOnDemandView(
       if (event == Lifecycle.Event.ON_RESUME) {
         hasLocationPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
         isLocationServicesEnabled = isLocationEnabled()
         hasBackgroundLocation =
@@ -157,8 +154,7 @@ fun StardomOnDemandView(
       rememberLauncherForActivityResult(
           ActivityResultContracts.RequestMultiplePermissions()
       ) { permissions ->
-        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         isLocationServicesEnabled = isLocationEnabled()
         hasBackgroundLocation =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -274,7 +270,6 @@ fun StardomOnDemandView(
                         .clickable(onClickLabel = "Toggle On Demand") {
                           val newEnabled = !config.enabled
                           repo.updateEnabled(newEnabled)
-                          (context.applicationContext as? App)?.updateOnDemandMonitorState(newEnabled)
                         }
                         .padding(14.dp)) {
                   Row(
@@ -652,9 +647,13 @@ fun StardomOnDemandView(
                                             .background(StardomColors.Background)
                                             .border(1.dp, StardomColors.BorderStrong)
                                             .clickable {
-                                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                                bgLocationLauncher.launch(
-                                                    Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                  data = Uri.fromParts("package", context.packageName, null)
+                                                }
+                                                context.startActivity(intent)
+                                              } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                                bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                                               }
                                             }
                                             .padding(horizontal = 16.dp, vertical = 8.dp)) {

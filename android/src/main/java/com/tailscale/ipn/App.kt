@@ -16,6 +16,10 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
+import android.app.Activity
+import android.os.Bundle
+import com.tailscale.ipn.product.ondemand.OnDemandMonitorAction
+import com.tailscale.ipn.product.ondemand.OnDemandMonitorLifecycleGate
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -91,6 +95,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -116,11 +122,14 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     )
   }
   val vpnStopCommandDispatcher: VpnStopCommandDispatcher by lazy {
-    VpnStopCommandDispatcher()
+    VpnStopCommandDispatcher(::dispatchStopIntent)
   }
   val vpnRuntimeTracker: VpnRuntimeStateTracker by lazy {
     VpnRuntimeStateTracker(vpnStopCommandDispatcher::dispatchStopCommand)
   }
+  @Volatile var activeIpnService: IPNService? = null
+  @Volatile var isAppVisible: Boolean = false
+    private set
   val vpnEntitlementController: VpnEntitlementController by lazy {
     val sessionController = stardomSessionController
     VpnEntitlementController(
@@ -249,6 +258,29 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
         getString(R.string.health_channel_name),
         getString(R.string.health_channel_description),
         NotificationManagerCompat.IMPORTANCE_HIGH)
+    registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+      private var resumedActivities = 0
+
+      override fun onActivityResumed(activity: Activity) {
+        resumedActivities++
+        isAppVisible = true
+        checkAndReassertMonitorState()
+      }
+
+      override fun onActivityPaused(activity: Activity) {
+        resumedActivities--
+        if (resumedActivities <= 0) {
+          resumedActivities = 0
+          isAppVisible = false
+        }
+      }
+
+      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+      override fun onActivityStarted(activity: Activity) {}
+      override fun onActivityStopped(activity: Activity) {}
+      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+      override fun onActivityDestroyed(activity: Activity) {}
+    })
   }
 
   override fun onTerminate() {
@@ -324,9 +356,12 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
     NetworkChangeCallback.monitorDnsChanges(connectivityManager, dns)
     onDemandController.start(applicationScope)
     applicationScope.launch {
-      onDemandRepository.config.collect { config ->
-        updateOnDemandMonitorState(config.enabled)
-      }
+      onDemandRepository.config
+          .map { it.enabled }
+          .distinctUntilChanged()
+          .collect { enabled ->
+            handleConfigChange(enabled)
+          }
     }
     initViewModels()
     applicationScope.launch {
@@ -749,6 +784,30 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
       }
     }
   }
+
+  fun checkAndReassertMonitorState() {
+    val action = OnDemandMonitorLifecycleGate.evaluateOnResume(
+        configEnabled = onDemandRepository.config.value.enabled,
+        isVpnStartingOrRunning = vpnRuntimeTracker.state.value.isStartingOrRunning(),
+        isServiceActive = activeIpnService != null,
+    )
+    if (action == OnDemandMonitorAction.START_MONITOR) {
+      updateOnDemandMonitorState(true)
+    }
+  }
+
+  fun handleConfigChange(enabled: Boolean) {
+    val action = OnDemandMonitorLifecycleGate.evaluateConfigChange(
+        newEnabled = enabled,
+        isAppVisible = isAppVisible,
+        isVpnStartingOrRunning = vpnRuntimeTracker.state.value.isStartingOrRunning(),
+    )
+    when (action) {
+      OnDemandMonitorAction.START_MONITOR -> updateOnDemandMonitorState(true)
+      OnDemandMonitorAction.STOP_MONITOR -> updateOnDemandMonitorState(false)
+      OnDemandMonitorAction.NO_ACTION -> Unit
+    }
+  }
 }
 
 /**
@@ -863,18 +922,24 @@ open class UninitializedApp : Application() {
     }
     val result =
         initializedApp.vpnStartDispatchBoundary.dispatchIfAuthorized(origin) {
-          val intent =
-              Intent(initializedApp, IPNService::class.java).apply {
-                action = IPNService.ACTION_START_VPN
-              }
-          val pendingIntent =
-              PendingIntent.getForegroundService(
-                  initializedApp,
-                  0,
-                  intent,
-                  PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-              )
-          pendingIntent.send()
+          val runningService = initializedApp.activeIpnService
+          if (runningService != null) {
+            runningService.startVpnFromApp(origin)
+          } else {
+            val intent =
+                Intent(initializedApp, IPNService::class.java).apply {
+                  action = IPNService.ACTION_START_VPN
+                  putExtra(IPNService.EXTRA_ORIGIN, origin.name)
+                }
+            val pendingIntent =
+                PendingIntent.getForegroundService(
+                    initializedApp,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            pendingIntent.send()
+          }
         }
     if (result is VpnStartDispatchResult.Denied &&
         (origin == VpnStartOrigin.QuickSettings ||
@@ -900,13 +965,7 @@ open class UninitializedApp : Application() {
     }
   }
 
-  @JvmOverloads
-  fun stopVPN(isManual: Boolean = true) {
-    val initializedApp = this as? App
-    if (isManual) {
-      initializedApp?.onDemandController?.notifyManualVpnToggle(false)
-    }
-    if (initializedApp?.vpnStopCommandDispatcher?.dispatchStopCommand() == true) return
+  internal fun dispatchStopIntent() {
     val intent = Intent(this, IPNService::class.java).apply { action = IPNService.ACTION_STOP_VPN }
     try {
       startService(intent)
@@ -914,6 +973,18 @@ open class UninitializedApp : Application() {
       TSLog.e(TAG, "stopVPN hit IllegalStateException in startService(): $illegalStateException")
     } catch (e: Exception) {
       TSLog.e(TAG, "stopVPN hit exception in startService(): $e")
+    }
+  }
+
+  @JvmOverloads
+  fun stopVPN(isManual: Boolean = true) {
+    val initializedApp = this as? App
+    if (isManual) {
+      initializedApp?.onDemandController?.notifyManualVpnToggle(false)
+    }
+    if (initializedApp?.vpnStopCommandDispatcher?.dispatchStopCommand() == true) return
+    if (initializedApp == null) {
+      dispatchStopIntent()
     }
   }
 

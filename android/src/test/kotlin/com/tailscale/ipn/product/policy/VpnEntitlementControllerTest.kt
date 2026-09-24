@@ -448,6 +448,67 @@ class VpnEntitlementControllerTest {
   }
 
   @Test
+  fun deferredCloseFromOldCoordinatorDoesNotDisconnectSubsequentRunWhenTeardownPrecedesRecreate() = runTest {
+    val runtime = VpnRuntimeStateTracker {}
+    val oldWriter = CapturingWantRunningWriter()
+    val newWriter = CapturingWantRunningWriter()
+    val oldDisconnects = AtomicInteger()
+    val newDisconnects = AtomicInteger()
+    val closeReturned = CountDownLatch(1)
+
+    lateinit var oldCoordinator: VpnServiceRunCoordinator
+    lateinit var newCoordinator: VpnServiceRunCoordinator
+    var oldRequests = 0
+    var newRequests = 0
+
+    oldCoordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, oldWriter, backgroundScope)
+
+    // Start old run
+    oldCoordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = {
+          oldRequests++
+          thread(start = true, name = "vpn-old-close-test") {
+            // Teardown before recreate: close old coordinator with afterFence that installs new coordinator
+            oldCoordinator.close {
+              oldDisconnects.incrementAndGet()
+              newCoordinator = VpnServiceRunCoordinator(runtime, AlwaysAuthorizer, newWriter, backgroundScope)
+            }
+            closeReturned.countDown()
+          }
+          assertTrue(closeReturned.await(1, TimeUnit.SECONDS))
+          // While request is in flight, afterFence has NOT executed yet
+          assertEquals(0, oldDisconnects.get())
+        },
+        rejectStart = {},
+    )
+    oldWriter.succeed()
+    runCurrent()
+
+    // Now old request finished, deferred close executed, and new coordinator was created!
+    assertEquals(1, oldRequests)
+    assertEquals(1, oldDisconnects.get())
+    assertEquals(VpnRuntimeState.Idle, runtime.state.value)
+
+    // Now start the new coordinator
+    newCoordinator.beginAuthorizedStart(
+        VpnStartOrigin.ServiceStart,
+        requestVpn = { newRequests++ },
+        rejectStart = {},
+    )
+    newWriter.succeed()
+    runCurrent()
+
+    assertEquals(1, newRequests)
+    assertEquals(VpnRuntimeState.Starting, runtime.state.value)
+    assertTrue(newCoordinator.updateVpnStatus(true))
+    assertEquals(VpnRuntimeState.Running, runtime.state.value)
+    // Old close action did not touch the new run:
+    assertEquals(1, oldDisconnects.get())
+    assertEquals(0, newDisconnects.get())
+  }
+
+  @Test
   fun runtimePolicyRevocationAfterHandoffDispatchesRegisteredFencedStop() = runTest {
     val fallbackCommands = AtomicInteger()
     val stopCommands = AtomicInteger()

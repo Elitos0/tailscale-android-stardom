@@ -429,22 +429,76 @@ class NetworkChangeCallbackTest {
   }
 
   @Test
-  fun multipleWifiCandidates_prefersCandidateWithSsid() {
-    val wifiWithoutSsid = candidate("wifi-no-ssid", isWifi = true, hasSsid = false, nonMetered = true)
-    val wifiWithSsid = candidate("wifi-with-ssid", isWifi = true, hasSsid = true, nonMetered = true)
+  fun pickOnDemandCandidate_prefersSystemDefault() {
+    val wifi1 = onDemandCandidate("wifi-1", isSystemDefault = true, sequence = 100L)
+    val wifi2 = onDemandCandidate("wifi-2", isSystemDefault = false, sequence = 200L)
 
-    assertEquals(
-        "wifi-with-ssid",
-        pickPreferredNetwork(listOf(wifiWithoutSsid, wifiWithSsid))
-    )
+    assertEquals("wifi-1", pickOnDemandCandidate(listOf(wifi1, wifi2)))
   }
 
   @Test
-  fun multipleWifiCandidates_neitherHasSsid_picksFirstNonMetered() {
-    val wifi1 = candidate("wifi-1", isWifi = true, hasSsid = false, nonMetered = true)
-    val wifi2 = candidate("wifi-2", isWifi = true, hasSsid = false, nonMetered = true)
+  fun pickOnDemandCandidate_prefersNewerWifiDuringHandover() {
+    val wifiOld = onDemandCandidate("wifi-old", isSystemDefault = false, sequence = 100L)
+    val wifiNew = onDemandCandidate("wifi-new", isSystemDefault = false, sequence = 200L)
 
-    assertEquals("wifi-1", pickPreferredNetwork(listOf(wifi1, wifi2)))
+    assertEquals("wifi-new", pickOnDemandCandidate(listOf(wifiOld, wifiNew)))
+  }
+
+  @Test
+  fun twoSimultaneouslyLiveWifis_handoverWithUnknownThenKnownSsid() {
+    val netA = mock(Network::class.java)
+    val capsA = mock(NetworkCapabilities::class.java)
+    `when`(capsA.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(capsA.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(capsA.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(capsA.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)).thenReturn(true)
+
+    val netB = mock(Network::class.java)
+    val capsB = mock(NetworkCapabilities::class.java)
+    `when`(capsB.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)).thenReturn(true)
+    `when`(capsB.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)).thenReturn(true)
+    `when`(capsB.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)).thenReturn(true)
+    `when`(capsB.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)).thenReturn(true)
+
+    val config = com.tailscale.ipn.product.ondemand.OnDemandConfig(
+        enabled = true,
+        wifiScope = com.tailscale.ipn.product.ondemand.WifiRuleScope.ONLY_SELECTED,
+        selectedSsids = setOf("WifiA"),
+        wifiAction = com.tailscale.ipn.product.ondemand.OnDemandAction.DISCONNECT,
+        unlistedWifiAction = com.tailscale.ipn.product.ondemand.OnDemandAction.CONNECT,
+    )
+
+    // Step 1: Start on Wi-Fi A (selected network, SSID="WifiA")
+    NetworkChangeCallback.updateNetworkForTesting(netA, caps = capsA, ssid = "WifiA", sequence = 100L)
+    var snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals(com.tailscale.ipn.product.ondemand.NetworkTransport.WIFI, snapshot.transport)
+    assertEquals("WifiA", snapshot.ssid)
+    var decision = com.tailscale.ipn.product.ondemand.OnDemandDecisionEngine.evaluate(snapshot, config, isVpnRunning = true)
+    assertEquals(com.tailscale.ipn.product.ondemand.OnDemandDecision.Disconnect, decision)
+
+    // Step 2: Wi-Fi B connects simultaneously, but SSID is not yet determined (new B unknown).
+    // Newer B with null SSID outranks older A. Snapshot has null SSID, yielding NoAction
+    // so we never apply A's rule to B.
+    NetworkChangeCallback.updateNetworkForTesting(netB, caps = capsB, ssid = null, sequence = 200L)
+    snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals(null, snapshot.ssid)
+    assertEquals(com.tailscale.ipn.product.ondemand.NetworkTransport.WIFI, snapshot.transport)
+    decision = com.tailscale.ipn.product.ondemand.OnDemandDecisionEngine.evaluate(snapshot, config, isVpnRunning = true)
+    assertEquals(com.tailscale.ipn.product.ondemand.OnDemandDecision.NoAction, decision)
+    // Step 3: Wi-Fi B resolves valid SSID "WifiB" (then known)
+    NetworkChangeCallback.updateNetworkForTesting(netB, caps = capsB, ssid = "WifiB", sequence = 300L)
+    snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals("WifiB", snapshot.ssid)
+    decision = com.tailscale.ipn.product.ondemand.OnDemandDecisionEngine.evaluate(snapshot, config, isVpnRunning = false)
+    // WifiB is unlisted -> decision is Connect!
+    assertEquals(com.tailscale.ipn.product.ondemand.OnDemandDecision.Connect, decision)
+
+    // Step 4: Wi-Fi B is disconnected (handover back to Wi-Fi A)
+    NetworkChangeCallback.removeNetworkForTesting(netB)
+    snapshot = NetworkChangeCallback.activeNetworkSnapshot.value
+    assertEquals("WifiA", snapshot.ssid)
+    decision = com.tailscale.ipn.product.ondemand.OnDemandDecisionEngine.evaluate(snapshot, config, isVpnRunning = true)
+    assertEquals(com.tailscale.ipn.product.ondemand.OnDemandDecision.Disconnect, decision)
   }
 
   private fun candidate(
@@ -454,8 +508,6 @@ class NetworkChangeCallbackTest {
       validated: Boolean = true,
       hasDns: Boolean = true,
       nonMetered: Boolean = false,
-      isWifi: Boolean = false,
-      hasSsid: Boolean = false,
   ) =
       NetworkCandidate(
           value = name,
@@ -464,7 +516,16 @@ class NetworkChangeCallbackTest {
           validated = validated,
           hasDns = hasDns,
           nonMetered = nonMetered,
-          isWifi = isWifi,
-          hasSsid = hasSsid,
+      )
+
+  private fun onDemandCandidate(
+      name: String,
+      isSystemDefault: Boolean = false,
+      sequence: Long = 0L,
+  ) =
+      OnDemandCandidate(
+          value = name,
+          isSystemDefault = isSystemDefault,
+          sequence = sequence,
       )
 }
